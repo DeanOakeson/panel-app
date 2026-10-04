@@ -1,0 +1,39 @@
+"use client";
+
+import { signOut } from "firebase/auth";
+import { auth } from "@/lib/firebaseClient";
+import { useRouter } from "next/navigation";
+
+export default function DashboardPage() {
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    router.replace("/login");
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+
+      <div className="bg-white p-10 rounded shadow-md text-center">
+
+        <h1 className="text-2xl font-bold text-green-600">
+          Logged in ✅
+        </h1>
+
+        <p className="text-gray-600 mt-2">
+          Welcome to your dashboard
+        </p>
+
+        {/* LOGOUT BUTTON */}
+        <button
+          onClick={handleLogout}
+          className="mt-6 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
+        >
+          Logout
+        </button>
+
+      </div>
+    </div>
+  );
+}

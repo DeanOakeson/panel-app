@@ -16,7 +16,7 @@ export default function AssignmentsPage() {
   const [dueDate, setDueDate] = useState("");
   const [error, setError] = useState("");
 
-  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const pointValue = Number(points);
 
