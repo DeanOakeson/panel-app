@@ -45,7 +45,6 @@ jobs:
 
   deploy:
     needs: validate
-    # Never grant cloud credentials to pull requests or other branches.
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -53,9 +52,9 @@ jobs:
       contents: read
       id-token: write
     env:
-      FIREBASE_PROJECT_ID: ${{ vars[format('FIREBASE_{0}_PROJECT_ID', github.ref == 'refs/heads/main' && 'PRODUCTION' || 'STAGING')] }}
-      WIF_PROVIDER: ${{ vars[format('FIREBASE_{0}_WIF_PROVIDER', github.ref == 'refs/heads/main' && 'PRODUCTION' || 'STAGING')] }}
-      DEPLOY_SERVICE_ACCOUNT: ${{ vars[format('FIREBASE_{0}_SERVICE_ACCOUNT', github.ref == 'refs/heads/main' && 'PRODUCTION' || 'STAGING')] }}
+      FIREBASE_PROJECT_ID: ${{ secrets[format('FIREBASE_{0}_PROJECT_ID', github.ref == 'refs/heads/main' && 'PRODUCTION' || 'STAGING')] }}
+      WIF_PROVIDER: ${{ secrets[format('FIREBASE_{0}_WIF_PROVIDER', github.ref == 'refs/heads/main' && 'PRODUCTION' || 'STAGING')] }}
+      DEPLOY_SERVICE_ACCOUNT: ${{ secrets[format('FIREBASE_{0}_SERVICE_ACCOUNT', github.ref == 'refs/heads/main' && 'PRODUCTION' || 'STAGING')] }}
     steps:
       - uses: actions/checkout@v7
 
@@ -64,7 +63,7 @@ jobs:
         run: |
           for variable in FIREBASE_PROJECT_ID WIF_PROVIDER DEPLOY_SERVICE_ACCOUNT; do
             if [ -z "${!variable}" ]; then
-              echo "::error::Missing $variable. Configure repository variables using docs/firebase-deployment.md."
+              echo "::error::Missing $variable. Configure repository secrets using docs/firebase-deployment.md."
               exit 1
             fi
           done
