@@ -1,25 +1,41 @@
-import { getApps, initializeApp, cert } from "firebase-admin/app";
+import { getApps, initializeApp, cert, type App } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 
-// The Admin SDK routes to the emulators on its own when *_EMULATOR_HOST is set
-const useEmulators = !!process.env.FIRESTORE_EMULATOR_HOST;
+/**
+ * Returns the Admin app, initializing it on first call. Deferred so `next build` can
+ * import route modules without credentials.
+ */
+function getAdminApp(): App {
+  if (getApps().length > 0) return getApps()[0];
 
-const app =
-  getApps().length > 0
-    ? getApps()[0]
-    : initializeApp(
-        useEmulators
-          ? { projectId: process.env.FIREBASE_PROJECT_ID }
-          : {
-              credential: cert({
-                projectId: process.env.FIREBASE_PROJECT_ID!,
-                clientEmail: process.env.FIREBASE_CLIENT_EMAIL!,
-                privateKey: process.env.FIREBASE_PRIVATE_KEY!.replace(/\\n/g, "\n"),
-              }),
-            }
-      );
+  // The Admin SDK routes to the emulators on its own when *_EMULATOR_HOST is set
+  if (process.env.FIRESTORE_EMULATOR_HOST) {
+    return initializeApp({ projectId: process.env.FIREBASE_PROJECT_ID });
+  }
 
-// Export services
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+  const { FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY } = process.env;
+  if (!FIREBASE_PROJECT_ID || !FIREBASE_CLIENT_EMAIL || !FIREBASE_PRIVATE_KEY) {
+    throw new Error(
+      "Missing FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, or FIREBASE_PRIVATE_KEY."
+    );
+  }
+
+  return initializeApp({
+    credential: cert({
+      projectId: FIREBASE_PROJECT_ID,
+      clientEmail: FIREBASE_CLIENT_EMAIL,
+      privateKey: FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    }),
+  });
+}
+
+/** Returns the Admin Auth service. */
+export function getAdminAuth() {
+  return getAuth(getAdminApp());
+}
+
+/** Returns the Admin Firestore service. */
+export function getAdminDb() {
+  return getFirestore(getAdminApp());
+}
