@@ -44,3 +44,9 @@ next-env.d.ts
 gha-creds-*.json
 
 .vercel
+
+# firebase emulators
+.emulator-data
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
