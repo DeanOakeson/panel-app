@@ -18,7 +18,7 @@ export async function GET(req: Request) {
       id: doc.id,
       ...doc.data(),
     });
-  } catch (err) {
+  } catch {
     return Response.json({ error: "Invalid token" }, { status: 401 });
   }
 }
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
       success: true,
       uid,
     });
-  } catch (err) {
+  } catch {
     return Response.json({ error: "Failed request" }, { status: 500 });
   }
 }
