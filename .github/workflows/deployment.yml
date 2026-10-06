@@ -1,0 +1,144 @@
+name: Production deployment
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check deployment configuration
+        shell: bash
+        run: |
+          for variable in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            if [ -z "${!variable}" ]; then
+              echo "::error::Missing $variable. See docs/vercel-deployment.md."
+              exit 1
+            fi
+          done
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test --if-present
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Pull production configuration and check build
+        shell: bash
+        run: |
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Validate checked-in Firestore configuration
+        shell: bash
+        run: |
+          for file in firebase.json firestore.rules firestore.indexes.json; do
+            if [ ! -s "$file" ]; then
+              echo "::error::Missing $file. Import the existing configuration as described in docs/firebase-deployment.md."
+              exit 1
+            fi
+          done
+          jq -e '.firestore.rules == "firestore.rules" and .firestore.indexes == "firestore.indexes.json"' firebase.json
+          jq -e '(.indexes | type == "array") and (.fieldOverrides | type == "array")' firestore.indexes.json
+
+  firestore:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PRODUCTION_PROJECT_ID }}
+      WIF_PROVIDER: ${{ secrets.FIREBASE_PRODUCTION_WIF_PROVIDER }}
+      DEPLOY_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_PRODUCTION_SERVICE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check deployment configuration
+        shell: bash
+        run: |
+          for variable in FIREBASE_PROJECT_ID WIF_PROVIDER DEPLOY_SERVICE_ACCOUNT; do
+            if [ -z "${!variable}" ]; then
+              echo "::error::Missing $variable. Configure repository secrets using docs/firebase-deployment.md."
+              exit 1
+            fi
+          done
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install Firebase CLI
+        run: npm install --global firebase-tools@15
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Deploy Firestore rules and indexes
+        run: firebase deploy --only firestore:rules,firestore:indexes --project "$FIREBASE_PROJECT_ID" --non-interactive
+
+  vercel:
+    needs: firestore
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check deployment configuration
+        shell: bash
+        run: |
+          for variable in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            if [ -z "${!variable}" ]; then
+              echo "::error::Missing $variable. See docs/vercel-deployment.md."
+              exit 1
+            fi
+          done
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Pull configuration, build, and deploy
+        shell: bash
+        run: |
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          vercel build --prod --token="$VERCEL_TOKEN"
+          vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
