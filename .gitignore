@@ -40,4 +40,13 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Temporary credentials created by google-github-actions/auth
+gha-creds-*.json
+
 .vercel
+
+# firebase emulators
+.emulator-data
+firebase-debug.log
+firestore-debug.log
+ui-debug.log

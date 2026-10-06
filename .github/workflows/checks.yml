@@ -28,6 +28,12 @@ jobs:
       - run: npm run lint
 
       # next build also type-checks
+      # Placeholders let the client SDK initialize during prerender. Nothing calls Firebase at build time.
       - run: npm run build
+        env:
+          NEXT_PUBLIC_FIREBASE_API_KEY: ci-placeholder
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: demo-panel-app.firebaseapp.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: demo-panel-app
+          NEXT_PUBLIC_FIREBASE_APP_ID: ci-placeholder
 
       - run: npm test --if-present

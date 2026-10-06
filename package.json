@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "emulators": "firebase emulators:start --project demo-panel-app --import=./.emulator-data --export-on-exit"
   },
   "dependencies": {
     "firebase": "^12.19.0",
@@ -22,6 +23,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.8",
+    "firebase-tools": "^15.32.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

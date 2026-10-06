@@ -48,8 +48,8 @@ export default function AuthPage() {
       }
 
       router.push("/dashboard");
-    } catch (err: any) {
-      setError(err.message || "Something went wrong");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
     }
@@ -58,18 +58,18 @@ export default function AuthPage() {
   // 🔥 SHOW NOTHING while checking auth
   if (checkingAuth) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <p className="text-gray-600">Loading...</p>
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
+        <p className="text-gray-600 dark:text-gray-400">Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
 
-      <div className="w-full max-w-md bg-white p-8 rounded shadow-md">
+      <div className="w-full max-w-md bg-white dark:bg-gray-800 p-8 rounded shadow-md">
 
-        <h1 className="text-2xl font-bold text-center mb-6 text-black">
+        <h1 className="text-2xl font-bold text-center mb-6 text-black dark:text-white">
           {isLogin ? "Sign in" : "Create account"}
         </h1>
 
@@ -78,7 +78,7 @@ export default function AuthPage() {
           <input
             type="email"
             placeholder="Email"
-            className="w-full border p-3 rounded text-black"
+            className="w-full border p-3 rounded text-black dark:text-white"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
@@ -86,7 +86,7 @@ export default function AuthPage() {
           <input
             type="password"
             placeholder="Password"
-            className="w-full border p-3 rounded text-black"
+            className="w-full border p-3 rounded text-black dark:text-white"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
@@ -110,7 +110,7 @@ export default function AuthPage() {
           </button>
         </form>
 
-        <p className="text-sm text-center mt-4 text-black">
+        <p className="text-sm text-center mt-4 text-black dark:text-white">
           {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
           <button
             onClick={() => setIsLogin(!isLogin)}

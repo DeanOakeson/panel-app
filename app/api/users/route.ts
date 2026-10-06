@@ -1,4 +1,4 @@
-import { db, auth } from "@/lib/firebaseAdmin";
+import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 
 // GET /api/users (get current user profile)
 export async function GET(req: Request) {
@@ -9,16 +9,16 @@ export async function GET(req: Request) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const decoded = await auth.verifyIdToken(token);
+    const decoded = await getAdminAuth().verifyIdToken(token);
     const uid = decoded.uid;
 
-    const doc = await db.collection("users").doc(uid).get();
+    const doc = await getAdminDb().collection("users").doc(uid).get();
 
     return Response.json({
       id: doc.id,
       ...doc.data(),
     });
-  } catch (err) {
+  } catch {
     return Response.json({ error: "Invalid token" }, { status: 401 });
   }
 }
@@ -32,12 +32,12 @@ export async function POST(req: Request) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const decoded = await auth.verifyIdToken(token);
+    const decoded = await getAdminAuth().verifyIdToken(token);
     const uid = decoded.uid;
 
     const body = await req.json();
 
-    await db.collection("users").doc(uid).set(
+    await getAdminDb().collection("users").doc(uid).set(
       {
         name: body.name,
         email: body.email,
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
       success: true,
       uid,
     });
-  } catch (err) {
+  } catch {
     return Response.json({ error: "Failed request" }, { status: 500 });
   }
-}
+}
