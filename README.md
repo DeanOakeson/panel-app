@@ -106,3 +106,17 @@ Open the Emulator UI at http://localhost:4000. Under **Authentication**, add a u
 Emulator data is saved to `.emulator-data` when you stop the emulators with Ctrl+C. It loads again on the next start. Delete the folder to start fresh.
 
 To go back to the real Firebase project, remove the three emulator variables from `.env.local` and fill in the real values.
+
+---
+
+## User roles
+
+Each user's role is the `role` field on their Firestore record at `users/{uid}`. It is one of:
+
+- `student`
+- `professor`
+- `admin`
+
+`lib/roles.ts` holds this list. Only the server sets a role, through the Admin SDK. The Firestore rules stop clients from writing user records, and `POST /api/users` ignores any `role` it receives.
+
+To give a test user a role locally, open the Emulator UI's **Firestore** tab. Create or edit the `users/{uid}` document and add a `role` string field. The document ID is the user's UID from the **Authentication** tab.

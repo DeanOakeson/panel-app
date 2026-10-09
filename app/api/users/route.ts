@@ -37,6 +37,7 @@ export async function POST(req: Request) {
 
     const body = await req.json();
 
+    // Never copies body.role, so users can't set their own role. Only admins assign roles.
     await getAdminDb().collection("users").doc(uid).set(
       {
         name: body.name,
