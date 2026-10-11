@@ -43,7 +43,7 @@ export async function POST(req: Request) {
         email: body.email,
         createdAt: new Date(),
       },
-      { merge: true }
+      { merge: true },
     );
 
     return Response.json({
@@ -53,4 +53,4 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: "Failed request" }, { status: 500 });
   }
-}
+}
