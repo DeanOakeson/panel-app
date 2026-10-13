@@ -25,6 +25,14 @@ export default function DashboardPage() {
           Welcome to your dashboard
         </p>
 
+        {/* Non-admins get redirected back by the /admin layout */}
+        <a
+          href="/admin/create-user"
+          className="inline-block mt-4 text-sm font-medium text-blue-600 hover:underline"
+        >
+          Admin: create user
+        </a>
+
         {/* LOGOUT BUTTON */}
         <button
           onClick={handleLogout}

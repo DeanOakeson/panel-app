@@ -31,6 +31,7 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
+# .env.example is already tracked, so it is unaffected by this pattern
 .env*
 
 # vercel
@@ -43,10 +44,13 @@ next-env.d.ts
 # Temporary credentials created by google-github-actions/auth
 gha-creds-*.json
 
-.vercel
-
 # firebase emulators
 .emulator-data
 firebase-debug.log
 firestore-debug.log
+auth-debug.log
+hub-debug.log
 ui-debug.log
+.firebase/
+# per-developer local emulator config (off-default ports, not for the team)
+firebase.emulator-test.json
