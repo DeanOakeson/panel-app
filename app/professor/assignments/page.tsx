@@ -19,7 +19,12 @@ export default function AssignmentsPage() {
   function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const pointValue = Number(points);
-
+  const key = process.env.FIREBASE_PRIVATE_KEY ?? "";
+console.log({
+  hasKey: !!key,
+  startsWithHeader: key.startsWith("-----BEGIN PRIVATE KEY-----"),
+  endsWithFooter: key.includes("-----END PRIVATE KEY-----"),
+});
     if (!name.trim()) {
       setError("Assignment name is required.");
       return;
