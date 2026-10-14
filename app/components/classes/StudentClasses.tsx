@@ -12,7 +12,7 @@ export default function StudentClasses({
   if (classes.length === 0) {
     return (
       <p className="text-gray-500 dark:text-zinc-400">
-        You haven't joined any classes yet.
+        You haven&apos;t joined any classes yet.
       </p>
     );
   }

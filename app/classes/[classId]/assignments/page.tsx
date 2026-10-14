@@ -1,12 +1,13 @@
 
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import CreateAssignment from "../../../components/assignments/CreateAssignment";
 
 export default function AssignmentsPage() {
   const { classId } = useParams<{ classId: string }>();
+  const router = useRouter();
 
   return (
     <main className="mx-auto w-full max-w-2xl p-8">
@@ -28,7 +29,7 @@ export default function AssignmentsPage() {
       <CreateAssignment
         classId={classId}
         onCreated={() => {
-          window.location.href = "/classes";
+          router.push("/classes");
         }}
       />
     </main>
