@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { onAuthStateChanged, type User } from "firebase/auth";
 import { auth } from "@/lib/firebaseClient";
 import StudentClasses from "../components/classes/StudentClasses";
 import ProfessorClasses from "../components/classes/ProfessorClasses";
@@ -18,18 +19,8 @@ export default function ClassesPage() {
   const [error, setError] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
 
-  const loadClasses = useCallback(async () => {
-    setLoading(true);
-    setError("");
-
+  const loadClasses = useCallback(async (user: User) => {
     try {
-      const user = auth.currentUser;
-
-      if (!user) {
-        router.replace("/");
-        return;
-      }
-
       const token = await user.getIdToken();
 
       // Load the user's profile and role.
@@ -82,11 +73,33 @@ export default function ClassesPage() {
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, []);
 
   useEffect(() => {
-    loadClasses();
-  }, [loadClasses]);
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        router.replace("/");
+        return;
+      }
+
+      void loadClasses(user);
+    });
+
+    return unsubscribe;
+  }, [loadClasses, router]);
+
+  const reloadClasses = useCallback(async () => {
+    const user = auth.currentUser;
+
+    if (!user) {
+      router.replace("/");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    await loadClasses(user);
+  }, [loadClasses, router]);
 
   const isProfessor = role === "professor";
 
@@ -123,7 +136,7 @@ export default function ClassesPage() {
           onCancel={() => setShowCreateForm(false)}
           onCreated={async () => {
             setShowCreateForm(false);
-            await loadClasses();
+            await reloadClasses();
           }}
         />
       )}
@@ -139,7 +152,7 @@ export default function ClassesPage() {
 
           <button
             type="button"
-            onClick={loadClasses}
+            onClick={reloadClasses}
             className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
           >
             Try again
