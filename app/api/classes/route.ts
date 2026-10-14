@@ -2,14 +2,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 
-export async function GET(request: NextRequest) {
+const VALID_TERMS = ["Spring", "Summer", "Fall", "Winter"];
+
+export async function POST(request: NextRequest) {
   try {
-    // 1. Verify the Firebase ID token
+    // 1. Verify authentication token
     const authHeader = request.headers.get("authorization");
 
     if (!authHeader?.startsWith("Bearer ")) {
       return NextResponse.json(
-        { error: "Unauthorized" },
+        { error: "Unauthorized. Please sign in." },
         { status: 401 }
       );
     }
@@ -21,7 +23,7 @@ export async function GET(request: NextRequest) {
       decodedToken = await getAdminAuth().verifyIdToken(token);
     } catch {
       return NextResponse.json(
-        { error: "Invalid or expired token" },
+        { error: "Invalid or expired authentication token." },
         { status: 401 }
       );
     }
@@ -29,72 +31,127 @@ export async function GET(request: NextRequest) {
     const uid = decodedToken.uid;
     const db = getAdminDb();
 
-    // 2. Get the user's profile
-    const userRef = db.collection("users").doc(uid);
-    const userDoc = await userRef.get();
+    // 2. Verify that the user is a professor
+    const userDoc = await db.collection("users").doc(uid).get();
 
     if (!userDoc.exists) {
       return NextResponse.json(
-        { error: "User not found" },
+        { error: "User profile not found." },
         { status: 404 }
       );
     }
 
-    const user = userDoc.data();
-
-    // 3. Verify the user's role
-    if (user?.role !== "student") {
+    if (userDoc.data()?.role !== "professor") {
       return NextResponse.json(
-        { error: "Only students can use this endpoint" },
+        { error: "Only professors can create classes." },
         { status: 403 }
       );
     }
 
-    // 4. Get the student's class references
-    const classSnapshot = await userRef
-      .collection("classes")
-      .get();
+    // 3. Read and validate request body
+    let body: Record<string, unknown>;
 
-    // 5. Use each class_id to fetch the full class
-    const classResults = await Promise.all(
-      classSnapshot.docs.map(async (doc) => {
-        const classId = doc.data().class_id;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid JSON request body." },
+        { status: 400 }
+      );
+    }
 
-        if (typeof classId !== "string" || !classId.trim()) {
-          return null;
-        }
+    const name =
+      typeof body.name === "string" ? body.name.trim() : "";
 
-        const classDoc = await db
-          .collection("classes")
-          .doc(classId)
-          .get();
+    const courseCode =
+      typeof body.courseCode === "string"
+        ? body.courseCode.trim()
+        : "";
 
-        if (!classDoc.exists) {
-          return null;
-        }
+    const year = body.year;
 
-        return {
-          id: classDoc.id,
-          ...classDoc.data(),
-        };
-      })
-    );
+    const term =
+      typeof body.term === "string" ? body.term : "";
 
-    // 6. Remove invalid or missing classes
-    const classes = classResults.filter(
-      (classItem) => classItem !== null
-    );
+    const section =
+      typeof body.section === "string"
+        ? body.section.trim()
+        : "";
 
-    // 7. Return the classes
+    if (!name || !courseCode || !section || !term || year === undefined) {
+      return NextResponse.json(
+        {
+          error:
+            "Course name, course code, year, term, and section are required.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (name.length > 150 || courseCode.length > 30) {
+      return NextResponse.json(
+        { error: "Course name or course code is too long." },
+        { status: 400 }
+      );
+    }
+
+    if (
+      typeof year !== "number" ||
+      !Number.isInteger(year) ||
+      year < 2000 ||
+      year > 2100
+    ) {
+      return NextResponse.json(
+        { error: "Year must be a valid number between 2000 and 2100." },
+        { status: 400 }
+      );
+    }
+
+    if (!VALID_TERMS.includes(term)) {
+      return NextResponse.json(
+        { error: "Term must be Spring, Summer, Fall, or Winter." },
+        { status: 400 }
+      );
+    }
+
+    if (section.length > 20) {
+      return NextResponse.json(
+        { error: "Section must be 20 characters or fewer." },
+        { status: 400 }
+      );
+    }
+
+    // 4. Create the class in Firestore
+    const classRef = db.collection("classes").doc();
+
+    const newClass = {
+      name,
+      courseCode,
+      year,
+      term,
+      section,
+      professor_id: uid,
+      createdAt: new Date().toISOString(),
+    };
+
+    await classRef.set(newClass);
+
+    // 5. Return the created class
     return NextResponse.json(
-      { classes },
-      { status: 200 }
+      {
+        message: "Class created successfully.",
+        class: {
+          id: classRef.id,
+          ...newClass,
+        },
+      },
+      { status: 201 }
     );
   } catch (error) {
-    console.error("GET /api/classes failed:", error);
+    console.error("POST /api/classes failed:", error);
 
     return NextResponse.json(
-      { error: "Failed to fetch classes" },
+      { error: "Failed to create class." },
       { status: 500 }
     );
   }

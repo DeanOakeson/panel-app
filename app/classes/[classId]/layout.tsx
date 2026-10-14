@@ -23,7 +23,7 @@ export default function ClassLayout({
     <div className="min-w-0">
       {/* Fixed course sidebar */}
       <aside className="fixed bottom-0 left-24 top-0 z-40 w-56 overflow-y-auto bg-grey-200 px-4 py-6">
-        <h2 className="mb-5 px-3 text-sm font-semibold text-gray-900">
+        <h2 className="mb-5 px-3 text-sm font-semibold text-gray-200">
           Course Navigation
         </h2>
 
@@ -41,7 +41,7 @@ export default function ClassLayout({
                 className={`block rounded-md px-3 py-2 text-sm ${
                   active
                     ? "border-l-2 border-red-600 font-semibold text-white"
-                    : "text-gray-700 hover:bg-gray-100"
+                    : "text-gray-100 hover:bg-gray-100"
                 }`}
               >
                 {item.label}
