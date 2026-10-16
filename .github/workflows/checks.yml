@@ -36,4 +36,10 @@ jobs:
           NEXT_PUBLIC_FIREBASE_PROJECT_ID: demo-panel-app
           NEXT_PUBLIC_FIREBASE_APP_ID: ci-placeholder
 
+      # The Firestore emulator that npm test starts needs Java 21 or newer
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
       - run: npm test --if-present
