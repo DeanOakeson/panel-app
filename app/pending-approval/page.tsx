@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { auth } from "@/lib/firebaseClient";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { useRouter } from "next/navigation";
 
 export default function PendingApprovalPage() {
@@ -12,7 +12,7 @@ export default function PendingApprovalPage() {
   const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(getFirebaseAuth(), (user) => {
       if (!user) {
         router.replace("/login");
         return;
@@ -28,7 +28,7 @@ export default function PendingApprovalPage() {
     setSigningOut(true);
 
     try {
-      await signOut(auth);
+      await signOut(getFirebaseAuth());
       router.replace("/login");
     } catch (error) {
       console.error("Sign out failed:", error);

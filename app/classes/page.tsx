@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, type User } from "firebase/auth";
-import { auth } from "@/lib/firebaseClient";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
 import StudentClasses from "../components/classes/StudentClasses";
 import ProfessorClasses from "../components/classes/ProfessorClasses";
 import CreateCourseForm from "../components/classes/CreateClass";
@@ -76,7 +76,7 @@ export default function ClassesPage() {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(getFirebaseAuth(), (user) => {
       if (!user) {
         router.replace("/");
         return;
@@ -89,7 +89,7 @@ export default function ClassesPage() {
   }, [loadClasses, router]);
 
   const reloadClasses = useCallback(async () => {
-    const user = auth.currentUser;
+    const user = getFirebaseAuth().currentUser;
 
     if (!user) {
       router.replace("/");

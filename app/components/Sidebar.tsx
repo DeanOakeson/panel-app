@@ -3,7 +3,7 @@
 
 import { signOut } from "firebase/auth";
 import { usePathname, useRouter } from "next/navigation";
-import { auth } from "@/lib/firebaseClient";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
 
 const navigation = [
   { name: "Accounts", icon: "👤", href: "/accounts" },
@@ -22,7 +22,7 @@ export default function Sidebar() {
 
   async function handleLogout() {
     try {
-      await signOut(auth);
+      await signOut(getFirebaseAuth());
       router.replace("/");
     } catch (error) {
       console.error("Logout failed:", error);

@@ -2,7 +2,7 @@
 "use client";
 
 import { useState } from "react";
-import { auth } from "@/lib/firebaseClient";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
 
 type CreateClassProps = {
   onCreated: () => void | Promise<void>;
@@ -25,7 +25,7 @@ export default function CreateClass({
     e.preventDefault();
     setError("");
 
-    const user = auth.currentUser;
+    const user = getFirebaseAuth().currentUser;
 
     if (!user) {
       setError("Please sign in again.");
