@@ -1,14 +1,14 @@
 "use client";
 
 import { signOut } from "firebase/auth";
-import { auth } from "@/lib/firebaseClient";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { useRouter } from "next/navigation";
 
 export default function DashboardPage() {
   const router = useRouter();
 
   const handleLogout = async () => {
-    await signOut(auth);
+    await signOut(getFirebaseAuth());
     router.replace("/login");
   };
 

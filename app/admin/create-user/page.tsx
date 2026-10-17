@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { auth } from "@/lib/firebaseClient";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
 
 type Role = "student" | "professor";
 
@@ -33,14 +33,16 @@ export default function CreateUserPage() {
       return;
     }
 
-    if (!auth.currentUser) {
+    const currentUser = getFirebaseAuth().currentUser;
+
+    if (!currentUser) {
       setError("You must be signed in.");
       return;
     }
 
     setSubmitting(true);
     try {
-      const token = await auth.currentUser.getIdToken();
+      const token = await currentUser.getIdToken();
       const res = await fetch("/api/admin/users", {
         method: "POST",
         headers: {

@@ -10,7 +10,7 @@ import {
   signOut,
   type User,
 } from "firebase/auth";
-import { auth } from "@/lib/firebaseClient";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { useRouter } from "next/navigation";
 
 type Role = "student" | "professor" | "admin";
@@ -92,7 +92,7 @@ export default function AuthPage() {
 
   // Check the saved Firestore profile when authentication changes.
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
+    const unsubscribe = onAuthStateChanged(getFirebaseAuth(), async (user: User | null) => {
       if (!user) {
         setCheckingAuth(false);
         return;
@@ -165,7 +165,7 @@ export default function AuthPage() {
     try {
       if (isLogin) {
         const credential = await signInWithEmailAndPassword(
-          auth,
+          getFirebaseAuth(),
           email.trim(),
           password
         );
@@ -193,7 +193,7 @@ export default function AuthPage() {
       skipRedirect.current = true;
 
       const credential = await createUserWithEmailAndPassword(
-        auth,
+        getFirebaseAuth(),
         email.trim(),
         password
       );
@@ -219,7 +219,7 @@ export default function AuthPage() {
 
         router.replace(destination);
       } catch (profileError) {
-        await signOut(auth);
+        await signOut(getFirebaseAuth());
         throw profileError;
       } finally {
         skipRedirect.current = false;
