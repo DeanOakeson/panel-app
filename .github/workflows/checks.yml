@@ -34,4 +34,10 @@ jobs:
       # An env-less build keeps CI's failure mode identical to preview's.
       - run: npm run build
 
+      # The Firestore emulator that npm test starts needs Java 21 or newer
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
       - run: npm test --if-present
