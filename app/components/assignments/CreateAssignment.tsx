@@ -14,6 +14,7 @@ export default function CreateAssignment({
   onCreated,
 }: CreateAssignmentProps) {
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [points, setPoints] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [error, setError] = useState("");
@@ -57,6 +58,7 @@ export default function CreateAssignment({
           },
           body: JSON.stringify({
             name: name.trim(),
+            description: description.trim(),
             points: pointValue,
             dueDate,
           }),
@@ -70,6 +72,7 @@ export default function CreateAssignment({
       }
 
       setName("");
+      setDescription("");
       setPoints("");
       setDueDate("");
 
@@ -103,6 +106,18 @@ export default function CreateAssignment({
           placeholder="e.g. Project 1"
           className="rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
           required
+        />
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
+        Description (optional)
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          maxLength={5000}
+          rows={5}
+          placeholder="Instructions, requirements, or links for students"
+          className="rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
         />
       </label>
 
