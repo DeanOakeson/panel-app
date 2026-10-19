@@ -31,6 +31,7 @@ Live demo: https://panel-app-ten.vercel.app/
 - `lib/firebaseAdmin.ts` — server-side Firebase Admin
 - `firestore.rules` / `firestore.indexes.json` — Firestore config
 - `firebase.json` — Firebase / emulator config
+- `__tests__/` — Vitest tests; `__tests__/helpers/emulators.ts` resets the emulators and signs in test users
 
 ### Development Commands
 ```bash
@@ -38,6 +39,7 @@ npm install
 npm run dev              # http://localhost:3000
 npm run lint
 npm run build
+npm test                 # Vitest against throwaway Auth + Firestore emulators (needs Java 21+)
 
 # Local Firebase emulators (Auth + Firestore)
 npm run emulators        # Auth :9099, Firestore :8080, UI :4000
@@ -62,10 +64,11 @@ npm run emulators        # Auth :9099, Firestore :8080, UI :4000
 - Auth-protected routes should follow the existing pattern used by `/dashboard` and `/login`.
 - Match existing Tailwind utility style.
 - Firestore rules and indexes are version-controlled — update them if you change data access patterns.
-- There is currently no automated test suite; verify changes manually (and with emulators when touching Auth/Firestore).
+- Tests use Vitest. API route tests call the exported handler directly (`POST(new Request(...))`) against the emulators. Don't mock Firebase Admin.
+- `npm test` starts its own emulators on the default ports, so stop `npm run emulators` first.
 
 ### Before Finishing a Change
-1. Run `npm run lint`.
-2. For auth or data changes, test against the emulators.
+1. Run `npm run lint` and `npm test`.
+2. For auth or data changes, add or update tests under `__tests__/`.
 3. Confirm the change still builds (`npm run build` for non-trivial work).
 4. Summarize what you changed and why.
