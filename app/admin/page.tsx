@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 type CourseRow = {
   id: string;
   name: string;
@@ -32,10 +34,14 @@ export default function AdminHome() {
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <button type="button" disabled title="Coming soon"
-            className="rounded bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-60">
+          <Link href="/admin/professors"
+            className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-500">
+            Professor requests
+          </Link>
+          <Link href="/admin/create-user"
+            className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-500">
             Create user
-          </button>
+          </Link>
           <button type="button" disabled title="Coming soon"
             className="rounded bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-60">
             Create course

@@ -11,17 +11,9 @@ import {
   type User,
 } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
+import { getHomePath } from "@/lib/homePath";
+import { fetchUserProfile, type UserProfile } from "@/lib/userProfile";
 import { useRouter } from "next/navigation";
-
-type Role = "student" | "professor" | "admin";
-type ProfessorStatus = "pending" | "approved" | "rejected" | "not_requested";
-
-type UserProfile = {
-  success?: boolean;
-  uid?: string;
-  role?: Role;
-  professorStatus?: ProfessorStatus | string;
-};
 
 export default function AuthPage() {
   const router = useRouter();
@@ -36,59 +28,6 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [checkingAuth, setCheckingAuth] = useState(true);
-
-  function getDestination(profile: UserProfile): string | null {
-    // Admin accounts can access the professor approval page.
-    if (profile.role === "admin") {
-      return "/admin/professors";
-    }
-
-    // Students who have not requested professor access use the dashboard.
-    if (
-      profile.role === "student" &&
-      profile.professorStatus === "not_requested"
-    ) {
-      return "/dashboard";
-    }
-
-    // Applicants must wait for approval.
-    if (profile.professorStatus === "pending") {
-      return "/pending-approval";
-    }
-
-    // Rejected applicants must not access professor features.
-    if (profile.professorStatus === "rejected") {
-      return "/pending-approval";
-    }
-
-    // Only approved professors can enter the dashboard as professors.
-    if (
-      profile.role === "professor" &&
-      profile.professorStatus === "approved"
-    ) {
-      return "/dashboard";
-    }
-
-    return null;
-  }
-
-  async function fetchUserProfile(user: User): Promise<UserProfile> {
-    const token = await user.getIdToken();
-
-    const response = await fetch("/api/users", {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      throw new Error("Could not load your profile. Please try again.");
-    }
-
-    return (await response.json()) as UserProfile;
-  }
 
   // Check the saved Firestore profile when authentication changes.
   useEffect(() => {
@@ -105,16 +44,7 @@ export default function AuthPage() {
 
       try {
         const profile = await fetchUserProfile(user);
-        const destination = getDestination(profile);
-
-        if (destination) {
-          router.replace(destination);
-        } else {
-          setError(
-            "Your account status could not be verified. Please contact an administrator."
-          );
-          setCheckingAuth(false);
-        }
+        router.replace(getHomePath(profile));
       } catch (err) {
         console.error("Failed to check user profile:", err);
         setError(
@@ -171,16 +101,7 @@ export default function AuthPage() {
         );
 
         const profile = await fetchUserProfile(credential.user);
-        const destination = getDestination(profile);
-
-        if (!destination) {
-          setError(
-            "Your account status could not be verified. Please contact an administrator."
-          );
-          return;
-        }
-
-        router.replace(destination);
+        router.replace(getHomePath(profile));
         return;
       }
 
@@ -209,15 +130,7 @@ export default function AuthPage() {
           role
         );
 
-        const destination = getDestination(profile);
-
-        if (!destination) {
-          throw new Error(
-            "Your account was created, but its role or approval status is invalid. Please contact an administrator."
-          );
-        }
-
-        router.replace(destination);
+        router.replace(getHomePath(profile));
       } catch (profileError) {
         await signOut(getFirebaseAuth());
         throw profileError;
