@@ -2,7 +2,7 @@
 "use client";
 
 import { useState } from "react";
-import { auth } from "@/lib/firebaseClient";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
 
 type CreateAssignmentProps = {
   classId: string;
@@ -36,7 +36,7 @@ export default function CreateAssignment({
       return;
     }
 
-    const user = auth.currentUser;
+    const user = getFirebaseAuth().currentUser;
 
     if (!user) {
       setError("Please sign in again.");

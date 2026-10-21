@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, User } from "firebase/auth";
-import { auth } from "@/lib/firebaseClient";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
 
 /**
  * Gates everything under /admin: must be signed in AND have role === "admin".
@@ -26,7 +26,7 @@ export default function AdminLayout({
     let active = true;
 
     const unsubscribe = onAuthStateChanged(
-      auth,
+      getFirebaseAuth(),
       async (user: User | null) => {
         if (!user) {
           router.replace("/login");

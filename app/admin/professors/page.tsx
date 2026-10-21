@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useRouter } from "next/navigation";
-import { auth } from "@/lib/firebaseClient";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
 
 type ProfessorRequest = {
   uid: string;
@@ -28,7 +28,7 @@ export default function AdminProfessorsPage() {
     setError("");
 
     try {
-      const user = auth.currentUser;
+      const user = getFirebaseAuth().currentUser;
 
       if (!user) {
         setError("Please sign in as an administrator.");
@@ -59,7 +59,7 @@ export default function AdminProfessorsPage() {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(getFirebaseAuth(), (user) => {
       if (!user) {
         router.replace("/");
         return;
@@ -75,7 +75,7 @@ export default function AdminProfessorsPage() {
     setLoggingOut(true);
 
     try {
-      await signOut(auth);
+      await signOut(getFirebaseAuth());
       router.replace("/");
     } catch {
       setError("Unable to log out. Please try again.");
@@ -92,7 +92,7 @@ export default function AdminProfessorsPage() {
     setMessage("");
 
     try {
-      const user = auth.currentUser;
+      const user = getFirebaseAuth().currentUser;
 
       if (!user) {
         throw new Error("Please sign in again.");

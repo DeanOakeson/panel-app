@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "firebase emulators:exec --project demo-panel-app --only auth,firestore \"vitest run\"",
+    "test:watch": "firebase emulators:exec --project demo-panel-app --only auth,firestore vitest",
     "emulators": "firebase emulators:start --project demo-panel-app --import=./.emulator-data --export-on-exit"
   },
   "dependencies": {
@@ -25,6 +27,7 @@
     "eslint-config-next": "16.3.8",
     "firebase-tools": "^15.32.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.12"
   }
 }

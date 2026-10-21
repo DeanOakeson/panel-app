@@ -106,3 +106,16 @@ Open the Emulator UI at http://localhost:4000. Under **Authentication**, add a u
 Emulator data is saved to `.emulator-data` when you stop the emulators with Ctrl+C. It loads again on the next start. Delete the folder to start fresh.
 
 To go back to the real Firebase project, remove the three emulator variables from `.env.local` and fill in the real values.
+
+---
+
+## Tests
+
+```bash
+npm test         # run once
+npm run test:watch
+```
+
+Tests use [Vitest](https://vitest.dev/) and need Java 21, like the emulators. `npm test` starts a fresh Auth and Firestore emulator, runs the tests, and shuts the emulators down. Your `.emulator-data` is never touched. Stop `npm run emulators` first, because both use the same ports.
+
+API route tests live in `__tests__/api/` and call the route handler directly with a `Request`.

@@ -41,6 +41,13 @@ jobs:
 
       - run: npm ci
       - run: npm run lint
+
+      # The Firestore emulator that npm test starts needs Java 21 or newer
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
       - run: npm test --if-present
 
       - name: Install Vercel CLI
