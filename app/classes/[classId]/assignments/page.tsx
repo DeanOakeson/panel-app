@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { onAuthStateChanged, type User } from "firebase/auth";
-import { auth } from "@/lib/firebaseClient";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
 import CreateAssignment from "../../../components/assignments/CreateAssignment";
 
 type Assignment = {
@@ -61,7 +61,7 @@ export default function AssignmentsPage() {
   );
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      const unsubscribe = onAuthStateChanged(getFirebaseAuth(), (user) => {
       if (!user) {
         router.replace("/login");
         return;
@@ -75,8 +75,9 @@ export default function AssignmentsPage() {
 
   async function handleCreated() {
     setShowForm(false);
-    if (auth.currentUser) {
-      await loadAssignments(auth.currentUser);
+    const user = getFirebaseAuth().currentUser;
+    if (user) {
+      await loadAssignments(user);
     }
   }
 
