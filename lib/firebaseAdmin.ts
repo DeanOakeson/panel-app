@@ -37,13 +37,5 @@ export function getAdminAuth() {
 
 /** Returns the Admin Firestore service. */
 export function getAdminDb() {
-  const db = getFirestore(getAdminApp());
-  try {
-    // REST instead of gRPC: works through networks that block gRPC
-    // and starts faster on Vercel's serverless functions.
-    db.settings({ preferRest: true });
-  } catch {
-    // settings() can only run once per instance; later calls land here.
-  }
-  return db;
+  return getFirestore(getAdminApp());
 }
