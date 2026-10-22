@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 
 export type Assignment = {
@@ -205,6 +206,12 @@ export default function AssignmentItem({
 
       {canEdit && mode === "view" && (
         <div className="flex gap-3 text-sm">
+          <Link
+            href={`/classes/${classId}/assignments/${a.id}/submissions`}
+            className="text-blue-600 hover:text-blue-500 dark:text-blue-400"
+          >
+            Submissions
+          </Link>
           <button
             type="button"
             onClick={startEdit}
