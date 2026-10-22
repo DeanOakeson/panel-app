@@ -63,6 +63,15 @@ export default function SubmissionsPage() {
     return unsubscribe;
   }, [loadSubmissions, router]);
 
+  async function handleGraded() {
+    const user = getFirebaseAuth().currentUser;
+    if (user) {
+      await loadSubmissions(user);
+    }
+  }
+
+  const gradedCount = submissions.filter((submission) => submission.grade).length;
+
   return (
     <div className="mx-auto w-full max-w-3xl">
       <Link
@@ -82,7 +91,8 @@ export default function SubmissionsPage() {
             {assignment.points} pts ·{" "}
             {assignment.dueDate ? `Due ${assignment.dueDate}` : "No due date"} ·{" "}
             {submissions.length}{" "}
-            {submissions.length === 1 ? "submission" : "submissions"}
+            {submissions.length === 1 ? "submission" : "submissions"} ·{" "}
+            {gradedCount} graded
           </p>
         )}
       </header>
@@ -94,11 +104,20 @@ export default function SubmissionsPage() {
       ) : submissions.length === 0 ? (
         <p className="text-gray-500 dark:text-zinc-400">No submissions yet.</p>
       ) : (
-        <ul className="flex flex-col gap-3">
-          {submissions.map((submission) => (
-            <SubmissionItem key={submission.id} submission={submission} />
-          ))}
-        </ul>
+        assignment && (
+          <ul className="flex flex-col gap-3">
+            {submissions.map((submission) => (
+              <SubmissionItem
+                key={submission.id}
+                classId={classId}
+                assignmentId={assignmentId}
+                points={assignment.points}
+                submission={submission}
+                onGraded={handleGraded}
+              />
+            ))}
+          </ul>
+        )
       )}
     </div>
   );

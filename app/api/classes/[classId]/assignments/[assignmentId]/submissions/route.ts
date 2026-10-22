@@ -1,98 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { getAdminDb } from "@/lib/firebaseAdmin";
+import { authorizeAssignmentProfessor } from "@/lib/assignmentAccess";
 
 type RouteContext = {
   params: Promise<{ classId: string; assignmentId: string }>;
 };
 
 /**
- * Verifies the caller is the professor assigned to this class and that the
- * assignment exists. Returns the assignment's document, or an error response.
- */
-async function authorizeClassProfessor(
-  request: NextRequest,
-  classId: string,
-  assignmentId: string
-) {
-  const authHeader = request.headers.get("authorization");
-
-  if (!authHeader?.startsWith("Bearer ")) {
-    return {
-      error: NextResponse.json(
-        { error: "Unauthorized. Please sign in." },
-        { status: 401 }
-      ),
-    };
-  }
-
-  let uid: string;
-
-  try {
-    const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
-    uid = decoded.uid;
-  } catch {
-    return {
-      error: NextResponse.json(
-        { error: "Invalid or expired authentication token." },
-        { status: 401 }
-      ),
-    };
-  }
-
-  const db = getAdminDb();
-  const [userDoc, classDoc, assignmentDoc] = await Promise.all([
-    db.collection("users").doc(uid).get(),
-    db.collection("classes").doc(classId).get(),
-    db
-      .collection("classes")
-      .doc(classId)
-      .collection("assignments")
-      .doc(assignmentId)
-      .get(),
-  ]);
-
-  if (!classDoc.exists) {
-    return {
-      error: NextResponse.json({ error: "Class not found." }, { status: 404 }),
-    };
-  }
-
-  if (
-    userDoc.data()?.role !== "professor" ||
-    classDoc.data()?.professor_id !== uid
-  ) {
-    return {
-      error: NextResponse.json(
-        { error: "Only this class's professor can view submissions." },
-        { status: 403 }
-      ),
-    };
-  }
-
-  if (!assignmentDoc.exists) {
-    return {
-      error: NextResponse.json(
-        { error: "Assignment not found." },
-        { status: 404 }
-      ),
-    };
-  }
-
-  return { assignmentDoc };
-}
-
-/**
  * Lists an assignment's submissions, sorted by student name. Each submission
- * is keyed by the student's uid and carries the student's name and email.
+ * is keyed by the student's uid and carries the student's name, email, and
+ * grade (null until graded).
  */
 export async function GET(request: NextRequest, { params }: RouteContext) {
   try {
     const { classId, assignmentId } = await params;
-    const auth = await authorizeClassProfessor(request, classId, assignmentId);
+    const auth = await authorizeAssignmentProfessor(request, classId, assignmentId);
     if (auth.error) return auth.error;
 
     const db = getAdminDb();
-    const snapshot = await auth.assignmentDoc.ref.collection("submissions").get();
+    const [snapshot, gradeSnapshot] = await Promise.all([
+      auth.assignmentDoc.ref.collection("submissions").get(),
+      auth.assignmentDoc.ref.collection("grades").get(),
+    ]);
 
     // getAll() rejects an empty argument list
     const studentDocs = snapshot.empty
@@ -103,6 +32,9 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     const students = new Map(
       studentDocs.map((studentDoc) => [studentDoc.id, studentDoc.data()])
     );
+    const grades = new Map(
+      gradeSnapshot.docs.map((gradeDoc) => [gradeDoc.id, gradeDoc.data()])
+    );
 
     const submissions = snapshot.docs.map((doc) => {
       const student = students.get(doc.id);
@@ -112,6 +44,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         ...doc.data(),
         studentName: (student?.name as string | undefined) ?? null,
         studentEmail: (student?.email as string | undefined) ?? null,
+        grade: grades.get(doc.id) ?? null,
       };
     });
 
