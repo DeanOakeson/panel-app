@@ -151,3 +151,54 @@ export async function POST(req: Request) {
     );
   }
 }
+
+/**
+ * ADMIN-ONLY. Lists users, optionally filtered by role:
+ * GET /api/admin/users?role=professor
+ * Returns uid, name, and email only.
+ */
+export async function GET(req: Request) {
+  try {
+    const token = req.headers.get("authorization")?.split("Bearer ")[1];
+    if (!token) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    let callerUid: string;
+    try {
+      callerUid = (await getAdminAuth().verifyIdToken(token)).uid;
+    } catch {
+      return Response.json({ error: "Invalid or expired token" }, { status: 401 });
+    }
+
+    if ((await getCallerRole(callerUid)) !== "admin") {
+      return Response.json(
+        { error: "Forbidden: admin role required" },
+        { status: 403 }
+      );
+    }
+
+    const role = new URL(req.url).searchParams.get("role");
+    let query: FirebaseFirestore.Query = getAdminDb().collection("users");
+
+    if (role) {
+      if (!["student", "professor", "admin"].includes(role)) {
+        return Response.json({ error: "Unknown role." }, { status: 400 });
+      }
+      query = query.where("role", "==", role);
+    }
+
+    const snapshot = await query.get();
+    const users = snapshot.docs
+      .map((doc) => ({
+        uid: doc.id,
+        name: (doc.data().name as string | undefined) ?? "",
+        email: (doc.data().email as string | undefined) ?? "",
+      }))
+      .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+
+    return Response.json({ users }, { status: 200 });
+  } catch {
+    return Response.json({ error: "Failed to load users." }, { status: 500 });
+  }
+}
