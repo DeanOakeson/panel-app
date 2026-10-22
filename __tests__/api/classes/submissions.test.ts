@@ -163,6 +163,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submissions", ()
           submittedAt: "2026-10-31T09:00:00.000Z",
           studentName: "Ada Lovelace",
           studentEmail: "ada@example.com",
+          grade: null,
         },
         {
           id: "zoe",
@@ -170,6 +171,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submissions", ()
           submittedAt: "2026-10-30T09:00:00.000Z",
           studentName: "Zoe Zhang",
           studentEmail: "zoe@example.com",
+          grade: null,
         },
       ]);
     });
@@ -181,7 +183,34 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submissions", ()
 
       expect(res.status).toBe(200);
       expect((await res.json()).submissions).toEqual([
-        { id: "ghost", text: "Still here", studentName: null, studentEmail: null },
+        {
+          id: "ghost",
+          text: "Still here",
+          studentName: null,
+          studentEmail: null,
+          grade: null,
+        },
+      ]);
+    });
+
+    it("includes each submission's grade", async () => {
+      const grade = {
+        score: 90,
+        feedback: "Strong work",
+        gradedBy: "owner",
+        gradedAt: "2026-11-02T09:00:00.000Z",
+      };
+      await addSubmission("ada", "Ada Lovelace", { text: "My essay" });
+      await addSubmission("zoe", "Zoe Zhang", { text: "Mine" });
+      await assignmentDoc().collection("grades").doc("ada").set(grade);
+
+      const res = await getSubmissions(ownerToken);
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.submissions.map((submission: { grade: unknown }) => submission.grade)).toEqual([
+        grade,
+        null,
       ]);
     });
   });

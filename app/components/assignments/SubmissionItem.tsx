@@ -1,3 +1,18 @@
+import GradeForm from "./GradeForm";
+
+/**
+ * A professor's grade for one submission, stored at
+ * classes/{classId}/assignments/{assignmentId}/grades/{studentUid}.
+ */
+export type Grade = {
+  score: number;
+  feedback: string;
+  /** The grading professor's uid. */
+  gradedBy: string;
+  /** ISO 8601 string. */
+  gradedAt: string;
+};
+
 /**
  * A student's work for an assignment, stored at
  * classes/{classId}/assignments/{assignmentId}/submissions/{studentUid}.
@@ -11,10 +26,16 @@ export type Submission = {
   submittedAt?: string;
   studentName: string | null;
   studentEmail: string | null;
+  grade: Grade | null;
 };
 
 type SubmissionItemProps = {
+  classId: string;
+  assignmentId: string;
+  /** The assignment's points possible. */
+  points: number;
   submission: Submission;
+  onGraded: () => void | Promise<void>;
 };
 
 /** Returns whether `url` is an http or https link that is safe to render as an anchor. */
@@ -27,11 +48,21 @@ function isWebLink(url: string) {
   }
 }
 
-/** One submission, collapsed to the student and submission time until opened. */
-export default function SubmissionItem({ submission }: SubmissionItemProps) {
+/**
+ * One submission, collapsed to the student, submission time, and grade until
+ * opened. Opening it shows the work and its grade, or a form to grade it.
+ */
+export default function SubmissionItem({
+  classId,
+  assignmentId,
+  points,
+  submission,
+  onGraded,
+}: SubmissionItemProps) {
   const submittedAt = submission.submittedAt
     ? new Date(submission.submittedAt).toLocaleString()
     : "Unknown time";
+  const { grade } = submission;
 
   return (
     <li className="rounded-lg border border-gray-200 bg-white dark:border-zinc-800 dark:bg-gray-900">
@@ -47,8 +78,19 @@ export default function SubmissionItem({ submission }: SubmissionItemProps) {
               </span>
             )}
           </span>
-          <span className="text-sm text-gray-500 dark:text-zinc-400">
-            Submitted {submittedAt}
+          <span className="flex flex-wrap items-center gap-3 text-sm">
+            <span className="text-gray-500 dark:text-zinc-400">
+              Submitted {submittedAt}
+            </span>
+            {grade ? (
+              <span className="font-semibold text-green-700 dark:text-green-400">
+                {grade.score} / {points}
+              </span>
+            ) : (
+              <span className="font-semibold text-amber-600 dark:text-amber-400">
+                Not graded
+              </span>
+            )}
           </span>
         </summary>
 
@@ -79,6 +121,32 @@ export default function SubmissionItem({ submission }: SubmissionItemProps) {
             <p className="text-sm text-gray-500 dark:text-zinc-400">
               This submission is empty.
             </p>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2 border-t border-gray-200 p-4 dark:border-zinc-800">
+          {grade ? (
+            <>
+              <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                Grade: {grade.score} / {points}
+              </p>
+              {grade.feedback && (
+                <p className="whitespace-pre-wrap break-words text-sm text-gray-700 dark:text-zinc-300">
+                  {grade.feedback}
+                </p>
+              )}
+              <p className="text-xs text-gray-500 dark:text-zinc-400">
+                Graded {new Date(grade.gradedAt).toLocaleString()}
+              </p>
+            </>
+          ) : (
+            <GradeForm
+              classId={classId}
+              assignmentId={assignmentId}
+              studentId={submission.id}
+              points={points}
+              onSaved={onGraded}
+            />
           )}
         </div>
       </details>
