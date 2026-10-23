@@ -68,12 +68,22 @@ export default function AssignmentsPage() {
     return unsubscribe;
   }, [loadAssignments, router]);
 
-  async function handleCreated() {
-    setShowForm(false);
+  async function reloadAssignments() {
     const user = getFirebaseAuth().currentUser;
     if (user) {
       await loadAssignments(user);
     }
+  }
+
+  async function handleCreated() {
+    setShowForm(false);
+    await reloadAssignments();
+  }
+
+  // Editing or deleting an assignment only refreshes the list, so an open
+  // create form (and any draft in it) stays put.
+  async function handleChanged() {
+    await reloadAssignments();
   }
 
   return (
@@ -119,7 +129,7 @@ export default function AssignmentsPage() {
               classId={classId}
               assignment={a}
               canEdit={isProfessor}
-              onChanged={handleCreated}
+              onChanged={handleChanged}
             />
 
           ))}

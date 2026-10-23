@@ -80,15 +80,24 @@ export default function AssignmentItem({
       return;
     }
 
+    // Send only the fields that changed, so two people editing different
+    // fields of the same assignment don't overwrite each other's work.
+    const changes: Record<string, string | number> = {};
+    if (name.trim() !== a.name) changes.name = name.trim();
+    if (description.trim() !== (a.description ?? ""))
+      changes.description = description.trim();
+    if (pointValue !== a.points) changes.points = pointValue;
+    if (dueDate !== (a.dueDate ?? "")) changes.dueDate = dueDate;
+
+    if (Object.keys(changes).length === 0) {
+      setMode("view");
+      return;
+    }
+
     setBusy(true);
     setError("");
     try {
-      await send("PATCH", {
-        name: name.trim(),
-        description: description.trim(),
-        points: pointValue,
-        dueDate,
-      });
+      await send("PATCH", changes);
       setMode("view");
       await onChanged();
     } catch (err) {

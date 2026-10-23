@@ -125,6 +125,25 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]", () => {
     expect((await assignmentDoc().get()).data()).toMatchObject(original);
   });
 
+  it("returns 404 for a class that does not exist", async () => {
+    const res = await call(PATCH, "PATCH", ownerToken, { name: "X" }, {
+      classId: "missing-class",
+      assignmentId,
+    });
+
+    expect(res.status).toBe(404);
+  });
+
+  it("leaves fields that were not sent unchanged", async () => {
+    const res = await call(PATCH, "PATCH", ownerToken, { points: 80 });
+
+    expect(res.status).toBe(200);
+    expect((await assignmentDoc().get()).data()).toMatchObject({
+      ...original,
+      points: 80,
+    });
+  });
+
   it("returns 404 for an assignment that does not exist", async () => {
     const res = await call(PATCH, "PATCH", ownerToken, { name: "X" }, {
       classId,
@@ -136,6 +155,23 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]", () => {
 });
 
 describe("DELETE /api/classes/[classId]/assignments/[assignmentId]", () => {
+  it("returns 401 without a token", async () => {
+    const res = await call(DELETE, "DELETE");
+
+    expect(res.status).toBe(401);
+    expect((await assignmentDoc().get()).exists).toBe(true);
+  });
+
+  it("returns 404 for a class that does not exist", async () => {
+    const res = await call(DELETE, "DELETE", ownerToken, undefined, {
+      classId: "missing-class",
+      assignmentId,
+    });
+
+    expect(res.status).toBe(404);
+    expect((await assignmentDoc().get()).exists).toBe(true);
+  });
+
   it("returns 403 for a professor who does not teach the class", async () => {
     const { idToken } = await createSignedInUser("other@example.com", "professor");
 
