@@ -198,7 +198,8 @@ export async function GET(req: Request) {
       .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
 
     return Response.json({ users }, { status: 200 });
-  } catch {
+  } catch (error) {
+    console.error("GET /api/admin/users error:", error);
     return Response.json({ error: "Failed to load users." }, { status: 500 });
   }
 }
