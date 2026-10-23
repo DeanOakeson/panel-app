@@ -1,7 +1,10 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
-import { useParams, usePathname } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
+import { onAuthStateChanged } from "firebase/auth";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
 
 const items = [
   { label: "Home", path: "" },
@@ -17,7 +20,17 @@ export default function ClassLayout({
 }) {
   const { classId } = useParams<{ classId: string }>();
   const pathname = usePathname();
+  const router = useRouter();
   const basePath = `/classes/${classId}`;
+
+  // Every class page needs a signed-in user, so send signed-out visitors to
+  // the login page instead of leaving them on a page that never loads.
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(getFirebaseAuth(), (user) => {
+      if (!user) router.replace("/login");
+    });
+    return unsubscribe;
+  }, [router]);
 
   return (
     <div className="min-w-0">
