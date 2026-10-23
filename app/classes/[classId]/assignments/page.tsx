@@ -6,14 +6,9 @@ import Link from "next/link";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import CreateAssignment from "../../../components/assignments/CreateAssignment";
-
-type Assignment = {
-  id: string;
-  name: string;
-  description?: string;
-  points: number;
-  dueDate: string | null;
-};
+import AssignmentItem, {
+  type Assignment,
+} from "../../../components/assignments/AssignmentItem";
 
 export default function AssignmentsPage() {
   const { classId } = useParams<{ classId: string }>();
@@ -48,7 +43,7 @@ export default function AssignmentsPage() {
 
         if (profileRes.ok) {
           const profile = await profileRes.json();
-          // The server still checks class ownership when creating.
+          // The server still checks class ownership when creating, editing, or deleting.
           setIsProfessor(profile.role === "professor");
         }
       } catch (err) {
@@ -73,12 +68,22 @@ export default function AssignmentsPage() {
     return unsubscribe;
   }, [loadAssignments, router]);
 
-  async function handleCreated() {
-    setShowForm(false);
+  async function reloadAssignments() {
     const user = getFirebaseAuth().currentUser;
     if (user) {
       await loadAssignments(user);
     }
+  }
+
+  async function handleCreated() {
+    setShowForm(false);
+    await reloadAssignments();
+  }
+
+  // Editing or deleting an assignment only refreshes the list, so an open
+  // create form (and any draft in it) stays put.
+  async function handleChanged() {
+    await reloadAssignments();
   }
 
   return (
@@ -119,24 +124,13 @@ export default function AssignmentsPage() {
       ) : (
         <ul className="flex flex-col gap-3">
           {assignments.map((a) => (
-            <li
+            <AssignmentItem
               key={a.id}
-              className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4 dark:border-zinc-800 dark:bg-gray-900"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-semibold text-gray-900 dark:text-white">
-                  {a.name}
-                </span>
-                <span className="text-sm text-gray-500 dark:text-zinc-400">
-                  {a.points} pts · {a.dueDate ? `Due ${a.dueDate}` : "No due date"}
-                </span>
-              </div>
-              {a.description && (
-                <p className="whitespace-pre-line text-sm text-gray-600 dark:text-zinc-300">
-                  {a.description}
-                </p>
-              )}
-            </li>
+              classId={classId}
+              assignment={a}
+              canEdit={isProfessor}
+              onChanged={handleChanged}
+            />
 
           ))}
         </ul>
