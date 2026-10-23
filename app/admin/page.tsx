@@ -42,10 +42,10 @@ export default function AdminHome() {
             className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-500">
             Create user
           </Link>
-          <button type="button" disabled title="Coming soon"
-            className="rounded bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-60">
+          <Link href="/admin/create-course"
+            className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-500">
             Create course
-          </button>
+          </Link>
         </div>
       </div>
 

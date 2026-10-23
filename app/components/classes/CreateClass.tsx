@@ -1,25 +1,55 @@
-
 "use client";
 
 import { useState } from "react";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 
+export const TERMS = ["Spring", "Summer", "Fall", "Winter"] as const;
+
+export type ProfessorOption = { uid: string; name: string; email: string };
+
+export type CreatedClass = {
+  name: string;
+  courseCode: string;
+  year: number;
+  term: string;
+  section: string;
+  professorId?: string;
+};
+
+/**
+ * Admin mode: pass `professors` to show a professor picker. The class is then
+ * created for the chosen professor instead of the signed-in user.
+ */
+type AdminOptions = {
+  professors: ProfessorOption[];
+  loading: boolean;
+  error: string;
+  onRetry: () => void;
+};
+
 type CreateClassProps = {
-  onCreated: () => void | Promise<void>;
-  onCancel: () => void;
+  onCreated: (created: CreatedClass) => void | Promise<void>;
+  onCancel?: () => void;
+  title?: string;
+  admin?: AdminOptions;
 };
 
 export default function CreateClass({
   onCreated,
   onCancel,
+  title = "Create a class",
+  admin,
 }: CreateClassProps) {
   const [name, setName] = useState("");
   const [courseCode, setCourseCode] = useState("");
   const [year, setYear] = useState(String(new Date().getFullYear()));
   const [term, setTerm] = useState("Fall");
   const [section, setSection] = useState("001");
+  const [professorId, setProfessorId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const professorsUnavailable = !!admin && (admin.loading || !!admin.error);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -43,6 +73,20 @@ export default function CreateClass({
       return;
     }
 
+    if (admin && !professorId) {
+      setError("Choose a professor for this course.");
+      return;
+    }
+
+    const created: CreatedClass = {
+      name: name.trim(),
+      courseCode: courseCode.trim(),
+      year: parsedYear,
+      term,
+      section: section.trim(),
+      ...(admin ? { professorId } : {}),
+    };
+
     try {
       setSaving(true);
 
@@ -54,22 +98,20 @@ export default function CreateClass({
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          name: name.trim(),
-          courseCode: courseCode.trim(),
-          year: parsedYear,
-          term,
-          section: section.trim(),
-        }),
+        body: JSON.stringify(created),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         throw new Error(data.error || "Failed to create class.");
       }
 
-      await onCreated();
+      setName("");
+      setCourseCode("");
+      setSection("001");
+      setProfessorId("");
+      await onCreated(created);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Something went wrong."
@@ -91,7 +133,7 @@ export default function CreateClass({
       className="mb-8 max-w-xl space-y-4 rounded-xl border border-gray-200 bg-white p-6 dark:border-zinc-800 dark:bg-gray-900"
     >
       <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-        Create a class
+        {title}
       </h2>
 
       <div>
@@ -150,12 +192,13 @@ export default function CreateClass({
             value={term}
             onChange={(e) => setTerm(e.target.value)}
             required
-            className={`${inputClass} text-black`}>
-                
-            <option value="Spring" className="text-black">Spring</option>
-            <option value="Summer" className="text-black">Summer</option>
-            <option value="Fall" className="text-black">Fall</option>
-            <option value="Winter" className="text-black">Winter</option>
+            className={`${inputClass} text-black`}
+          >
+            {TERMS.map((t) => (
+              <option key={t} value={t} className="text-black">
+                {t}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -175,25 +218,71 @@ export default function CreateClass({
         </div>
       </div>
 
+      {admin && (
+        <div>
+          <label htmlFor="professor" className={labelClass}>
+            Professor
+          </label>
+          <select
+            id="professor"
+            value={professorId}
+            onChange={(e) => setProfessorId(e.target.value)}
+            disabled={professorsUnavailable}
+            required
+            className={`${inputClass} text-black`}
+          >
+            <option value="" className="text-black">
+              {admin.loading
+                ? "Loading professors..."
+                : admin.error
+                  ? "Professors couldn't be loaded"
+                  : admin.professors.length === 0
+                    ? "No professors yet. Create one first."
+                    : "Choose a professor"}
+            </option>
+            {admin.professors.map((p) => (
+              <option key={p.uid} value={p.uid} className="text-black">
+                {p.name ? `${p.name} (${p.email})` : p.email}
+              </option>
+            ))}
+          </select>
+
+          {admin.error && (
+            <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-red-600">
+              {admin.error}
+              <button
+                type="button"
+                onClick={admin.onRetry}
+                className="font-semibold text-blue-600 hover:text-blue-500 dark:text-blue-400"
+              >
+                Try again
+              </button>
+            </p>
+          )}
+        </div>
+      )}
+
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="flex gap-3">
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || professorsUnavailable}
           className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
         >
           {saving ? "Creating..." : "Create class"}
         </button>
 
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={saving}
-          className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-700 dark:text-gray-300"
-        >
-          Cancel
-        </button>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-700 dark:text-gray-300"
+          >
+            Cancel
+          </button>
+        )}
       </div>
     </form>
   );

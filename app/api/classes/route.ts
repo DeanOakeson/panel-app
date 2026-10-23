@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     const uid = decodedToken.uid;
     const db = getAdminDb();
 
-    // 2. Verify that the user is a professor
+    // 2. Verify that the user is an admin or a professor
     const userDoc = await db.collection("users").doc(uid).get();
 
     if (!userDoc.exists) {
@@ -41,9 +41,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (userDoc.data()?.role !== "professor") {
+    const callerRole = userDoc.data()?.role;
+
+    if (callerRole !== "admin" && callerRole !== "professor") {
       return NextResponse.json(
-        { error: "Only professors can create classes." },
+        { error: "Only admins and professors can create classes." },
         { status: 403 }
       );
     }
@@ -121,7 +123,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 4. Create the class in Firestore
+    // 4. Decide who teaches the class. A professor creates classes for
+    //    themselves; an admin must choose an existing professor.
+    let professorId = uid;
+
+    if (callerRole === "admin") {
+      const requested =
+        typeof body.professorId === "string" ? body.professorId.trim() : "";
+
+      if (!requested) {
+        return NextResponse.json(
+          { error: "Choose a professor for this class." },
+          { status: 400 }
+        );
+      }
+
+      const professorDoc = await db.collection("users").doc(requested).get();
+
+      if (!professorDoc.exists || professorDoc.data()?.role !== "professor") {
+        return NextResponse.json(
+          { error: "The selected user is not a professor." },
+          { status: 400 }
+        );
+      }
+
+      professorId = requested;
+    }
+
+    // 5. Create the class in Firestore
     const classRef = db.collection("classes").doc();
 
     const newClass = {
@@ -130,13 +159,14 @@ export async function POST(request: NextRequest) {
       year,
       term,
       section,
-      professor_id: uid,
+      professor_id: professorId,
+      createdBy: uid,
       createdAt: new Date().toISOString(),
     };
 
     await classRef.set(newClass);
 
-    // 5. Return the created class
+    // 6. Return the created class
     return NextResponse.json(
       {
         message: "Class created successfully.",
