@@ -122,6 +122,15 @@ describe("GET /api/classes/[classId]/materials", () => {
     expect((await res.json()).materials).toHaveLength(1);
   });
 
+  it("lists materials for an admin", async () => {
+    const { idToken } = await createSignedInUser("admin@example.com", "admin");
+
+    const res = await GET(request("GET", idToken), classParams);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).materials).toHaveLength(1);
+  });
+
   it("returns 403 for a student who is not enrolled", async () => {
     const { idToken } = await createSignedInUser("outsider@example.com", "student");
 
@@ -141,6 +150,32 @@ describe("DELETE /api/classes/[classId]/materials/[materialId]", () => {
   function deleteParams(id = materialId) {
     return { params: Promise.resolve({ classId, materialId: id }) };
   }
+
+  it("returns 401 without a token", async () => {
+    const res = await DELETE(
+      request("DELETE", undefined, undefined, `/${materialId}`),
+      deleteParams()
+    );
+
+    expect(res.status).toBe(401);
+    expect((await materials().doc(materialId).get()).exists).toBe(true);
+  });
+
+  it("returns 403 for a professor who teaches a different class", async () => {
+    const other = await createSignedInUser("other-prof@example.com", "professor");
+    await getAdminDb()
+      .collection("classes")
+      .doc("class-2")
+      .set({ name: "CS 6400", professor_id: other.uid });
+
+    const res = await DELETE(
+      request("DELETE", other.idToken, undefined, `/${materialId}`),
+      deleteParams()
+    );
+
+    expect(res.status).toBe(403);
+    expect((await materials().doc(materialId).get()).exists).toBe(true);
+  });
 
   it("returns 403 for an enrolled student", async () => {
     const res = await DELETE(

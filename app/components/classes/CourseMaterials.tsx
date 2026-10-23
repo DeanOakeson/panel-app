@@ -14,6 +14,23 @@ type Material = {
 const inputClass =
   "rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white";
 
+/**
+ * Mirrors the server's check: any link the browser can parse with an
+ * http or https scheme. Spaces are fine; they get encoded when saved.
+ */
+function checkLink(value: string): string | null {
+  const trimmed = value.trim();
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return "Links must start with http:// or https://.";
+  }
+  try {
+    new URL(trimmed);
+    return null;
+  } catch {
+    return "That link isn't valid. Check it for typos.";
+  }
+}
+
 export default function CourseMaterials({ classId }: { classId: string }) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,6 +45,8 @@ export default function CourseMaterials({ classId }: { classId: string }) {
   const [saving, setSaving] = useState(false);
 
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<{ id: string; message: string } | null>(null);
 
   const authedFetch = useCallback(
     async (user: User, path: string, init: RequestInit = {}) => {
@@ -93,8 +112,9 @@ export default function CourseMaterials({ classId }: { classId: string }) {
       setFormError("Title is required.");
       return;
     }
-    if (!/^https?:\/\/\S+$/i.test(url.trim())) {
-      setFormError("Enter a link starting with http:// or https://.");
+    const linkError = checkLink(url);
+    if (linkError) {
+      setFormError(linkError);
       return;
     }
 
@@ -131,9 +151,17 @@ export default function CourseMaterials({ classId }: { classId: string }) {
   }
 
   async function handleDelete(id: string) {
-    const user = getFirebaseAuth().currentUser;
-    if (!user) return;
+    // Ignore a second click while the first request is still running.
+    if (deletingId) return;
 
+    const user = getFirebaseAuth().currentUser;
+    if (!user) {
+      setDeleteError({ id, message: "Please sign in again." });
+      return;
+    }
+
+    setDeletingId(id);
+    setDeleteError(null);
     try {
       const res = await authedFetch(
         user,
@@ -145,7 +173,13 @@ export default function CourseMaterials({ classId }: { classId: string }) {
       setConfirmingId(null);
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      // Show the error on this item only, so the rest of the list stays visible.
+      setDeleteError({
+        id,
+        message: err instanceof Error ? err.message : "Something went wrong.",
+      });
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -255,13 +289,18 @@ export default function CourseMaterials({ classId }: { classId: string }) {
                     <button
                       type="button"
                       onClick={() => handleDelete(m.id)}
-                      className="rounded-md bg-red-600 px-3 py-1 font-semibold text-white hover:bg-red-500"
+                      disabled={deletingId === m.id}
+                      className="rounded-md bg-red-600 px-3 py-1 font-semibold text-white hover:bg-red-500 disabled:opacity-60"
                     >
-                      Yes, remove
+                      {deletingId === m.id ? "Removing..." : "Yes, remove"}
                     </button>
                     <button
                       type="button"
-                      onClick={() => setConfirmingId(null)}
+                      onClick={() => {
+                        setConfirmingId(null);
+                        setDeleteError(null);
+                      }}
+                      disabled={deletingId === m.id}
                       className="text-gray-600 hover:text-gray-800 dark:text-gray-400"
                     >
                       Cancel
@@ -270,12 +309,19 @@ export default function CourseMaterials({ classId }: { classId: string }) {
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setConfirmingId(m.id)}
+                    onClick={() => {
+                      setConfirmingId(m.id);
+                      setDeleteError(null);
+                    }}
                     className="mt-1 self-start text-sm text-red-600 hover:text-red-500"
                   >
                     Remove
                   </button>
                 ))}
+
+              {deleteError?.id === m.id && (
+                <p className="text-sm text-red-600">{deleteError.message}</p>
+              )}
             </li>
           ))}
         </ul>
