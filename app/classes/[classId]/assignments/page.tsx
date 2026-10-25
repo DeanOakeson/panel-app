@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -15,6 +16,10 @@ type Assignment = {
   dueDate: string | null;
 };
 
+type UserProfile = {
+  role?: string;
+};
+
 export default function AssignmentsPage() {
   const { classId } = useParams<{ classId: string }>();
   const router = useRouter();
@@ -22,37 +27,55 @@ export default function AssignmentsPage() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [isProfessor, setIsProfessor] = useState(false);
+  const [role, setRole] = useState("");
   const [showForm, setShowForm] = useState(false);
+
+  const isProfessor = role === "professor";
+  const isStudent = role === "student";
+  const isAdmin = role === "admin";
 
   const loadAssignments = useCallback(
     async (user: User) => {
+      setLoading(true);
       setError("");
 
       try {
         const token = await user.getIdToken();
-        const headers = { Authorization: `Bearer ${token}` };
+        const headers = {
+          Authorization: `Bearer ${token}`,
+        };
 
         const [assignmentsRes, profileRes] = await Promise.all([
-          fetch(`/api/classes/${classId}/assignments`, { headers, cache: "no-store" }),
-          fetch("/api/users", { headers, cache: "no-store" }),
+          fetch(`/api/classes/${classId}/assignments`, {
+            headers,
+            cache: "no-store",
+          }),
+          fetch("/api/users", {
+            headers,
+            cache: "no-store",
+          }),
         ]);
 
-        const data = await assignmentsRes.json();
+        if (!profileRes.ok) {
+          throw new Error("Failed to load your user profile.");
+        }
+
+        const profile: UserProfile = await profileRes.json();
+        setRole(profile.role ?? "");
 
         if (!assignmentsRes.ok) {
+          const data = await assignmentsRes.json();
           throw new Error(data.error || "Failed to load assignments.");
         }
 
+        const data = await assignmentsRes.json();
         setAssignments(data.assignments ?? []);
-
-        if (profileRes.ok) {
-          const profile = await profileRes.json();
-          // The server still checks class ownership when creating.
-          setIsProfessor(profile.role === "professor");
-        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Something went wrong.");
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Something went wrong."
+        );
       } finally {
         setLoading(false);
       }
@@ -61,7 +84,9 @@ export default function AssignmentsPage() {
   );
 
   useEffect(() => {
-      const unsubscribe = onAuthStateChanged(getFirebaseAuth(), (user) => {
+    const auth = getFirebaseAuth();
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
         router.replace("/login");
         return;
@@ -75,7 +100,9 @@ export default function AssignmentsPage() {
 
   async function handleCreated() {
     setShowForm(false);
+
     const user = getFirebaseAuth().currentUser;
+
     if (user) {
       await loadAssignments(user);
     }
@@ -91,9 +118,15 @@ export default function AssignmentsPage() {
       </Link>
 
       <header className="mb-6 mt-4 flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-          Assignments
-        </h1>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+            Assignments
+          </h1>
+
+          <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">
+            View assignments for this class.
+          </p>
+        </div>
 
         {isProfessor && !loading && !error && (
           <button
@@ -106,38 +139,85 @@ export default function AssignmentsPage() {
         )}
       </header>
 
-      {showForm && (
-        <CreateAssignment classId={classId} onCreated={handleCreated} />
+      {showForm && isProfessor && (
+        <div className="mb-6">
+          <CreateAssignment
+            classId={classId}
+            onCreated={handleCreated}
+          />
+        </div>
       )}
 
       {loading ? (
-        <p className="text-gray-600 dark:text-gray-300">Loading assignments...</p>
+        <p className="text-gray-600 dark:text-gray-300">
+          Loading assignments...
+        </p>
       ) : error ? (
-        <p className="text-red-600">{error}</p>
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950">
+          <p className="text-sm text-red-600 dark:text-red-400">
+            {error}
+          </p>
+
+          <button
+            type="button"
+            onClick={() => {
+              const user = getFirebaseAuth().currentUser;
+
+              if (user) {
+                void loadAssignments(user);
+              }
+            }}
+            className="mt-2 text-sm font-semibold text-red-700 underline dark:text-red-300"
+          >
+            Try again
+          </button>
+        </div>
+      ) : !isProfessor && !isStudent && !isAdmin ? (
+        <p className="text-gray-500 dark:text-zinc-400">
+          Your account does not have permission to view assignments.
+        </p>
       ) : assignments.length === 0 ? (
-        <p className="text-gray-500 dark:text-zinc-400">No assignments yet.</p>
+        <div className="rounded-lg border border-gray-200 p-6 text-center dark:border-zinc-800">
+          <p className="font-medium text-gray-700 dark:text-gray-200">
+            No assignments yet.
+          </p>
+
+          <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">
+            Assignments for this class will appear here.
+          </p>
+        </div>
       ) : (
         <ul className="flex flex-col gap-3">
-          {assignments.map((a) => (
+          {assignments.map((assignment) => (
             <li
-              key={a.id}
-              className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4 dark:border-zinc-800 dark:bg-gray-900"
+              key={assignment.id}
+              className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-zinc-800 dark:bg-gray-900"
             >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-semibold text-gray-900 dark:text-white">
-                  {a.name}
-                </span>
-                <span className="text-sm text-gray-500 dark:text-zinc-400">
-                  {a.points} pts · {a.dueDate ? `Due ${a.dueDate}` : "No due date"}
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <Link
+                  href={`/classes/${classId}/assignments/${assignment.id}`}
+                  className="font-semibold text-blue-600 hover:text-blue-500 dark:text-blue-400"
+                >
+                  {assignment.name}
+                </Link>
+
+                <span className="whitespace-nowrap text-sm text-gray-500 dark:text-zinc-400">
+                  {assignment.points} pts
                 </span>
               </div>
-              {a.description && (
+
+              {assignment.description && (
                 <p className="whitespace-pre-line text-sm text-gray-600 dark:text-zinc-300">
-                  {a.description}
+                  {assignment.description}
                 </p>
               )}
-            </li>
 
+              <div className="border-t border-gray-100 pt-2 text-sm text-gray-500 dark:border-zinc-800 dark:text-zinc-400">
+                {assignment.dueDate
+                  ? `Due ${assignment.dueDate}`
+                  : "No due date"}
+              </div>
+            </li>
           ))}
         </ul>
       )}

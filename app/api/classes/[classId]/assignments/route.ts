@@ -150,20 +150,33 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 }
 
 /** Lists a class's assignments for its professor or enrolled students. */
+
+/** Lists assignments for the class professor, admin, or enrolled students. */
 export async function GET(request: NextRequest, { params }: RouteContext) {
   try {
     const { classId } = await params;
     const auth = await authorize(request, classId);
+
     if ("error" in auth) return auth.error;
 
     const db = getAdminDb();
-    const isClassProfessor =
-      auth.role === "professor" && auth.classData?.professor_id === auth.uid;
 
-    if (!isClassProfessor && auth.role !== "admin") {
-      // Students must be enrolled: users/{uid}/classes holds { class_id }
-      // (same structure /api/classes/student reads).
-      const enrolled = await db
+    const isClassProfessor =
+      auth.role === "professor" &&
+      auth.classData?.professor_id === auth.uid;
+
+    const isAdmin = auth.role === "admin";
+    const isStudent = auth.role === "student";
+
+    if (!isClassProfessor && !isAdmin && !isStudent) {
+      return NextResponse.json(
+        { error: "You do not have permission to view assignments." },
+        { status: 403 }
+      );
+    }
+
+    if (isStudent) {
+      const enrollment = await db
         .collection("users")
         .doc(auth.uid)
         .collection("classes")
@@ -171,9 +184,9 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         .limit(1)
         .get();
 
-      if (enrolled.empty) {
+      if (enrollment.empty) {
         return NextResponse.json(
-          { error: "You do not have access to this class." },
+          { error: "You are not enrolled in this class." },
           { status: 403 }
         );
       }
@@ -183,7 +196,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       .collection("classes")
       .doc(classId)
       .collection("assignments")
-      .orderBy("createdAt")
+      .orderBy("createdAt", "desc")
       .get();
 
     const assignments = snapshot.docs.map((doc) => ({
@@ -194,6 +207,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ assignments }, { status: 200 });
   } catch (error) {
     console.error("GET /api/classes/[classId]/assignments failed:", error);
+
     return NextResponse.json(
       { error: "Failed to load assignments." },
       { status: 500 }
