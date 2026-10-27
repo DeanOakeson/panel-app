@@ -9,8 +9,11 @@
 // env var (`const adminUid = process.env.ADMIN_UID` + a `===`/`!==` on it).
 //
 // If you need to allowlist a file, add it to `allowlist` below with a
-// one-line reason. Every entry must name a route that still exists, so a
-// rename forces a re-review instead of a stale entry surviving forever.
+// one-line reason. Every entry must name a route that still exists AND that
+// still contains the inline ADMIN_UID check it was allowlisted for: a rename
+// forces a re-review via the path check, and a migration that removes the
+// check forces one via the reverse check (below). A stale entry is never
+// allowed to survive and silently mask drift.
 
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -26,8 +29,6 @@ const apiDir = path.join(repoRoot, "app", "api");
  * list minimal — the drift this test exists to prevent is one entry at a time.
  */
 const allowlist: Record<string, string> = {
-  "app/api/admin/professors/route.ts":
-    "Legacy inline admin-auth guard; migrating it onto requireAdmin is PR #49 (open and green) — remove this entry once #49 merges.",
   "app/api/users/route.ts":
     "The approve/reject guard (uid === ADMIN_UID) is a deliberate privilege-escalation stop that keeps approve/reject from rewriting the admin account, not an admin-auth check — it must stay.",
 };
@@ -96,6 +97,20 @@ describe("admin guard drift (END-27)", () => {
     expect(
       stale,
       `stale allowlist entries — remove them or fix the path: ${stale.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("every allowlist entry still has the inline ADMIN_UID check it was allowlisted for", () => {
+    // Reverse assertion: an entry that no longer matches reality is worse than
+    // no entry — it silently exempts the file from the drift scan forever.
+    // When a migration (e.g. moving a route onto requireAdmin) removes the
+    // comparison, delete the entry in the same PR.
+    const stale = Object.keys(allowlist).filter(
+      (rel) => findDrift(readFileSync(path.join(repoRoot, rel), "utf8")).length === 0,
+    );
+    expect(
+      stale,
+      `stale allowlist entries — these files no longer contain an inline ADMIN_UID check, so the exemption is masking nothing: delete ${stale.join(", ")} from the allowlist in __tests__/lib/adminGuardDrift.test.ts`,
     ).toEqual([]);
   });
 
