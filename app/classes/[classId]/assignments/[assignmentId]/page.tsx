@@ -11,7 +11,7 @@ import StudentSubmission from "../../../../components/assignments/StudentSubmiss
 import ProfessorSubmissions from "../../../../components/assignments/ProfessorSubmission";
 import SubmissionUploadForm from "../../../../components/assignments/SubmissionUploadForm";
 
-import type { Assignment, Submission } from "../../../../components/Types";
+import type { Assignment, Grade, Submission } from "../../../../components/Types";
 
 export default function AssignmentDetailPage() {
     const { classId, assignmentId } = useParams<{
@@ -147,6 +147,23 @@ export default function AssignmentDetailPage() {
         }
     }
 
+    // Updates only the graded submission, so other students' grade forms
+    // stay mounted and keep their unsaved drafts
+    function handleGraded(studentId: string, grade: Grade) {
+        setStudentSubmissions((current) =>
+            current.map((studentSubmission) =>
+                studentSubmission.studentId === studentId
+                    ? {
+                          ...studentSubmission,
+                          grade: grade.score,
+                          feedback: grade.feedback,
+                          gradedAt: grade.gradedAt,
+                      }
+                    : studentSubmission
+            )
+        );
+    }
+
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(
             getFirebaseAuth(),
@@ -219,9 +236,12 @@ export default function AssignmentDetailPage() {
 
                     {isProfessor ? (
                         <ProfessorSubmissions
+                            classId={classId}
+                            assignment={assignment}
                             submissions={studentSubmissions}
                             loading={submissionLoading}
                             error={submissionError}
+                            onGraded={handleGraded}
                         />
                     ) : (
                         <>

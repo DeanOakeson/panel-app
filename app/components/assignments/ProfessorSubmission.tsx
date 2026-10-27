@@ -1,9 +1,14 @@
-import type { Submission } from "../Types";
+import GradeForm from "./GradeForm";
+import type { Assignment, Grade, Submission } from "../Types";
 
 type Props = {
+    classId: string;
+    assignment: Assignment;
     submissions: Submission[];
     loading: boolean;
     error: string;
+    /** Receives the grade the server saved for a student's submission. */
+    onGraded: (studentId: string, grade: Grade) => void;
 };
 
 function formatDate(dateString: string) {
@@ -24,10 +29,14 @@ function formatFileSize(bytes: number) {
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+/** Lists a class's submissions for an assignment, with a grade form on each ungraded one. */
 export default function ProfessorSubmissions({
+    classId,
+    assignment,
     submissions,
     loading,
     error,
+    onGraded,
 }: Props) {
     return (
         <section className="mt-6 rounded-lg border border-gray-200 bg-white p-6 dark:border-zinc-800 dark:bg-gray-900">
@@ -94,8 +103,16 @@ export default function ProfessorSubmissions({
                                 </p>
 
                                 <p className="font-medium text-gray-900 dark:text-white">
-                                    {submission.grade ?? "Not graded"}
+                                    {submission.grade !== null
+                                        ? `${submission.grade} / ${assignment.points}`
+                                        : "Not graded"}
                                 </p>
+
+                                {submission.gradedAt && (
+                                    <p className="text-xs text-gray-500 dark:text-zinc-400">
+                                        Graded {formatDate(submission.gradedAt)}
+                                    </p>
+                                )}
                             </div>
 
                             {submission.feedback && (
@@ -119,6 +136,18 @@ export default function ProfessorSubmissions({
                                 >
                                     View / Download file
                                 </a>
+                            )}
+
+                            {submission.grade === null && submission.studentId && (
+                                <div className="mt-4 border-t border-gray-200 pt-4 dark:border-zinc-700">
+                                    <GradeForm
+                                        classId={classId}
+                                        assignmentId={assignment.id}
+                                        studentId={submission.studentId}
+                                        points={assignment.points}
+                                        onSaved={onGraded}
+                                    />
+                                </div>
                             )}
                         </article>
                     ))}
