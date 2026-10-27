@@ -14,10 +14,18 @@ const courses: CourseRow[] = [
   { id: "cs6300", name: "CS 6300 Software Engineering Leadership", professor: null, studentCount: 0 },
 ];
 
-const tiles = [
+type AdminTile = {
+  label: string;
+  count: number;
+  action: string;
+  /** Present once the section exists; the other two are later tickets. */
+  href?: string;
+};
+
+const tiles: AdminTile[] = [
   { label: "Students", count: counts.students, action: "View all students" },
   { label: "Professors", count: counts.professors, action: "View all professors" },
-  { label: "Courses", count: counts.courses, action: "View all courses" },
+  { label: "Courses", count: counts.courses, action: "View all courses", href: "/admin/classes" },
 ];
 
 export default function AdminHome() {
@@ -34,6 +42,10 @@ export default function AdminHome() {
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
+          <Link href="/admin/classes"
+            className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-500">
+            All courses
+          </Link>
           <Link href="/admin/professors"
             className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-500">
             Professor requests
@@ -54,7 +66,13 @@ export default function AdminHome() {
           <div key={t.label} className="flex flex-col gap-2 rounded-xl border border-zinc-800 p-5">
             <span className="text-sm text-zinc-400">{t.label}</span>
             <span className="text-3xl font-bold">{t.count}</span>
-            <span className="text-sm text-zinc-500">{t.action} · coming soon</span>
+            {t.href ? (
+              <Link href={t.href} className="text-sm font-semibold text-blue-400 hover:underline">
+                {t.action}
+              </Link>
+            ) : (
+              <span className="text-sm text-zinc-500">{t.action} · coming soon</span>
+            )}
           </div>
         ))}
       </div>
