@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { getClosesAt } from "@/lib/assignmentDeadline";
 
 type RouteContext = {
   params: Promise<{ classId: string; assignmentId: string }>;
@@ -7,7 +8,8 @@ type RouteContext = {
 
 /**
  * Returns one assignment to the class's professor, an admin, or an enrolled
- * student.
+ * student, with `closesAt`: when submissions close as an ISO instant, or null
+ * when there is no due date.
  */
 export async function GET(
   request: NextRequest,
@@ -100,11 +102,22 @@ export async function GET(
       );
     }
 
+    const assignment = assignmentDoc.data();
+    let closesAt: string | null = null;
+
+    try {
+      closesAt = getClosesAt(assignment?.dueDate);
+    } catch (error) {
+      // The submit route rejects uploads for this assignment with a 500
+      console.error("Assignment has an invalid due date:", error);
+    }
+
     return NextResponse.json(
       {
         assignment: {
           id: assignmentDoc.id,
-          ...assignmentDoc.data(),
+          ...assignment,
+          closesAt,
         },
       },
       { status: 200 }
