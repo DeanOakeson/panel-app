@@ -159,6 +159,9 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submissions/[st
       expect(res.status).toBe(201);
       const saved = (await gradeDoc().get()).data();
       expect(saved).toEqual({
+        studentId,
+        classId,
+        assignmentId,
         score: 87.5,
         feedback: "Strong work",
         submittedAt,

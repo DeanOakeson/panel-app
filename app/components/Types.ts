@@ -42,8 +42,12 @@ export type Submission = {
 /**
  * A professor's grade for one submission, stored at
  * classes/{classId}/assignments/{assignmentId}/grades/{studentUid}.
+ * The IDs repeat the path so a collection-group query on grades can filter by them.
  */
 export type Grade = {
+    studentId: string;
+    classId: string;
+    assignmentId: string;
     score: number;
     feedback: string;
     /** The graded submission's submittedAt, which identifies the file version. */
