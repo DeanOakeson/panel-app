@@ -124,6 +124,9 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         gradedBy: access.uid,
         gradedAt: new Date().toISOString(),
       };
+      transaction.create(gradeRef, grade);
+
+      return { grade };
     });
 
     if ("error" in result) {
