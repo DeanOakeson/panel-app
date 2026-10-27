@@ -240,9 +240,6 @@ export async function POST(
         .collection("submissions")
         .doc(uid);
 
-      const previousSubmission = await submissionRef.get();
-      const previousData = previousSubmission.data();
-
       await submissionRef.set({
         studentId: uid,
         filePath,
@@ -251,8 +248,6 @@ export async function POST(
         fileSize: file.size,
         submittedAt: new Date().toISOString(),
         status: "submitted",
-        grade: previousData?.grade ?? null,
-        feedback: previousData?.feedback ?? "",
       });
     } catch (error) {
       await getSupabaseAdmin().storage
@@ -388,10 +383,14 @@ export async function GET(
     }
 
     const submissionsRef = assignmentRef.collection("submissions");
+    const gradesRef = assignmentRef.collection("grades");
 
     // Professors can view all submissions for their own class.
     if (role === "professor") {
-      const snapshot = await submissionsRef.get();
+      const [snapshot, gradeSnapshot] = await Promise.all([
+        submissionsRef.get(),
+        gradesRef.get(),
+      ]);
 
       // getAll() rejects an empty argument list
       const studentDocs = snapshot.empty
@@ -402,11 +401,15 @@ export async function GET(
       const students = new Map(
         studentDocs.map((studentDoc) => [studentDoc.id, studentDoc.data()])
       );
+      const grades = new Map(
+        gradeSnapshot.docs.map((gradeDoc) => [gradeDoc.id, gradeDoc.data()])
+      );
 
       const submissions = await Promise.all(
         snapshot.docs.map(async (doc) => {
           const submission = doc.data();
           const student = students.get(doc.id);
+          const grade = grades.get(doc.id);
 
           const { data, error } = await getSupabaseAdmin().storage
             .from(BUCKET)
@@ -428,8 +431,9 @@ export async function GET(
             fileSize: submission.fileSize,
             submittedAt: submission.submittedAt,
             status: submission.status || "submitted",
-            grade: submission.grade ?? null,
-            feedback: submission.feedback ?? "",
+            grade: grade?.score ?? null,
+            feedback: grade?.feedback ?? "",
+            gradedAt: grade?.gradedAt ?? null,
             fileUrl: error ? null : data.signedUrl,
           };
         })
@@ -450,7 +454,10 @@ export async function GET(
     }
 
     // Students can access only their own submission.
-    const submissionDoc = await submissionsRef.doc(uid).get();
+    const [submissionDoc, gradeDoc] = await Promise.all([
+      submissionsRef.doc(uid).get(),
+      gradesRef.doc(uid).get(),
+    ]);
 
     if (!submissionDoc.exists) {
       return NextResponse.json({
@@ -460,6 +467,7 @@ export async function GET(
     }
 
     const submission = submissionDoc.data()!;
+    const grade = gradeDoc.data();
 
     const { data, error } = await getSupabaseAdmin().storage
       .from(BUCKET)
@@ -483,8 +491,9 @@ export async function GET(
         fileSize: submission.fileSize,
         submittedAt: submission.submittedAt,
         status: submission.status || "submitted",
-        grade: submission.grade ?? null,
-        feedback: submission.feedback ?? "",
+        grade: grade?.score ?? null,
+        feedback: grade?.feedback ?? "",
+        gradedAt: grade?.gradedAt ?? null,
         fileUrl: data.signedUrl,
       },
     });

@@ -64,6 +64,7 @@ function submissionResponse(studentUid: string, submittedAt?: string) {
     ...submission,
     grade: null,
     feedback: "",
+    gradedAt: null,
     fileUrl: `https://files.example.com/${filePath}`,
   };
 }
@@ -86,6 +87,19 @@ async function addSubmission(
     .collection("submissions")
     .doc(studentUid)
     .set(fileSubmission(studentUid, submittedAt));
+}
+
+/** Stores a grade for a student's submission. */
+async function addGrade(studentUid: string, score: number, feedback = "") {
+  const grade = {
+    score,
+    feedback,
+    gradedBy: "owner",
+    gradedAt: "2026-11-02T09:00:00.000Z",
+  };
+  await assignmentDoc().collection("grades").doc(studentUid).set(grade);
+
+  return grade;
 }
 
 /** Creates a signed-in student enrolled in the class. */
@@ -233,6 +247,29 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       ]);
     });
 
+    it("includes each submission's grade from the grades collection", async () => {
+      await addSubmission("ada", "Ada Lovelace");
+      await addSubmission("zoe", "Zoe Zhang");
+      const grade = await addGrade("ada", 87.5, "Strong work");
+
+      const res = await getSubmissions(ownerToken);
+
+      expect(res.status).toBe(200);
+      const { submissions } = await res.json();
+      expect(submissions[0]).toMatchObject({
+        studentId: "ada",
+        grade: 87.5,
+        feedback: "Strong work",
+        gradedAt: grade.gradedAt,
+      });
+      expect(submissions[1]).toMatchObject({
+        studentId: "zoe",
+        grade: null,
+        feedback: "",
+        gradedAt: null,
+      });
+    });
+
     it("lists a submission without a file link when the link cannot be made", async () => {
       await addSubmission("ada", "Ada Lovelace");
       storage.createSignedUrl.mockResolvedValue({
@@ -269,6 +306,23 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       expect(await res.json()).toEqual({
         role: "student",
         submission: submissionResponse(uid),
+      });
+    });
+
+    it("returns the student's grade and feedback from the grades collection", async () => {
+      const { uid, idToken } = await createEnrolledStudent();
+      await addSubmission(uid, null);
+      const grade = await addGrade(uid, 0, "Missing the second half");
+      await addGrade("zoe", 100);
+
+      const res = await getSubmissions(idToken);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).submission).toEqual({
+        ...submissionResponse(uid),
+        grade: 0,
+        feedback: "Missing the second half",
+        gradedAt: grade.gradedAt,
       });
     });
   });

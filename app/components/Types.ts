@@ -30,5 +30,20 @@ export type Submission = {
     status: string;
     grade: number | null;
     feedback: string;
+    /** ISO 8601 string. Null until graded. */
+    gradedAt: string | null;
     fileUrl: string | null;
+};
+
+/**
+ * A professor's grade for one submission, stored at
+ * classes/{classId}/assignments/{assignmentId}/grades/{studentUid}.
+ */
+export type Grade = {
+    score: number;
+    feedback: string;
+    /** The grading professor's uid. */
+    gradedBy: string;
+    /** ISO 8601 string. */
+    gradedAt: string;
 };
