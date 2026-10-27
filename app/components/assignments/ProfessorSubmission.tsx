@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import GradeForm from "./GradeForm";
 import type { Assignment, Grade, Submission } from "../Types";
 
@@ -38,6 +41,19 @@ export default function ProfessorSubmissions({
     error,
     onGraded,
 }: Props) {
+    const [alreadyGradedIds, setAlreadyGradedIds] = useState<ReadonlySet<string>>(
+        new Set()
+    );
+
+    /** Passes a stored grade up, and remembers a row that was graded elsewhere first. */
+    function handleSaved(studentId: string, grade: Grade, alreadyGraded: boolean) {
+        if (alreadyGraded) {
+            setAlreadyGradedIds((current) => new Set(current).add(studentId));
+        }
+
+        onGraded(studentId, grade);
+    }
+
     return (
         <section className="mt-6 rounded-lg border border-gray-200 bg-white p-6 dark:border-zinc-800 dark:bg-gray-900">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -114,6 +130,13 @@ export default function ProfessorSubmissions({
                                     </p>
                                 )}
 
+                                {submission.studentId &&
+                                    alreadyGradedIds.has(submission.studentId) && (
+                                        <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
+                                            Already graded elsewhere. Showing the saved grade.
+                                        </p>
+                                    )}
+
                                 {submission.resubmittedAfterGrading && (
                                     <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
                                         Resubmitted after grading
@@ -152,7 +175,7 @@ export default function ProfessorSubmissions({
                                         studentId={submission.studentId}
                                         submittedAt={submission.submittedAt}
                                         points={assignment.points}
-                                        onSaved={onGraded}
+                                        onSaved={handleSaved}
                                     />
                                 </div>
                             )}

@@ -10,6 +10,7 @@ type RouteContext = {
  * Grades a student's submission with a score from 0 to the assignment's points
  * and optional feedback. Only the class's professor can grade, each submission
  * can be graded once, and `submittedAt` must match the version being graded.
+ * A 409 for an already graded submission includes the stored grade.
  */
 export async function POST(request: NextRequest, { params }: RouteContext) {
   try {
@@ -106,7 +107,11 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       }
 
       if (gradeDoc.exists) {
-        return { error: "This submission has already been graded.", status: 409 };
+        return {
+          error: "This submission has already been graded.",
+          status: 409,
+          grade: gradeDoc.data(),
+        };
       }
 
       const grade = {
@@ -123,7 +128,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
     if ("error" in result) {
       return NextResponse.json(
-        { error: result.error },
+        { error: result.error, grade: result.grade },
         { status: result.status }
       );
     }

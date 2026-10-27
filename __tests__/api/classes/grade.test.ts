@@ -175,16 +175,17 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submissions/[st
       expect((await gradeDoc().get()).data()).toMatchObject({ score, feedback: "" });
     });
 
-    it("returns 409 for a submission that is already graded", async () => {
+    it("returns 409 with the stored grade for a submission that is already graded", async () => {
       await postGrade({ submittedAt, score: 90, feedback: "First" }, ownerToken);
 
       const res = await postGrade({ submittedAt, score: 50, feedback: "Second" }, ownerToken);
 
       expect(res.status).toBe(409);
-      expect((await res.json()).error).toMatch(/already been graded/);
-      expect((await gradeDoc().get()).data()).toMatchObject({
-        score: 90,
-        feedback: "First",
+      const stored = (await gradeDoc().get()).data();
+      expect(stored).toMatchObject({ score: 90, feedback: "First" });
+      expect(await res.json()).toEqual({
+        error: expect.stringMatching(/already been graded/),
+        grade: stored,
       });
     });
 
@@ -197,7 +198,7 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submissions/[st
       const res = await postGrade({ submittedAt, score: 90 }, ownerToken);
 
       expect(res.status).toBe(409);
-      expect((await res.json()).error).toMatch(/resubmitted/);
+      expect(await res.json()).toEqual({ error: expect.stringMatching(/resubmitted/) });
       expect((await gradeDoc().get()).exists).toBe(false);
     });
   });

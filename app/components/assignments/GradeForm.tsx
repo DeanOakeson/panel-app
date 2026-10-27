@@ -12,8 +12,11 @@ type GradeFormProps = {
   /** The submittedAt of the submission the professor is looking at. */
   submittedAt: string;
   points: number;
-  /** Receives the student's uid and the grade the server saved. */
-  onSaved: (studentId: string, grade: Grade) => void;
+  /**
+   * Receives the student's uid, the stored grade, and whether another session
+   * had already saved it.
+   */
+  onSaved: (studentId: string, grade: Grade, alreadyGraded: boolean) => void;
 };
 
 const inputClass =
@@ -78,11 +81,16 @@ export default function GradeForm({
 
       const data = await response.json();
 
+      if (response.status === 409 && data.grade) {
+        onSaved(studentId, data.grade, true);
+        return;
+      }
+
       if (!response.ok) {
         throw new Error(data.error || "Failed to save grade.");
       }
 
-      onSaved(studentId, data.grade);
+      onSaved(studentId, data.grade, false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
