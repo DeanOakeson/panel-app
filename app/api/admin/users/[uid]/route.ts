@@ -209,15 +209,36 @@ async function readEnrollments(uid: string) {
 }
 
 /**
- * Submission docs this user owns inside a class: the submit route writes them
- * at `classes/{classId}/assignments/{assignmentId}/submissions/{uid}` (see
- * `app/api/classes/[classId]/assignments/[assignmentId]/submit/route.ts`), so
- * they only live in classes the user was enrolled in.
+ * Submissions and grades belonging to this user, by *uid*, everywhere they can
+ * exist. Two walks, deliberately overlapping:
+ *
+ * 1. the enrollment-based walk: every assignment inside every class the user is
+ *    currently enrolled in contributes `.../submissions/{uid}` and
+ *    `.../grades/{uid}`. Exact document paths, no index needed. This also
+ *    covers a grade whose submission doc is already gone, because it is derived
+ *    from enrollment rather than from the submission list.
+ * 2. the collection-group sweep: `where("studentId" == uid)` across all
+ *    `submissions` / `grades` subcollections. This is what catches docs the
+ *    enrollment walk cannot reach — the admin unenroll route
+ *    (`app/api/admin/classes/[classId]/enrollments/[studentId]`) deletes only
+ *    the enrollment mirror and leaves submissions behind, so after an
+ *    enroll → submit → unenroll → delete-user sequence the user's submission
+ *    sits in a class they are no longer enrolled in. Both routes stamp
+ *    `studentId` into the doc body (see `app/components/Types.ts`: "The IDs
+ *    repeat the path so a collection-group query can filter by them"), so the
+ *    sweep is the intended way to find them.
+ *
+ * References are deduped by path: the two walks hit the same doc for any
+ * currently-enrolled class, and the batch would otherwise carry duplicate
+ * deletes.
  */
-async function readSubmissionRefs(uid: string, classIds: string[]) {
+async function readUserOwnedClassDocs(uid: string, classIds: string[]) {
   const db = getAdminDb();
-  const refs: DocumentReference[] = [];
+  const byPath = new Map<string, DocumentReference>();
 
+  const add = (ref: DocumentReference) => byPath.set(ref.path, ref);
+
+  // Walk 1: assignment-scoped, enrollment-based.
   for (const classId of classIds) {
     const assignments = await db
       .collection("classes")
@@ -226,19 +247,39 @@ async function readSubmissionRefs(uid: string, classIds: string[]) {
       .get();
 
     for (const assignment of assignments.docs) {
-      refs.push(assignment.ref.collection("submissions").doc(uid));
+      add(assignment.ref.collection("submissions").doc(uid));
+      add(assignment.ref.collection("grades").doc(uid));
     }
   }
 
-  return refs;
+  // Walk 2: uid-scoped sweep across every class, catches unenrolled leftovers.
+  const [submissions, grades] = await Promise.all([
+    db.collectionGroup("submissions").where("studentId", "==", uid).get(),
+    db.collectionGroup("grades").where("studentId", "==", uid).get(),
+  ]);
+
+  for (const doc of submissions.docs) add(doc.ref);
+  for (const doc of grades.docs) add(doc.ref);
+
+  const refs = [...byPath.values()];
+  return {
+    submissionRefs: refs.filter((ref) =>
+      ref.path.endsWith("/submissions/" + uid)
+    ),
+    gradeRefs: refs.filter((ref) => ref.path.endsWith("/grades/" + uid)),
+  };
 }
 
 /**
  * DELETE /api/admin/users/[uid] — ADMIN-ONLY.
  *
  * Removes the Firebase Auth account, the `users/{uid}` profile, the user's
- * `users/{uid}/classes/*` enrollment mirrors, and their submission docs in
- * those classes. Self-deletion is refused.
+ * `users/{uid}/classes/*` enrollment mirrors, and their submission and grade
+ * docs. Self-deletion is refused.
+ *
+ * Submissions/grades are found by uid rather than by current enrollment, so a
+ * submission left behind by an earlier unenroll is still removed — see
+ * readUserOwnedClassDocs.
  *
  * Classes the user taught are left alone: `professor_id` keeps pointing at the
  * removed uid, which the admin class detail view already renders as
@@ -282,7 +323,7 @@ export async function DELETE(
     // a mid-way failure leaves a recoverable (and retryable) state rather than
     // a half-wiped one.
     const enrollments = await readEnrollments(uid);
-    const submissionRefs = await readSubmissionRefs(
+    const { submissionRefs, gradeRefs } = await readUserOwnedClassDocs(
       uid,
       enrollments.map((e) => e.classId)
     );
@@ -290,6 +331,7 @@ export async function DELETE(
     const docsToDelete: DocumentReference[] = [
       ...enrollments.map((e) => e.ref),
       ...submissionRefs,
+      ...gradeRefs,
       userRef,
     ];
 
@@ -315,6 +357,7 @@ export async function DELETE(
       deleted: uid,
       removedEnrollments: enrollments.length,
       removedSubmissions: submissionRefs.length,
+      removedGrades: gradeRefs.length,
     });
   } catch (error) {
     console.error("DELETE /api/admin/users/[uid] failed:", error);
