@@ -182,3 +182,56 @@ ffa8f778f5e1a043daa413b358a030122f424b01  refs/heads/professor/course-materials
 (a superseded draft of this same consolidation made by a run that was interrupted mid-task;
 identical tree to this branch except it lacks nothing — kept per "do not delete any local
 branch" and not referenced further).
+
+---
+
+## Addendum 2 — END-22 review fixes + cascade fast-forward (2026-10-27, END-22)
+
+Approved: CEO confirmation interaction `7740a0c7` (accepted 2026-10-27T23:33:07Z) = option C,
+"fast-forward `local/admin-sprint` to `72f8fe9`, re-run the consolidated suite, append the
+verdict". Executed as `git merge --ff-only 72f8fe9` from `028693c`; **not** a history rewrite —
+`028693c` is an ancestor of the new head, so nothing was reset and this file's prior content is
+intact.
+
+New head: `72f8fe9`. Three commits added on top of the END-31 head:
+
+```
+72f8fe9  admin: close two user-delete cascade orphans (END-22 review round 2)
+6a59dd4  admin: link the user list from the admin home page (END-22)
+42b8bb0  admin: fix admin user list edit semantics and token refresh (END-22 review)
+```
+
+The first two commits after `028693c` are the END-22 review round (three defects posted by the
+automated review of the withdrawn `51d3bfe`: admin-row rename silently demoting to student, a
+professor promotion leaving `professorStatus: "pending"`, and a once-captured ID token expiring
+after ~1h) plus the missing `/admin/users` nav link. `72f8fe9` closes two orphans in the delete
+cascade itself: a submission left by a user who was unenrolled before deletion, and grade docs
+under `classes/{cid}/assignments/{aid}/grades/{uid}` that were never collected at all.
+
+What landed beyond `028693c` is 8 files, +624/−39. There is still exactly **one**
+`lib/adminGuard.ts` (plus its test and the END-27 drift test) — `git ls-tree -r --name-only HEAD |
+grep -i adminguard` shows those three paths and no second copy; the `[uid]` route imports
+`requireAdmin` from `@/lib/adminGuard`.
+
+Verified on the new head, in `~/panel-app` itself (real, non-symlinked `node_modules`), emulators
+on alternate ports 8280/9299 via gitignored scratch config so the run could not collide with the
+concurrent END-38/39/40 re-verifications on 8080/9099:
+
+- `npx tsc --noEmit -p tsconfig.json` → exit 0
+- `npm run lint` → exit 0, zero findings
+- full emulator suite → exit 0, `Test Files 22 passed (22) / Tests 341 passed (341)`
+  (END-31's 337 plus the 4 new cascade tests), no failures
+- `npm run build` → exit 0, `/admin/users` static (○), `/api/admin/users/[uid]` dynamic (ƒ)
+
+END-22 gates, each behind a test in this tree: no self-demote (400, doc keeps `role=admin`), no
+self-delete (403), `role: "admin"` rejected by PATCH (400 for admin/wrong-case/typos), professor
+demotion resets `professorStatus` to `not_requested`, promotion sets `approved`, DELETE cascades
+Auth account + `users/{uid}` + `users/{uid}/classes/*` mirrors + that user's submissions
+(including post-unenroll leftovers) + grades with a `collectionGroup` sweep assertion, and delete
+is gated by a dialog that requires typing the user's name.
+
+Not done, deliberately: no push, no PR, no remote ref (END-28 — `origin` still exposes exactly 8
+heads, `main`, `adminview` and six `professor/*`, none belonging to this ticket). Supabase storage
+objects behind a deleted submission are not deleted by the cascade: no delete path in this app
+removes storage objects, including the platform's own class-delete route, and adding it here only
+for user deletion would need a bucket decision outside END-22. Flagged, not silently expanded.
