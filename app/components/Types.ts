@@ -19,6 +19,10 @@ export type Assignment = {
 
 export type Submission = {
     studentId?: string;
+    /** Set on a professor's list. Null when the student has no profile. */
+    studentName?: string | null;
+    /** Set on a professor's list. Null when the student has no profile. */
+    studentEmail?: string | null;
     fileName: string;
     fileType: string;
     fileSize: number;

@@ -393,9 +393,20 @@ export async function GET(
     if (role === "professor") {
       const snapshot = await submissionsRef.get();
 
+      // getAll() rejects an empty argument list
+      const studentDocs = snapshot.empty
+        ? []
+        : await db.getAll(
+            ...snapshot.docs.map((doc) => db.collection("users").doc(doc.id))
+          );
+      const students = new Map(
+        studentDocs.map((studentDoc) => [studentDoc.id, studentDoc.data()])
+      );
+
       const submissions = await Promise.all(
         snapshot.docs.map(async (doc) => {
           const submission = doc.data();
+          const student = students.get(doc.id);
 
           const { data, error } = await getSupabaseAdmin().storage
             .from(BUCKET)
@@ -406,22 +417,12 @@ export async function GET(
               "Create submission download URL failed:",
               error
             );
-
-            return {
-              studentId: submission.studentId || doc.id,
-              fileName: submission.fileName,
-              fileType: submission.fileType,
-              fileSize: submission.fileSize,
-              submittedAt: submission.submittedAt,
-              status: submission.status || "submitted",
-              grade: submission.grade ?? null,
-              feedback: submission.feedback ?? "",
-              fileUrl: null,
-            };
           }
 
           return {
             studentId: submission.studentId || doc.id,
+            studentName: (student?.name as string | undefined) ?? null,
+            studentEmail: (student?.email as string | undefined) ?? null,
             fileName: submission.fileName,
             fileType: submission.fileType,
             fileSize: submission.fileSize,
@@ -429,9 +430,17 @@ export async function GET(
             status: submission.status || "submitted",
             grade: submission.grade ?? null,
             feedback: submission.feedback ?? "",
-            fileUrl: data.signedUrl,
+            fileUrl: error ? null : data.signedUrl,
           };
         })
+      );
+
+      const sortKey = (submission: (typeof submissions)[number]) =>
+        submission.studentName ??
+        submission.studentEmail ??
+        submission.studentId;
+      submissions.sort((first, second) =>
+        sortKey(first).localeCompare(sortKey(second))
       );
 
       return NextResponse.json({

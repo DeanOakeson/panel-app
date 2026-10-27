@@ -52,13 +52,23 @@ export default function ProfessorSubmissions({
                             key={submission.studentId}
                             className="rounded-lg border border-gray-200 p-4 dark:border-zinc-700"
                         >
-                            <p className="text-sm text-gray-500 dark:text-zinc-400">
-                                Student ID
+                            <p className="break-all font-semibold text-gray-900 dark:text-white">
+                                {submission.studentName ??
+                                    submission.studentEmail ??
+                                    "Unknown student"}
                             </p>
 
-                            <p className="mt-1 break-all font-medium text-gray-900 dark:text-white">
-                                {submission.studentId ?? "Unknown"}
-                            </p>
+                            {submission.studentName && submission.studentEmail && (
+                                <p className="break-all text-sm text-gray-500 dark:text-zinc-400">
+                                    {submission.studentEmail}
+                                </p>
+                            )}
+
+                            {!submission.studentName && !submission.studentEmail && (
+                                <p className="break-all text-sm text-gray-500 dark:text-zinc-400">
+                                    Student ID: {submission.studentId}
+                                </p>
+                            )}
 
                             <div className="mt-3">
                                 <p className="break-all font-medium text-gray-900 dark:text-white">
