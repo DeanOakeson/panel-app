@@ -4,7 +4,7 @@ import { requireAdmin } from "@/lib/adminGuard";
 
 export async function GET(req: Request) {
   try {
-    const { error, admin } = await requireAdmin(req);
+    const { error } = await requireAdmin(req);
     if (error) return error;
 
     const db = getAdminDb();
