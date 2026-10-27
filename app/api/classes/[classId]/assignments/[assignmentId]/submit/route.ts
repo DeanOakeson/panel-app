@@ -1,7 +1,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 type RouteContext = {
   params: Promise<{
@@ -215,7 +215,7 @@ export async function POST(
       `${classId}/${assignmentId}/${uid}/` +
       `${Date.now()}-${safeName}`;
 
-    const { error: uploadError } = await supabaseAdmin.storage
+    const { error: uploadError } = await getSupabaseAdmin().storage
       .from(BUCKET)
       .upload(filePath, Buffer.from(await file.arrayBuffer()), {
         contentType: file.type,
@@ -255,7 +255,7 @@ export async function POST(
         feedback: previousData?.feedback ?? "",
       });
     } catch (error) {
-      await supabaseAdmin.storage
+      await getSupabaseAdmin().storage
         .from(BUCKET)
         .remove([filePath]);
 
@@ -397,7 +397,7 @@ export async function GET(
         snapshot.docs.map(async (doc) => {
           const submission = doc.data();
 
-          const { data, error } = await supabaseAdmin.storage
+          const { data, error } = await getSupabaseAdmin().storage
             .from(BUCKET)
             .createSignedUrl(submission.filePath, 60 * 10);
 
@@ -452,7 +452,7 @@ export async function GET(
 
     const submission = submissionDoc.data()!;
 
-    const { data, error } = await supabaseAdmin.storage
+    const { data, error } = await getSupabaseAdmin().storage
       .from(BUCKET)
       .createSignedUrl(submission.filePath, 60 * 10);
 
