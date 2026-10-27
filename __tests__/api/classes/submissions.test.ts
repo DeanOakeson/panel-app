@@ -230,10 +230,11 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       ]);
     });
 
-    it("lists a submission whose student has no profile, sorted by student ID", async () => {
+    it("lists students without a profile after named students, by student ID", async () => {
       await addSubmission("zoe", "Zoe Zhang");
       await addSubmission("ghost", null);
       await addSubmission("ada", "Ada Lovelace");
+      await addSubmission("abe", null);
 
       const res = await getSubmissions(ownerToken);
 
@@ -245,14 +246,19 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           studentEmail: "ada@example.com",
         },
         {
-          ...submissionResponse("ghost"),
+          ...submissionResponse("zoe"),
+          studentName: "Zoe Zhang",
+          studentEmail: "zoe@example.com",
+        },
+        {
+          ...submissionResponse("abe"),
           studentName: null,
           studentEmail: null,
         },
         {
-          ...submissionResponse("zoe"),
-          studentName: "Zoe Zhang",
-          studentEmail: "zoe@example.com",
+          ...submissionResponse("ghost"),
+          studentName: null,
+          studentEmail: null,
         },
       ]);
     });

@@ -370,13 +370,20 @@ export async function GET(
         })
       );
 
-      const sortKey = (submission: (typeof submissions)[number]) =>
-        submission.studentName ??
-        submission.studentEmail ??
-        submission.studentId;
-      submissions.sort((first, second) =>
-        sortKey(first).localeCompare(sortKey(second))
-      );
+      // Rows shown as "Unknown student" go after every named student
+      submissions.sort((first, second) => {
+        const firstName = first.studentName ?? first.studentEmail;
+        const secondName = second.studentName ?? second.studentEmail;
+
+        if (firstName !== null && secondName !== null) {
+          return firstName.localeCompare(secondName);
+        }
+
+        if (firstName !== null) return -1;
+        if (secondName !== null) return 1;
+
+        return first.studentId.localeCompare(second.studentId);
+      });
 
       return NextResponse.json({
         role,
