@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { onAuthStateChanged, type User } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 
 /** Roles an admin can move someone into — matches the API's ASSIGNABLE_ROLES. */
@@ -52,7 +52,7 @@ export default function AdminUsersPage() {
       try {
         const query = roleFilter === "all" ? "" : `?role=${roleFilter}`;
         const res = await fetch(`/api/admin/users${query}`, {
-          headers: { authorization: *** ${token}` },
+          headers: { authorization: `Bearer ${token}` },
           cache: "no-store",
         });
         const data = await res.json().catch(() => ({}));
@@ -82,10 +82,6 @@ export default function AdminUsersPage() {
     });
     return unsubscribe;
   }, [load, filter]);
-
-  function reload() {
-    if (me) void load(me.token, filter);
-  }
 
   function startEdit(user: AdminUser) {
     setActionError("");
@@ -135,7 +131,7 @@ export default function AdminUsersPage() {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          authorization: *** ${me.token}`
+          authorization: `Bearer ${me.token}`
         },
         body: JSON.stringify(changes),
       });
@@ -175,7 +171,7 @@ export default function AdminUsersPage() {
     try {
       const res = await fetch(`/api/admin/users/${pendingDelete.uid}`, {
         method: "DELETE",
-        headers: { authorization: *** ${me.token}` },
+        headers: { authorization: `Bearer ${me.token}` },
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {

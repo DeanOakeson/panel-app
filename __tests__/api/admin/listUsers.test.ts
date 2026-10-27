@@ -40,6 +40,23 @@ describe("GET /api/admin/users", () => {
     expect(users.at(0)).toMatchObject({ email: "prof@example.com" });
   });
 
+  it("includes the role the admin user list renders and edits", async () => {
+    const { idToken } = await createSignedInUser("admin@example.com", "admin");
+    await createSignedInUser("prof@example.com", "professor");
+    await createSignedInUser("student@example.com", "student");
+
+    const res = await listUsers(idToken);
+
+    expect(res.status).toBe(200);
+    const { users } = await res.json();
+    expect(users).toHaveLength(3);
+    expect(users.map((user: { role: string }) => user.role).sort()).toEqual([
+      "admin",
+      "professor",
+      "student",
+    ]);
+  });
+
   it("returns 400 for an unknown role", async () => {
     const { idToken } = await createSignedInUser("admin@example.com", "admin");
 
