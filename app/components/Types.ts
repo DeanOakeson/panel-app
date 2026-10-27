@@ -15,6 +15,8 @@ export type Assignment = {
     description?: string;
     points: number;
     dueDate: string | null;
+    /** When submissions close, as an ISO instant. Null when there is no due date. */
+    closesAt?: string | null;
 };
 
 export type Submission = {

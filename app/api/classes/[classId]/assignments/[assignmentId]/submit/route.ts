@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { getDeadline } from "@/lib/assignmentDeadline";
 
 type RouteContext = {
   params: Promise<{
@@ -12,7 +13,6 @@ type RouteContext = {
 
 const BUCKET = "assignment-submissions";
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const TIME_ZONE = "America/Denver";
 
 const ALLOWED_TYPES = [
   "application/pdf",
@@ -20,77 +20,6 @@ const ALLOWED_TYPES = [
   "image/png",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ];
-
-
-
-function getDeadline(dueDate: unknown): Date | null {
-  if (typeof dueDate !== "string") {
-    return null;
-  }
-
-  // Expect a date-only string: YYYY-MM-DD.
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
-    throw new Error("Invalid assignment due date.");
-  }
-
-  const [year, month, day] = dueDate.split("-").map(Number);
-
-  // Validate that the date actually exists.
-  const calendarDate = new Date(Date.UTC(year, month - 1, day));
-
-  if (
-    calendarDate.getUTCFullYear() !== year ||
-    calendarDate.getUTCMonth() !== month - 1 ||
-    calendarDate.getUTCDate() !== day
-  ) {
-    throw new Error("Invalid assignment due date.");
-  }
-
-  // Find the UTC offset for Mountain Time on the following
-  // calendar day, then convert local midnight to UTC.
-  const nextDay = new Date(
-    Date.UTC(year, month - 1, day + 1)
-  );
-
-  const nextDateString = [
-    nextDay.getUTCFullYear(),
-    String(nextDay.getUTCMonth() + 1).padStart(2, "0"),
-    String(nextDay.getUTCDate()).padStart(2, "0"),
-  ].join("-");
-
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: TIME_ZONE,
-    timeZoneName: "longOffset",
-    year: "numeric",
-  }).formatToParts(
-    new Date(`${nextDateString}T12:00:00Z`)
-  );
-
-  const offsetText =
-    parts.find((part) => part.type === "timeZoneName")?.value;
-
-  const offsetMatch = offsetText?.match(
-    /^GMT([+-])(\d{2}):(\d{2})$/
-  );
-
-  if (!offsetMatch) {
-    throw new Error("Could not determine assignment deadline timezone.");
-  }
-
-  const sign = offsetMatch[1] === "+" ? 1 : -1;
-  const offsetMinutes =
-    sign *
-    (Number(offsetMatch[2]) * 60 + Number(offsetMatch[3]));
-
-  // Midnight at the start of the following local day, minus 1 ms.
-  // This correctly handles daylight saving time.
-  return new Date(
-    nextDay.getTime() -
-      offsetMinutes * 60 * 1000 -
-      1
-  );
-}
-
 
 export async function POST(
   request: NextRequest,
