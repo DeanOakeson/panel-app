@@ -425,6 +425,8 @@ export async function GET(
         grade: grade?.score ?? null,
         feedback: grade?.feedback ?? "",
         gradedAt: grade?.gradedAt ?? null,
+        resubmittedAfterGrading:
+          !!grade && submission.submittedAt !== grade.submittedAt,
         fileUrl: data.signedUrl,
       },
     });

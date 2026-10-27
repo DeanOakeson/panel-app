@@ -65,6 +65,7 @@ function submissionResponse(studentUid: string, submittedAt?: string) {
     grade: null,
     feedback: "",
     gradedAt: null,
+    resubmittedAfterGrading: false,
     fileUrl: `https://files.example.com/${filePath}`,
   };
 }
@@ -220,13 +221,11 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           ...submissionResponse("ada", "2026-10-31T09:00:00.000Z"),
           studentName: "Ada Lovelace",
           studentEmail: "ada@example.com",
-          resubmittedAfterGrading: false,
         },
         {
           ...submissionResponse("zoe", "2026-10-30T09:00:00.000Z"),
           studentName: "Zoe Zhang",
           studentEmail: "zoe@example.com",
-          resubmittedAfterGrading: false,
         },
       ]);
     });
@@ -244,19 +243,16 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           ...submissionResponse("ada"),
           studentName: "Ada Lovelace",
           studentEmail: "ada@example.com",
-          resubmittedAfterGrading: false,
         },
         {
           ...submissionResponse("ghost"),
           studentName: null,
           studentEmail: null,
-          resubmittedAfterGrading: false,
         },
         {
           ...submissionResponse("zoe"),
           studentName: "Zoe Zhang",
           studentEmail: "zoe@example.com",
-          resubmittedAfterGrading: false,
         },
       ]);
     });
@@ -359,6 +355,30 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
         grade: 0,
         feedback: "Missing the second half",
         gradedAt: grade.gradedAt,
+      });
+    });
+
+    it("flags the student's grade once they resubmit after grading", async () => {
+      const { uid, idToken } = await createEnrolledStudent();
+      await addSubmission(uid, null, "2026-11-01T09:00:00.000Z");
+      await addGrade(uid, 85, "", "2026-11-01T09:00:00.000Z");
+
+      const graded = await getSubmissions(idToken);
+
+      expect((await graded.json()).submission).toMatchObject({
+        grade: 85,
+        resubmittedAfterGrading: false,
+      });
+
+      await addSubmission(uid, null, "2026-11-03T09:00:00.000Z");
+
+      const resubmitted = await getSubmissions(idToken);
+
+      expect(resubmitted.status).toBe(200);
+      expect((await resubmitted.json()).submission).toMatchObject({
+        submittedAt: "2026-11-03T09:00:00.000Z",
+        grade: 85,
+        resubmittedAfterGrading: true,
       });
     });
   });
