@@ -211,11 +211,13 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           ...submissionResponse("ada", "2026-10-31T09:00:00.000Z"),
           studentName: "Ada Lovelace",
           studentEmail: "ada@example.com",
+          resubmittedAfterGrading: false,
         },
         {
           ...submissionResponse("zoe", "2026-10-30T09:00:00.000Z"),
           studentName: "Zoe Zhang",
           studentEmail: "zoe@example.com",
+          resubmittedAfterGrading: false,
         },
       ]);
     });
@@ -233,16 +235,19 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           ...submissionResponse("ada"),
           studentName: "Ada Lovelace",
           studentEmail: "ada@example.com",
+          resubmittedAfterGrading: false,
         },
         {
           ...submissionResponse("ghost"),
           studentName: null,
           studentEmail: null,
+          resubmittedAfterGrading: false,
         },
         {
           ...submissionResponse("zoe"),
           studentName: "Zoe Zhang",
           studentEmail: "zoe@example.com",
+          resubmittedAfterGrading: false,
         },
       ]);
     });
@@ -267,6 +272,28 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
         grade: null,
         feedback: "",
         gradedAt: null,
+      });
+    });
+
+    it("flags a submission whose file is newer than its grade", async () => {
+      await addSubmission("ada", "Ada Lovelace", "2026-11-03T09:00:00.000Z");
+      await addSubmission("zoe", "Zoe Zhang", "2026-11-01T09:00:00.000Z");
+      await addGrade("ada", 90);
+      await addGrade("zoe", 80);
+
+      const res = await getSubmissions(ownerToken);
+
+      expect(res.status).toBe(200);
+      const { submissions } = await res.json();
+      expect(submissions[0]).toMatchObject({
+        studentId: "ada",
+        grade: 90,
+        resubmittedAfterGrading: true,
+      });
+      expect(submissions[1]).toMatchObject({
+        studentId: "zoe",
+        grade: 80,
+        resubmittedAfterGrading: false,
       });
     });
 

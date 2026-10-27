@@ -32,6 +32,8 @@ export type Submission = {
     feedback: string;
     /** ISO 8601 string. Null until graded. */
     gradedAt: string | null;
+    /** Set on a professor's list. True when the file changed after it was graded. */
+    resubmittedAfterGrading?: boolean;
     fileUrl: string | null;
 };
 

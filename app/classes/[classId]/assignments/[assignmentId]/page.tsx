@@ -158,6 +158,7 @@ export default function AssignmentDetailPage() {
                           grade: grade.score,
                           feedback: grade.feedback,
                           gradedAt: grade.gradedAt,
+                          resubmittedAfterGrading: false,
                       }
                     : studentSubmission
             )

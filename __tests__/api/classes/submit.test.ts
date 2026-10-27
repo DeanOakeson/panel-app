@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { POST } from "@/app/api/classes/[classId]/assignments/[assignmentId]/submit/route";
+import {
+  GET as getSubmissions,
+  POST,
+} from "@/app/api/classes/[classId]/assignments/[assignmentId]/submit/route";
+import { POST as postGrade } from "@/app/api/classes/[classId]/assignments/[assignmentId]/submissions/[studentId]/grade/route";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { clearEmulators, createSignedInUser } from "../../helpers/emulators";
 
@@ -8,6 +12,7 @@ const storage = vi.hoisted(() => ({
   from: vi.fn(),
   upload: vi.fn(),
   remove: vi.fn(),
+  createSignedUrl: vi.fn(),
 }));
 
 vi.mock("@/lib/supabaseAdmin", () => ({
@@ -66,10 +71,15 @@ let ownerToken: string;
 beforeEach(async () => {
   await clearEmulators();
 
+  vi.useRealTimers();
   vi.restoreAllMocks();
   storage.from.mockReset().mockReturnValue(storage);
   storage.upload.mockReset().mockResolvedValue({ data: {}, error: null });
   storage.remove.mockReset().mockResolvedValue({ data: [], error: null });
+  storage.createSignedUrl.mockReset().mockResolvedValue({
+    data: { signedUrl: "https://files.example.com/signed" },
+    error: null,
+  });
 
   const owner = await createSignedInUser("owner@example.com", "professor");
   ownerToken = owner.idToken;
@@ -163,23 +173,52 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => 
     });
   });
 
-  it("leaves an existing grade in the grades collection on resubmission", async () => {
+  it("keeps the grade and flags the submission when a graded student resubmits", async () => {
     const { uid, idToken } = await createEnrolledStudent();
     await postSubmission(pdf("first.pdf"), idToken);
-    const grade = {
-      score: 90,
-      feedback: "Good",
-      gradedBy: "owner",
-      gradedAt: "2026-11-02T09:00:00.000Z",
-    };
-    await assignmentDoc().collection("grades").doc(uid).set(grade);
+    const graded = await postGrade(
+      new NextRequest(
+        `http://localhost/api/classes/${classId}/assignments/${assignmentId}/submissions/${uid}/grade`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${ownerToken}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ score: 90, feedback: "Good" }),
+        }
+      ),
+      { params: Promise.resolve({ classId, assignmentId, studentId: uid }) }
+    );
+    const { grade } = await graded.json();
 
-    const res = await postSubmission(pdf(), idToken);
+    // Only Date is faked, so the emulator requests still run on real timers
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse(grade.gradedAt) + 60 * 1000);
+    const res = await postSubmission(pdf("second.pdf"), idToken);
+    vi.useRealTimers();
 
     expect(res.status).toBe(201);
+    expect((await submissionDoc(uid).get()).data()).toMatchObject({ fileName: "second.pdf" });
     expect((await assignmentDoc().collection("grades").doc(uid).get()).data()).toEqual(grade);
-    expect((await submissionDoc(uid).get()).data()).toMatchObject({ fileName: "essay.pdf" });
-    expect((await submissionDoc(uid).get()).data()).not.toHaveProperty("grade");
+
+    const list = await getSubmissions(
+      new NextRequest(
+        `http://localhost/api/classes/${classId}/assignments/${assignmentId}/submit`,
+        { headers: { authorization: `Bearer ${ownerToken}` } }
+      ),
+      { params: Promise.resolve({ classId, assignmentId }) }
+    );
+    expect((await list.json()).submissions).toEqual([
+      expect.objectContaining({
+        studentId: uid,
+        fileName: "second.pdf",
+        grade: 90,
+        feedback: "Good",
+        gradedAt: grade.gradedAt,
+        resubmittedAfterGrading: true,
+      }),
+    ]);
   });
 
   it("returns 500 and saves nothing when the upload fails", async () => {

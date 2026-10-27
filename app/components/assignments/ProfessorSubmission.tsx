@@ -113,6 +113,12 @@ export default function ProfessorSubmissions({
                                         Graded {formatDate(submission.gradedAt)}
                                     </p>
                                 )}
+
+                                {submission.resubmittedAfterGrading && (
+                                    <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
+                                        Resubmitted after grading
+                                    </p>
+                                )}
                             </div>
 
                             {submission.feedback && (
