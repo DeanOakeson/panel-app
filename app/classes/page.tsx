@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import StudentClasses from "../components/classes/StudentClasses";
+import BrowseCourses from "../components/classes/BrowseCourses";
 import ProfessorClasses from "../components/classes/ProfessorClasses";
 import CreateCourseForm from "../components/classes/CreateClass";
 import type { ClassItem } from "../components/Types";
@@ -101,6 +102,13 @@ export default function ClassesPage() {
     await loadClasses(user);
   }, [loadClasses, router]);
 
+  // Refreshes "My classes" without the full-page loading state, so the
+  // Browse courses list below stays on screen after enrolling.
+  const refreshClasses = useCallback(async () => {
+    const user = getFirebaseAuth().currentUser;
+    if (user) await loadClasses(user);
+  }, [loadClasses]);
+
   const isProfessor = role === "professor";
 
   return (
@@ -159,7 +167,10 @@ export default function ClassesPage() {
           </button>
         </div>
       ) : role === "student" ? (
-        <StudentClasses classes={classes} />
+        <>
+          <StudentClasses classes={classes} />
+          <BrowseCourses onEnrolled={refreshClasses} />
+        </>
       ) : role === "professor" ? (
         <ProfessorClasses classes={classes} />
       ) : role === "admin" ? (
