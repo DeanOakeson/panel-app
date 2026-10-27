@@ -1,9 +1,17 @@
-import type { Submission } from "../Types";
+"use client";
+
+import { useState } from "react";
+import GradeForm from "./GradeForm";
+import type { Assignment, Grade, Submission } from "../Types";
 
 type Props = {
+    classId: string;
+    assignment: Assignment;
     submissions: Submission[];
     loading: boolean;
     error: string;
+    /** Receives the grade the server saved for a student's submission. */
+    onGraded: (studentId: string, grade: Grade) => void;
 };
 
 function formatDate(dateString: string) {
@@ -24,11 +32,28 @@ function formatFileSize(bytes: number) {
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+/** Lists a class's submissions for an assignment, with a grade form on each ungraded one. */
 export default function ProfessorSubmissions({
+    classId,
+    assignment,
     submissions,
     loading,
     error,
+    onGraded,
 }: Props) {
+    const [alreadyGradedIds, setAlreadyGradedIds] = useState<ReadonlySet<string>>(
+        new Set()
+    );
+
+    /** Passes a stored grade up, and remembers a row that was graded elsewhere first. */
+    function handleSaved(studentId: string, grade: Grade, alreadyGraded: boolean) {
+        if (alreadyGraded) {
+            setAlreadyGradedIds((current) => new Set(current).add(studentId));
+        }
+
+        onGraded(studentId, grade);
+    }
+
     return (
         <section className="mt-6 rounded-lg border border-gray-200 bg-white p-6 dark:border-zinc-800 dark:bg-gray-900">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -52,13 +77,23 @@ export default function ProfessorSubmissions({
                             key={submission.studentId}
                             className="rounded-lg border border-gray-200 p-4 dark:border-zinc-700"
                         >
-                            <p className="text-sm text-gray-500 dark:text-zinc-400">
-                                Student ID
+                            <p className="break-all font-semibold text-gray-900 dark:text-white">
+                                {submission.studentName ??
+                                    submission.studentEmail ??
+                                    "Unknown student"}
                             </p>
 
-                            <p className="mt-1 break-all font-medium text-gray-900 dark:text-white">
-                                {submission.studentId ?? "Unknown"}
-                            </p>
+                            {submission.studentName && submission.studentEmail && (
+                                <p className="break-all text-sm text-gray-500 dark:text-zinc-400">
+                                    {submission.studentEmail}
+                                </p>
+                            )}
+
+                            {!submission.studentName && !submission.studentEmail && (
+                                <p className="break-all text-sm text-gray-500 dark:text-zinc-400">
+                                    Student ID: {submission.studentId}
+                                </p>
+                            )}
 
                             <div className="mt-3">
                                 <p className="break-all font-medium text-gray-900 dark:text-white">
@@ -84,8 +119,29 @@ export default function ProfessorSubmissions({
                                 </p>
 
                                 <p className="font-medium text-gray-900 dark:text-white">
-                                    {submission.grade ?? "Not graded"}
+                                    {submission.grade !== null
+                                        ? `${submission.grade} / ${assignment.points}`
+                                        : "Not graded"}
                                 </p>
+
+                                {submission.gradedAt && (
+                                    <p className="text-xs text-gray-500 dark:text-zinc-400">
+                                        Graded {formatDate(submission.gradedAt)}
+                                    </p>
+                                )}
+
+                                {submission.studentId &&
+                                    alreadyGradedIds.has(submission.studentId) && (
+                                        <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
+                                            Already graded elsewhere. Showing the saved grade.
+                                        </p>
+                                    )}
+
+                                {submission.resubmittedAfterGrading && (
+                                    <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
+                                        Resubmitted after grading
+                                    </p>
+                                )}
                             </div>
 
                             {submission.feedback && (
@@ -109,6 +165,19 @@ export default function ProfessorSubmissions({
                                 >
                                     View / Download file
                                 </a>
+                            )}
+
+                            {submission.grade === null && submission.studentId && (
+                                <div className="mt-4 border-t border-gray-200 pt-4 dark:border-zinc-700">
+                                    <GradeForm
+                                        classId={classId}
+                                        assignmentId={assignment.id}
+                                        studentId={submission.studentId}
+                                        submittedAt={submission.submittedAt}
+                                        points={assignment.points}
+                                        onSaved={handleSaved}
+                                    />
+                                </div>
                             )}
                         </article>
                     ))}

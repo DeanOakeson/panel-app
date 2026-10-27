@@ -65,7 +65,7 @@ export default function ClassLayout({
       </aside>
 
       {/* Class content scrolls independently */}
-      <main className="ml-56 min-w-0 p-6">
+      <main className="ml-56 h-screen min-w-0 overflow-y-auto p-6">
         {children}
       </main>
     </div>

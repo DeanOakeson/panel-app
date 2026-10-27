@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import {
   DELETE,
+  GET,
   PATCH,
 } from "@/app/api/classes/[classId]/assignments/[assignmentId]/route";
 import { getAdminDb } from "@/lib/firebaseAdmin";
@@ -32,7 +33,7 @@ type Handler = (
 
 function call(
   handler: Handler,
-  method: "PATCH" | "DELETE",
+  method: "GET" | "PATCH" | "DELETE",
   idToken?: string,
   body?: unknown,
   ids = { classId, assignmentId }
@@ -58,6 +59,8 @@ let ownerToken: string;
 beforeEach(async () => {
   await clearEmulators();
 
+  vi.restoreAllMocks();
+
   const owner = await createSignedInUser("owner@example.com", "professor");
   ownerToken = owner.idToken;
 
@@ -66,6 +69,52 @@ beforeEach(async () => {
     .doc(classId)
     .set({ name: "CS 6300", professor_id: owner.uid });
   await assignmentDoc().set(original);
+});
+
+describe("GET /api/classes/[classId]/assignments/[assignmentId]", () => {
+  it("returns when submissions close for the due date", async () => {
+    const res = await call(GET, "GET", ownerToken);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).assignment).toEqual({
+      id: assignmentId,
+      ...original,
+      closesAt: "2026-11-02T06:59:59.999Z",
+    });
+  });
+
+  it("returns the same closing instant to an enrolled student", async () => {
+    const { uid, idToken } = await createSignedInUser("student@example.com", "student");
+    await getAdminDb()
+      .collection("users")
+      .doc(uid)
+      .collection("classes")
+      .add({ class_id: classId });
+
+    const res = await call(GET, "GET", idToken);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).assignment.closesAt).toBe("2026-11-02T06:59:59.999Z");
+  });
+
+  it.each([null, ""])("returns a null closesAt for a due date of %j", async (dueDate) => {
+    await assignmentDoc().update({ dueDate });
+
+    const res = await call(GET, "GET", ownerToken);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).assignment.closesAt).toBeNull();
+  });
+
+  it("returns a null closesAt for a malformed due date", async () => {
+    await assignmentDoc().update({ dueDate: "2026-02-30" });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await call(GET, "GET", ownerToken);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).assignment.closesAt).toBeNull();
+  });
 });
 
 describe("PATCH /api/classes/[classId]/assignments/[assignmentId]", () => {
