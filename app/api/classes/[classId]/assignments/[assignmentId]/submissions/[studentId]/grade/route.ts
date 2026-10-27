@@ -115,15 +115,15 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       }
 
       const grade = {
+        studentId,
+        classId,
+        assignmentId,
         score,
         feedback,
         submittedAt,
         gradedBy: access.uid,
         gradedAt: new Date().toISOString(),
       };
-      transaction.create(gradeRef, grade);
-
-      return { grade };
     });
 
     if ("error" in result) {
