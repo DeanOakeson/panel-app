@@ -9,17 +9,35 @@ import {
 } from "@/lib/assignmentDeadline";
 
 describe("getDeadline", () => {
-  it("returns the last millisecond of the due date in Mountain Time", () => {
-    expect(getDeadline("2026-10-30")?.toISOString()).toBe("2026-10-31T05:59:59.999Z");
-    expect(getDeadline("2026-12-15")?.toISOString()).toBe("2026-12-16T06:59:59.999Z");
-  });
+  it.each([
+    { label: "a summer date", dueDate: "2026-07-15", cutoff: "2026-07-16T05:59:59.999Z" },
+    { label: "an autumn date in MDT", dueDate: "2026-10-30", cutoff: "2026-10-31T05:59:59.999Z" },
+    { label: "a winter date", dueDate: "2026-12-15", cutoff: "2026-12-16T06:59:59.999Z" },
+    { label: "the day before DST starts", dueDate: "2026-03-07", cutoff: "2026-03-08T06:59:59.999Z" },
+    { label: "the day DST starts", dueDate: "2026-03-08", cutoff: "2026-03-09T05:59:59.999Z" },
+    { label: "the day before DST ends", dueDate: "2026-10-31", cutoff: "2026-11-01T05:59:59.999Z" },
+    { label: "the day DST ends", dueDate: "2026-11-01", cutoff: "2026-11-02T06:59:59.999Z" },
+    { label: "the day before DST starts in 2027", dueDate: "2027-03-13", cutoff: "2027-03-14T06:59:59.999Z" },
+    { label: "the day DST starts in 2027", dueDate: "2027-03-14", cutoff: "2027-03-15T05:59:59.999Z" },
+    { label: "the day before DST ends in 2027", dueDate: "2027-11-06", cutoff: "2027-11-07T05:59:59.999Z" },
+    { label: "the day DST ends in 2027", dueDate: "2027-11-07", cutoff: "2027-11-08T06:59:59.999Z" },
+  ])("ends $label ($dueDate) at 11:59:59.999 PM Mountain Time", ({ dueDate, cutoff }) => {
+    const deadline = getDeadline(dueDate);
 
-  it("ends the day daylight saving time starts at 11:59 PM MDT", () => {
-    expect(getDeadline("2026-03-08")?.toISOString()).toBe("2026-03-09T05:59:59.999Z");
-  });
-
-  it("ends the day daylight saving time ends at 11:59 PM MST", () => {
-    expect(getDeadline("2026-11-01")?.toISOString()).toBe("2026-11-02T06:59:59.999Z");
+    expect(deadline?.toISOString()).toBe(cutoff);
+    expect(
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Denver",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        fractionalSecondDigits: 3,
+        hourCycle: "h23",
+      }).format(deadline!)
+    ).toBe(`${dueDate}, 23:59:59.999`);
   });
 
   it.each(["10/30/2026", "2026-1-5", "2026-10-30T12:00:00Z", ""])(

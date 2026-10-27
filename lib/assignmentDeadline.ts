@@ -30,25 +30,26 @@ export function getDeadline(dueDate: unknown): Date | null {
     throw new Error("Invalid assignment due date.");
   }
 
-  // Find the UTC offset for Mountain Time on the following
-  // calendar day, then convert local midnight to UTC.
-  const nextDay = new Date(
-    Date.UTC(year, month - 1, day + 1)
-  );
+  const nextMidnightAsUtc = Date.UTC(year, month - 1, day + 1);
 
-  const nextDateString = [
-    nextDay.getUTCFullYear(),
-    String(nextDay.getUTCMonth() + 1).padStart(2, "0"),
-    String(nextDay.getUTCDate()).padStart(2, "0"),
-  ].join("-");
+  // The cutoff is local midnight starting the next day, so it needs the
+  // offset in effect at that instant. Guess with the offset at UTC midnight,
+  // then re-read the offset at the guess in case a DST change lies between.
+  const guess =
+    nextMidnightAsUtc - getOffsetMinutes(new Date(nextMidnightAsUtc)) * 60 * 1000;
+  const nextMidnight =
+    nextMidnightAsUtc - getOffsetMinutes(new Date(guess)) * 60 * 1000;
 
+  return new Date(nextMidnight - 1);
+}
+
+/** Returns Mountain Time's offset from UTC in minutes at `instant`. */
+function getOffsetMinutes(instant: Date): number {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: DEADLINE_TIME_ZONE,
     timeZoneName: "longOffset",
     year: "numeric",
-  }).formatToParts(
-    new Date(`${nextDateString}T12:00:00Z`)
-  );
+  }).formatToParts(instant);
 
   const offsetText =
     parts.find((part) => part.type === "timeZoneName")?.value;
@@ -62,16 +63,8 @@ export function getDeadline(dueDate: unknown): Date | null {
   }
 
   const sign = offsetMatch[1] === "+" ? 1 : -1;
-  const offsetMinutes =
-    sign *
-    (Number(offsetMatch[2]) * 60 + Number(offsetMatch[3]));
 
-  // Midnight at the start of the following local day, minus 1 ms
-  return new Date(
-    nextDay.getTime() -
-      offsetMinutes * 60 * 1000 -
-      1
-  );
+  return sign * (Number(offsetMatch[2]) * 60 + Number(offsetMatch[3]));
 }
 
 /**
