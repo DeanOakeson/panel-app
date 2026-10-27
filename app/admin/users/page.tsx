@@ -4,11 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { onAuthStateChanged } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
-
-/** Roles an admin can move someone into — matches the API's ASSIGNABLE_ROLES. */
-const ASSIGNABLE_ROLES = ["student", "professor"] as const;
-
-type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
+import {
+  ASSIGNABLE_ROLES,
+  buildUserChanges,
+  canEditRole,
+  isAssignableRole,
+  type AssignableRole,
+} from "@/lib/adminUserEdit";
 
 type AdminUser = {
   uid: string;
@@ -19,12 +21,22 @@ type AdminUser = {
 
 const ROLE_FILTERS = ["all", "student", "professor", "admin"] as const;
 
-function isAssignableRole(role: string): role is AssignableRole {
-  return (ASSIGNABLE_ROLES as readonly string[]).includes(role);
+/**
+ * A fresh ID token for one request.
+ *
+ * Deliberately *not* captured once at sign-in and reused: a Firebase ID token
+ * lives about an hour, and an admin who leaves this page open and comes back
+ * would otherwise have every save and delete fail with 401 until a reload.
+ * `getIdToken()` returns the cached token while it is valid and refreshes it
+ * when it is not, so calling it per request is cheap.
+ */
+async function currentIdToken(): Promise<string | null> {
+  const user = getFirebaseAuth().currentUser;
+  return user ? await user.getIdToken() : null;
 }
 
 export default function AdminUsersPage() {
-  const [me, setMe] = useState<{ token: string; uid: string } | null>(null);
+  const [me, setMe] = useState<{ uid: string } | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [filter, setFilter] = useState<(typeof ROLE_FILTERS)[number]>("all");
 
@@ -46,9 +58,14 @@ export default function AdminUsersPage() {
   const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(
-    async (token: string, roleFilter: string) => {
+    async (token: string | null, roleFilter: string) => {
       setLoading(true);
       setLoadError("");
+      if (!token) {
+        setLoadError("You must be signed in.");
+        setLoading(false);
+        return;
+      }
       try {
         const query = roleFilter === "all" ? "" : `?role=${roleFilter}`;
         const res = await fetch(`/api/admin/users${query}`, {
@@ -76,8 +93,8 @@ export default function AdminUsersPage() {
         setLoading(false);
         return;
       }
-      const token = await user.getIdToken();
-      setMe({ token, uid: user.uid });
+      setMe({ uid: user.uid });
+      const token = await currentIdToken();
       await load(token, filter);
     });
     return unsubscribe;
@@ -88,6 +105,9 @@ export default function AdminUsersPage() {
     setActionSuccess("");
     setEditingUid(user.uid);
     setEditName(user.name);
+    // When the role dropdown is not offered for this row (an admin row, or the
+    // admin's own row) this value is a placeholder that no request will read:
+    // buildUserChanges only sends `role` if the dropdown was available.
     setEditRole(isAssignableRole(user.role) ? user.role : "student");
   }
 
@@ -110,28 +130,37 @@ export default function AdminUsersPage() {
       return;
     }
 
-    // Send only what actually changed, so a saved row reports exactly the
-    // fields the admin edited.
-    const changes: Record<string, string> = {};
-    if (name !== target.name) changes.name = name;
-    if (editRole !== target.role) changes.role = editRole;
+    // Send only what actually changed, and `role` only if this row offers an
+    // enabled role dropdown — otherwise the hidden select's placeholder value
+    // would ride along and rename an admin into a student. All the rules live
+    // in buildUserChanges so they can be tested without a DOM.
+    const changes = buildUserChanges({
+      targetName: target.name,
+      targetRole: target.role,
+      isSelf: target.uid === me.uid,
+      name,
+      role: editRole,
+    });
 
     if (Object.keys(changes).length === 0) {
       cancelEdit();
       return;
     }
 
-    // The page is gated to admins, so if the admin is editing their own row the
-    // only editable field left is the name — the server refuses the role change.
     setSavingUid(target.uid);
     setActionError("");
     setActionSuccess("");
     try {
+      const token = await currentIdToken();
+      if (!token) {
+        setActionError("Your session expired. Please sign in again.");
+        return;
+      }
       const res = await fetch(`/api/admin/users/${target.uid}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          authorization: `Bearer ${me.token}`
+          authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(changes),
       });
@@ -142,7 +171,7 @@ export default function AdminUsersPage() {
       }
       setActionSuccess(`Saved changes for ${data.email || target.email}.`);
       cancelEdit();
-      await load(me.token, filter);
+      await load(await currentIdToken(), filter);
     } catch {
       setActionError("Something went wrong. Please try again.");
     } finally {
@@ -169,9 +198,14 @@ export default function AdminUsersPage() {
     setDeleting(true);
     setActionError("");
     try {
+      const token = await currentIdToken();
+      if (!token) {
+        setActionError("Your session expired. Please sign in again.");
+        return;
+      }
       const res = await fetch(`/api/admin/users/${pendingDelete.uid}`, {
         method: "DELETE",
-        headers: { authorization: `Bearer ${me.token}` },
+        headers: { authorization: `Bearer ${token}` },
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -180,7 +214,7 @@ export default function AdminUsersPage() {
       }
       setActionSuccess(`Deleted ${pendingDelete.name || pendingDelete.email}.`);
       cancelDelete();
-      await load(me.token, filter);
+      await load(await currentIdToken(), filter);
     } catch {
       setActionError("Something went wrong. Please try again.");
     } finally {
@@ -344,13 +378,12 @@ export default function AdminUsersPage() {
                     <td className="px-4 py-3">{user.email}</td>
                     <td className="px-4 py-3">
                       {editingUid === user.uid ? (
-                        isAssignableRole(user.role) || isMe ? (
+                        canEditRole(user.role, isMe) ? (
                           <select
                             value={editRole}
                             onChange={(e) =>
                               setEditRole(e.target.value as AssignableRole)
                             }
-                            disabled={isMe}
                             className={`${inputClass} dark:bg-gray-800`}
                             aria-label="Role"
                           >
@@ -361,9 +394,10 @@ export default function AdminUsersPage() {
                             ))}
                           </select>
                         ) : (
-                          // Admins and other non-assignable roles stay as text:
-                          // this endpoint cannot change role into or out of
-                          // admin, so offering a dropdown would be a lie.
+                          // Admins, other non-assignable roles, and the
+                          // admin's own row stay as text: this endpoint cannot
+                          // change role into or out of admin, and refuses a
+                          // self role change, so a dropdown here would be a lie.
                           <span>
                             {user.role}{" "}
                             <span className="text-xs text-zinc-500">

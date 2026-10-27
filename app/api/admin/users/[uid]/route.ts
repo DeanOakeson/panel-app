@@ -29,7 +29,8 @@ const READ_ONLY_FIELDS = ["email", "password", "uid", "professorStatus"];
  * - the caller may not change **their own** role (an admin demoting themself
  *   could delete the last admin account), and may not delete themself;
  * - `role` is limited to student|professor — never `admin`;
- * - demoting a professor resets a pending/approved `professorStatus`.
+ * - promoting to professor sets `professorStatus: "approved"` (the admin action
+ *   is the approval); demoting a professor resets a pending/approved status.
  *
  * Body: any of `{ name, role }`. At least one is required.
  */
@@ -132,6 +133,18 @@ export async function PATCH(
 
     if (requestedRole !== undefined) {
       update.role = requestedRole;
+
+      // Promotion: an admin promoting someone to professor IS the approval.
+      // Without this, a pending applicant moved to `professor` keeps
+      // `professorStatus: "pending"`: `lib/homePath.ts` still routes them to
+      // /pending-approval instead of the professor dashboard, and the Reject
+      // button on the approve/reject endpoint (`app/api/users/route.ts`, which
+      // only accepts a pending applicant) would demote them back to student and
+      // stamp `rejected` onto someone who is already teaching. So the status
+      // becomes "approved" — the same value the approve route writes.
+      if (requestedRole === "professor") {
+        update.professorStatus = "approved";
+      }
 
       // A demoted professor must not keep a professor-shaped status:
       // - "approved" would leave them with a status that no longer matches a

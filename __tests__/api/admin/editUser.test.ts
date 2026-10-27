@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { PATCH } from "@/app/api/admin/users/[uid]/route";
 import { getAdminDb } from "@/lib/firebaseAdmin";
+import { HOME_PATHS, getHomePath } from "@/lib/homePath";
 import { clearEmulators, createSignedInUser } from "../../helpers/emulators";
 
 /**
@@ -174,6 +175,66 @@ describe("PATCH /api/admin/users/[uid]", () => {
         name: "K. Pett",
         role: "admin",
       });
+    });
+  });
+
+  describe("professorStatus on promotion", () => {
+    // An admin moving someone into `professor` is the approval itself; the
+    // status has to follow or the user is a professor who still looks pending.
+    it.each(["pending", "rejected", "not_requested", undefined])(
+      "sets professorStatus to approved when promoting from %j",
+      async (professorStatus) => {
+        const target = await createSignedInUser("stud@example.com", "student");
+        if (professorStatus !== undefined) {
+          await getAdminDb()
+            .collection("users")
+            .doc(target.uid)
+            .set({ professorStatus }, { merge: true });
+        }
+
+        const res = await patchUser(target.uid, { role: "professor" }, adminToken);
+
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toMatchObject({
+          role: "professor",
+          professorStatus: "approved",
+        });
+        expect((await profile(target.uid)).data()).toMatchObject({
+          role: "professor",
+          professorStatus: "approved",
+        });
+      }
+    );
+
+    it("no longer routes a promoted user to /pending-approval", async () => {
+      // The concrete failure the review pointed at: a pending applicant
+      // promoted here stayed `pending`, so lib/homePath.ts kept sending them to
+      // the approval queue and Reject there demoted them back to student.
+      const target = await createSignedInUser("stud@example.com", "student");
+      await getAdminDb()
+        .collection("users")
+        .doc(target.uid)
+        .set({ professorStatus: "pending" }, { merge: true });
+
+      await patchUser(target.uid, { role: "professor" }, adminToken);
+
+      const stored = (await profile(target.uid)).data();
+      expect(
+        getHomePath({ role: stored?.role, professorStatus: stored?.professorStatus })
+      ).toBe(HOME_PATHS.professor);
+    });
+
+    it("leaves professorStatus alone on a name-only edit of a professor", async () => {
+      const target = await createSignedInUser("prof@example.com", "professor");
+      await getAdminDb()
+        .collection("users")
+        .doc(target.uid)
+        .set({ professorStatus: "approved" }, { merge: true });
+
+      const res = await patchUser(target.uid, { name: "Renamed" }, adminToken);
+
+      expect(res.status).toBe(200);
+      expect((await profile(target.uid)).data()?.professorStatus).toBe("approved");
     });
   });
 
