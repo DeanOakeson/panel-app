@@ -35,8 +35,8 @@ export default function ClassLayout({
   return (
     <div className="min-w-0">
       {/* Fixed course sidebar */}
-      <aside className="fixed bottom-0 left-24 top-0 z-40 w-56 overflow-y-auto bg-grey-200 px-4 py-6">
-        <h2 className="mb-5 px-3 text-sm font-semibold text-gray-200">
+      <aside className="fixed bottom-0 left-24 top-0 z-40 w-56 overflow-y-auto bg-gray-200 px-4 py-6 dark:bg-gray-800">
+        <h2 className="mb-5 px-3 text-sm font-semibold text-gray-600 dark:text-gray-300">
           Course Navigation
         </h2>
 
@@ -53,8 +53,8 @@ export default function ClassLayout({
                 href={href}
                 className={`block rounded-md px-3 py-2 text-sm ${
                   active
-                    ? "border-l-2 border-red-600 font-semibold text-white"
-                    : "text-gray-100 hover:bg-gray-100"
+                    ? "border-l-2 border-red-600 font-semibold text-gray-900 dark:text-white"
+                    : "text-gray-700 hover:bg-gray-300 dark:text-gray-200 dark:hover:bg-gray-700"
                 }`}
               >
                 {item.label}
