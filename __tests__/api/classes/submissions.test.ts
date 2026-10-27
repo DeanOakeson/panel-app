@@ -89,11 +89,20 @@ async function addSubmission(
     .set(fileSubmission(studentUid, submittedAt));
 }
 
-/** Stores a grade for a student's submission. */
-async function addGrade(studentUid: string, score: number, feedback = "") {
+/**
+ * Stores a grade for a student's submission. `submittedAt` is the version it
+ * graded, the stored submission's by default.
+ */
+async function addGrade(
+  studentUid: string,
+  score: number,
+  feedback = "",
+  submittedAt = fileSubmission(studentUid).submittedAt
+) {
   const grade = {
     score,
     feedback,
+    submittedAt,
     gradedBy: "owner",
     gradedAt: "2026-11-02T09:00:00.000Z",
   };
@@ -275,11 +284,11 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       });
     });
 
-    it("flags a submission whose file is newer than its grade", async () => {
+    it("flags a submission whose file is not the version that was graded", async () => {
       await addSubmission("ada", "Ada Lovelace", "2026-11-03T09:00:00.000Z");
       await addSubmission("zoe", "Zoe Zhang", "2026-11-01T09:00:00.000Z");
-      await addGrade("ada", 90);
-      await addGrade("zoe", 80);
+      await addGrade("ada", 90, "", "2026-11-01T08:00:00.000Z");
+      await addGrade("zoe", 80, "", "2026-11-01T09:00:00.000Z");
 
       const res = await getSubmissions(ownerToken);
 

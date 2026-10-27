@@ -185,7 +185,11 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => 
             authorization: `Bearer ${ownerToken}`,
             "content-type": "application/json",
           },
-          body: JSON.stringify({ score: 90, feedback: "Good" }),
+          body: JSON.stringify({
+            score: 90,
+            feedback: "Good",
+            submittedAt: (await submissionDoc(uid).get()).data()?.submittedAt,
+          }),
         }
       ),
       { params: Promise.resolve({ classId, assignmentId, studentId: uid }) }

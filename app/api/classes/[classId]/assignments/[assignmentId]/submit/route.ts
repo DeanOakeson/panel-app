@@ -435,8 +435,7 @@ export async function GET(
             feedback: grade?.feedback ?? "",
             gradedAt: grade?.gradedAt ?? null,
             resubmittedAfterGrading:
-              !!grade &&
-              Date.parse(submission.submittedAt) > Date.parse(grade.gradedAt),
+              !!grade && submission.submittedAt !== grade.submittedAt,
             fileUrl: error ? null : data.signedUrl,
           };
         })

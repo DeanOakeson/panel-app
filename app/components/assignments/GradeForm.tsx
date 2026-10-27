@@ -9,6 +9,8 @@ type GradeFormProps = {
   assignmentId: string;
   /** The student's uid, which is also their submission's id. */
   studentId: string;
+  /** The submittedAt of the submission the professor is looking at. */
+  submittedAt: string;
   points: number;
   /** Receives the student's uid and the grade the server saved. */
   onSaved: (studentId: string, grade: Grade) => void;
@@ -22,6 +24,7 @@ export default function GradeForm({
   classId,
   assignmentId,
   studentId,
+  submittedAt,
   points,
   onSaved,
 }: GradeFormProps) {
@@ -65,7 +68,11 @@ export default function GradeForm({
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ score: scoreValue, feedback: feedback.trim() }),
+          body: JSON.stringify({
+            score: scoreValue,
+            feedback: feedback.trim(),
+            submittedAt,
+          }),
         }
       );
 

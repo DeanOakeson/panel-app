@@ -150,6 +150,7 @@ export default function ProfessorSubmissions({
                                         classId={classId}
                                         assignmentId={assignment.id}
                                         studentId={submission.studentId}
+                                        submittedAt={submission.submittedAt}
                                         points={assignment.points}
                                         onSaved={onGraded}
                                     />

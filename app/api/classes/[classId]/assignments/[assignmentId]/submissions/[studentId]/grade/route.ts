@@ -6,13 +6,10 @@ type RouteContext = {
   params: Promise<{ classId: string; assignmentId: string; studentId: string }>;
 };
 
-// gRPC status Firestore returns when create() finds an existing document
-const ALREADY_EXISTS = 6;
-
 /**
  * Grades a student's submission with a score from 0 to the assignment's points
- * and optional feedback. Only the class's professor can grade, and each
- * submission can be graded once.
+ * and optional feedback. Only the class's professor can grade, each submission
+ * can be graded once, and `submittedAt` must match the version being graded.
  */
 export async function POST(request: NextRequest, { params }: RouteContext) {
   try {
@@ -27,26 +24,17 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const assignmentRef = getAdminDb()
+    const db = getAdminDb();
+    const assignmentRef = db
       .collection("classes")
       .doc(classId)
       .collection("assignments")
       .doc(assignmentId);
-    const [assignmentDoc, submissionDoc] = await Promise.all([
-      assignmentRef.get(),
-      assignmentRef.collection("submissions").doc(studentId).get(),
-    ]);
+    const assignmentDoc = await assignmentRef.get();
 
     if (!assignmentDoc.exists) {
       return NextResponse.json(
         { error: "Assignment not found." },
-        { status: 404 }
-      );
-    }
-
-    if (!submissionDoc.exists) {
-      return NextResponse.json(
-        { error: "Submission not found." },
         { status: 404 }
       );
     }
@@ -66,6 +54,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     const score = body.score;
     const feedback =
       typeof body.feedback === "string" ? body.feedback.trim() : "";
+    const submittedAt = body.submittedAt;
 
     if (
       typeof score !== "number" ||
@@ -86,26 +75,60 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const grade = {
-      score,
-      feedback,
-      gradedBy: access.uid,
-      gradedAt: new Date().toISOString(),
-    };
-
-    try {
-      await assignmentRef.collection("grades").doc(studentId).create(grade);
-    } catch (error) {
-      if ((error as { code?: number }).code === ALREADY_EXISTS) {
-        return NextResponse.json(
-          { error: "This submission has already been graded." },
-          { status: 409 }
-        );
-      }
-      throw error;
+    if (typeof submittedAt !== "string" || submittedAt === "") {
+      return NextResponse.json(
+        { error: "submittedAt of the reviewed submission is required." },
+        { status: 400 }
+      );
     }
 
-    return NextResponse.json({ grade }, { status: 201 });
+    const submissionRef = assignmentRef.collection("submissions").doc(studentId);
+    const gradeRef = assignmentRef.collection("grades").doc(studentId);
+
+    // Reading the submission in the transaction keeps a resubmission from
+    // landing between the version check and the grade write
+    const result = await db.runTransaction(async (transaction) => {
+      const [submissionDoc, gradeDoc] = await transaction.getAll(
+        submissionRef,
+        gradeRef
+      );
+
+      if (!submissionDoc.exists) {
+        return { error: "Submission not found.", status: 404 };
+      }
+
+      if (submissionDoc.data()?.submittedAt !== submittedAt) {
+        return {
+          error:
+            "The student resubmitted after you opened this submission. Reload the page to see the new file.",
+          status: 409,
+        };
+      }
+
+      if (gradeDoc.exists) {
+        return { error: "This submission has already been graded.", status: 409 };
+      }
+
+      const grade = {
+        score,
+        feedback,
+        submittedAt,
+        gradedBy: access.uid,
+        gradedAt: new Date().toISOString(),
+      };
+      transaction.create(gradeRef, grade);
+
+      return { grade };
+    });
+
+    if ("error" in result) {
+      return NextResponse.json(
+        { error: result.error },
+        { status: result.status }
+      );
+    }
+
+    return NextResponse.json({ grade: result.grade }, { status: 201 });
   } catch (error) {
     console.error(
       "POST /api/classes/[classId]/assignments/[assignmentId]/submissions/[studentId]/grade failed:",

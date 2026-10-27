@@ -32,7 +32,7 @@ export type Submission = {
     feedback: string;
     /** ISO 8601 string. Null until graded. */
     gradedAt: string | null;
-    /** Set on a professor's list. True when the file changed after it was graded. */
+    /** Set on a professor's list. True when the graded file has been replaced. */
     resubmittedAfterGrading?: boolean;
     fileUrl: string | null;
 };
@@ -44,6 +44,8 @@ export type Submission = {
 export type Grade = {
     score: number;
     feedback: string;
+    /** The graded submission's submittedAt, which identifies the file version. */
+    submittedAt: string;
     /** The grading professor's uid. */
     gradedBy: string;
     /** ISO 8601 string. */
