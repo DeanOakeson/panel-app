@@ -155,7 +155,8 @@ export async function POST(req: Request) {
 /**
  * ADMIN-ONLY. Lists users, optionally filtered by role:
  * GET /api/admin/users?role=professor
- * Returns uid, name, and email only.
+ * Returns uid, name, email, and role. Role is included because the admin user
+ * list edits it; the filter values are unchanged.
  */
 export async function GET(req: Request) {
   try {
@@ -194,6 +195,7 @@ export async function GET(req: Request) {
         uid: doc.id,
         name: (doc.data().name as string | undefined) ?? "",
         email: (doc.data().email as string | undefined) ?? "",
+        role: (doc.data().role as string | undefined) ?? "",
       }))
       .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
 
