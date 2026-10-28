@@ -235,3 +235,74 @@ heads, `main`, `adminview` and six `professor/*`, none belonging to this ticket)
 objects behind a deleted submission are not deleted by the cascade: no delete path in this app
 removes storage objects, including the platform's own class-delete route, and adding it here only
 for user deletion would need a bucket decision outside END-22. Flagged, not silently expanded.
+
+---
+
+## Re-anchor record + fresh green proof (run 23968aa0, 2026-10-28)
+
+Branch drift, per CEO instruction `ec7b3cfd` on END-31: `local/admin-sprint` had been moved back to
+`81eac6b` (= `main`) at 2026-10-27 18:14:27 MDT (`git reflog show local/admin-sprint`, entry
+`reset: moving to main`). No content was lost — the pre-reset tip `6968f4b` was still in the object
+store and contained the whole composed sprint. Fix applied was pointer-only, no rebase, no new
+history, no branch deletions:
+
+```
+git checkout main
+git branch -f local/admin-sprint 6968f4b
+```
+
+Post-fix shape, matching the expected numbers exactly:
+
+- `git rev-parse local/admin-sprint` → `6968f4b`
+- `git log --oneline main..local/admin-sprint | wc -l` → **19**
+- `git diff --stat main..local/admin-sprint` → **21 files changed, 3514 insertions(+), 36 deletions(-)**
+- Shared worktree `~/panel-app` left checked out on `main`, `git status --porcelain` empty
+- Package ancestry re-checked in this run: `95deb20` (END-20), `853f9b4` (END-21), `72f8fe9` (END-22),
+  `2d4c47b` (END-26), `c8afba0` (END-27) are all ancestors of `6968f4b`
+- Remote stayed read-only: `git fetch --prune` + `git ls-remote` only. `origin` still exposes exactly
+  8 heads (`main`, `adminview`, six `professor/*`). No push, no PR, no remote ref created or deleted.
+
+### Fresh green numbers — this run
+
+Run in a throwaway worktree `/mnt/scratch/panel-end31-reanchor` created detached at `6968f4b`, with a
+real copied `node_modules` (741 entries, directory not symlink) and its own `.env.local`, emulators on
+alternate ports via a scratch-only `firebase.test.json` (auth 9299, firestore 8280, UI off) so the run
+could not collide with a concurrent sibling run on 9099/8080:
+
+- `npx tsc --noEmit -p tsconfig.json` → exit **0**
+- `npm run lint` → exit **0**, zero findings
+- full emulator suite (`firebase emulators:exec --only auth,firestore "vitest run"`) → exit **0**,
+  `Test Files 22 passed (22)` / `Tests 341 passed (341)`, duration 61s, **zero failed, zero skipped**
+- `npm run build` → exit **0**; `/admin/classes/[classId]` and `/api/admin/classes/[classId]` both
+  dynamic (ƒ) in the route manifest, `/admin/users` static
+
+### Failing-file baselining (END-31 addendum `d39145a8`): nothing to baseline, and the cited counts
+### do not correspond to any tree in this repo
+
+The addendum asked for a solo `main`-worktree baseline run for *every* failing test file, against the
+independent runs cited as `Test Files 5 failed | 21 passed (26)` / `Tests 8 failed | 337 passed (345)`.
+My full-suite run on the re-anchored tree had **no failing files at all**, so step 2 had nothing to
+consume and I ran zero baseline runs (the exemption went unused).
+
+The cited counts are also not reproducible against any tree I can name, which is worth flagging before
+anyone treats those 8 failures as a known-good baseline:
+
+- `6968f4b` has **22** `*.test.ts` files under `__tests__` (plus `helpers/emulators.ts` and
+  `setup.ts`, which are not test files); `main` (`81eac6b`) has **16**. Neither is 26.
+- The named file `__tests__/api/admin/adminCourses.test.ts` **does not exist** — not in `main`, not in
+  `6968f4b`, not in any local or remote ref (`for-each-ref` sweep across all refs), not on disk in any
+  worktree under `/mnt/scratch`, and not in the teammate branch `adminview` (`24a4f5c`). The admin
+  course test file in this repo is `__tests__/api/admin/classes.test.ts`, which is on both `main` and
+  this branch and passed here.
+- The three END-22 verification tickets the counts are attributed to are not verification reports of a
+  failed suite: END-38 and END-40 are **cancelled** ("END-22 was accepted and closed at the human's
+  approval (interaction 2ace3b8e, accepted 23:50Z) … its run ended with no report posted") and END-39
+  is **done** with "8/8 PASS. No contradiction with the END-22 numbers" — that is 8 *claims checked*,
+  not 8 *tests failed*. The "8 failed" and the "8/8 PASS" are almost certainly the same number read
+  two different ways.
+
+So the honest verdict for the branch, from this run: **341 passed / 0 failed at `6968f4b`, green in
+absolute terms, not merely green relative to `main`.** No pre-existing-failure exemption was needed
+because there were no failures to exempt. If a future run does produce failures, baseline it on plain
+`main` in a throwaway worktree as the addendum specifies — that procedure is sound; it just had no
+input this time.
