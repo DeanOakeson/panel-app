@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 
@@ -28,6 +28,7 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [enrollingId, setEnrollingId] = useState<string | null>(null);
+  const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
   const [enrollError, setEnrollError] = useState<{ id: string; message: string } | null>(null);
 
   const load = useCallback(async (user: User) => {
@@ -109,6 +110,48 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
     }
   }
 
+  /**
+   * Clears the signed-in student's own pending request. DELETE
+   * /api/classes/{classId}/enroll answers `{withdrawn:true}` (the row drops
+   * back to "Request"), 404 when nothing is pending, and 409 when the student
+   * is actually enrolled — leaving a course is the unenroll path, so the
+   * server refuses it and the message is shown as-is. Withdraw is only ever
+   * rendered for a pending request, never for an enrollment (the `c.enrolled`
+   * branch wins above).
+   */
+  async function withdraw(classId: string) {
+    if (withdrawingId) return;
+
+    const user = getFirebaseAuth().currentUser;
+    if (!user) {
+      setEnrollError({ id: classId, message: "Please sign in again." });
+      return;
+    }
+
+    setWithdrawingId(classId);
+    setEnrollError(null);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`/api/classes/${classId}/enroll`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to withdraw the request.");
+
+      setClasses((current) =>
+        current.map((c) => (c.id === classId ? { ...c, requested: false } : c))
+      );
+    } catch (err) {
+      setEnrollError({
+        id: classId,
+        message: err instanceof Error ? err.message : "Failed to withdraw the request.",
+      });
+    } finally {
+      setWithdrawingId(null);
+    }
+  }
+
   const visible = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return classes;
@@ -128,7 +171,7 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
             Browse courses
           </h2>
           <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">
-            Enroll in a course to see its assignments and materials.
+            Requests go to an administrator for approval before the course appears in My classes.
           </p>
         </div>
 
@@ -198,7 +241,10 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
                   Enrolled
                 </span>
               ) : c.requested ? (
-                <Fragment>
+                /* A pending request only: the c.enrolled branch above owns
+                   real roster entries, so Withdraw is never offered for an
+                   enrollment -- leaving a course is the unenroll path. */
+                <span className="flex items-center gap-2">
                   <span
                     className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
                     title="An administrator still needs to approve this request."
@@ -208,7 +254,15 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
                   <span className="text-xs text-gray-500 dark:text-zinc-400">
                     Waiting for approval
                   </span>
-                </Fragment>
+                  <button
+                    type="button"
+                    onClick={() => void withdraw(c.id)}
+                    disabled={withdrawingId !== null}
+                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-60 dark:border-zinc-700 dark:text-gray-300 dark:hover:bg-zinc-800"
+                  >
+                    {withdrawingId === c.id ? "Withdrawing..." : "Withdraw"}
+                  </button>
+                </span>
               ) : (
                 <button
                   type="button"
