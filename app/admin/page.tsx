@@ -17,6 +17,7 @@ type Summary = {
   students: number;
   professors: number;
   courses: number;
+  pendingRequests: number;
   classes: CourseRow[];
 };
 
@@ -60,6 +61,7 @@ export default function AdminHome() {
         students: data.students ?? 0,
         professors: data.professors ?? 0,
         courses: data.courses ?? 0,
+        pendingRequests: data.pendingRequests ?? 0,
         classes: data.classes ?? [],
       });
     } catch (err) {
@@ -86,6 +88,11 @@ export default function AdminHome() {
    * The two user tiles link into the user list with the role filter already
    * applied: /admin/users reads `?role=` and preselects the matching tab, so
    * these are real links now rather than "coming soon" placeholders.
+   *
+   * The fourth tile counts PENDING ENROLLMENT REQUESTS (END-54), not
+   * enrollments: it is a queue length, kept off the course table's `Students`
+   * column on purpose so "who is in this course" and "who is waiting for it"
+   * can never be read as the same number.
    */
   const tiles: AdminTile[] = summary
     ? [
@@ -106,6 +113,12 @@ export default function AdminHome() {
           count: summary.courses,
           action: "View all courses",
           href: "/admin/classes",
+        },
+        {
+          label: "Pending enrollment requests",
+          count: summary.pendingRequests,
+          action: "Review enrollment requests",
+          href: "/admin/requests",
         },
       ]
     : [];

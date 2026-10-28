@@ -19,23 +19,33 @@ const adminHome = readFileSync(
   "utf8"
 );
 
-/** Every distinct `href="/admin/..."` literal in the admin home page. */
+/** Every distinct `/admin/...` link the admin home renders. */
 function adminHrefLinks(source: string): string[] {
   const found = new Set<string>();
-  for (const match of source.matchAll(/href="(\/admin\/[^"]*)"/g)) {
+  // JSX attribute form (`href="/admin/users"`) and the tile-object form
+  // (`href: "/admin/requests"`) both produce a real link, so both are pinned.
+  for (const match of source.matchAll(/href(?:="|:\s*")(\/admin\/[^"]*)"/g)) {
     found.add(match[1]);
   }
   return [...found];
 }
 
-/** Does a page exist at app{href}/page.tsx? */
+/** Does a page exist at app{href}/page.tsx? Any `?query` is part of the link, not the path. */
 function pageExists(href: string): boolean {
-  return existsSync(path.join(repoRoot, "app", ...href.split("/"), "page.tsx"));
+  const [pathname] = href.split("?");
+  return existsSync(path.join(repoRoot, "app", ...pathname.split("/"), "page.tsx"));
 }
 
 describe("admin home navigation", () => {
   it("links to the user list (/admin/users)", () => {
     expect(adminHrefLinks(adminHome)).toContain("/admin/users");
+  });
+
+  // END-54: the whole point of the ticket is that an admin can find out which
+  // course a student asked to join, and a queue nobody can navigate to is no
+  // answer at all. The tile count and the link are one object in app/admin/page.tsx.
+  it("links to the enrollment request queue (/admin/requests)", () => {
+    expect(adminHrefLinks(adminHome)).toContain("/admin/requests");
   });
 
   it("every /admin/* link points at a page that exists", () => {

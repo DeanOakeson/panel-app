@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 
@@ -13,10 +13,12 @@ type AvailableClass = {
   section: string;
   professorName: string | null;
   enrolled: boolean;
+  /** True while an admin has not yet approved this course (END-54). */
+  requested: boolean;
 };
 
 type BrowseCoursesProps = {
-  /** Called after a successful enrollment so the page can refresh "My classes". */
+  /** Called after a request is sent so the page can refresh "My classes". */
   onEnrolled: () => void | Promise<void>;
 };
 
@@ -59,7 +61,16 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
     if (user) void load(user);
   }
 
-  async function enroll(classId: string) {
+  /**
+   * Sends a course request. This no longer enrolls: POST
+   * /api/classes/{classId}/enroll records a pending request an admin has to
+   * approve on /admin/requests (END-54). The server answers `{requested:true}`
+   * for a new request, `{requested:true, alreadyRequested:true}` when one is
+   * already waiting, and `{alreadyEnrolled:true}` if the student is on the
+   * roster already — all three leave the row in a settled state, so the badge
+   * is refreshed from whichever one came back.
+   */
+  async function request(classId: string) {
     if (enrollingId) return;
 
     const user = getFirebaseAuth().currentUser;
@@ -77,16 +88,21 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to enroll.");
+      if (!res.ok) throw new Error(data.error || "Failed to request the course.");
 
+      const enrolledNow = Boolean(data.alreadyEnrolled);
       setClasses((current) =>
-        current.map((c) => (c.id === classId ? { ...c, enrolled: true } : c))
+        current.map((c) =>
+          c.id === classId
+            ? { ...c, enrolled: enrolledNow, requested: !enrolledNow }
+            : c
+        )
       );
       await onEnrolled();
     } catch (err) {
       setEnrollError({
         id: classId,
-        message: err instanceof Error ? err.message : "Failed to enroll.",
+        message: err instanceof Error ? err.message : "Failed to request the course.",
       });
     } finally {
       setEnrollingId(null);
@@ -176,17 +192,31 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
               </div>
 
               {c.enrolled ? (
+                /* Only for an actual roster entry — a pending request must not
+                   read as enrolled (END-54). */
                 <span className="rounded-full bg-green-100 px-3 py-1 text-sm font-semibold text-green-800 dark:bg-green-900/40 dark:text-green-300">
                   Enrolled
                 </span>
+              ) : c.requested ? (
+                <Fragment>
+                  <span
+                    className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                    title="An administrator still needs to approve this request."
+                  >
+                    Requested
+                  </span>
+                  <span className="text-xs text-gray-500 dark:text-zinc-400">
+                    Waiting for approval
+                  </span>
+                </Fragment>
               ) : (
                 <button
                   type="button"
-                  onClick={() => void enroll(c.id)}
+                  onClick={() => void request(c.id)}
                   disabled={enrollingId !== null}
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
                 >
-                  {enrollingId === c.id ? "Enrolling..." : "Enroll"}
+                  {enrollingId === c.id ? "Requesting..." : "Request"}
                 </button>
               )}
             </li>
