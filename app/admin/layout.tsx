@@ -1,12 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { onAuthStateChanged, User } from "firebase/auth";
+import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 
 /**
  * Gates everything under /admin: must be signed in AND have role === "admin".
+ *
+ * Also the one place the admin chrome is rendered: every page under /admin
+ * inherits the header below (a link back to /admin plus Log out) so the section
+ * behaves like one app instead of five pages that each invented their own
+ * controls — the page-local Log out that used to sit on /admin/professors is
+ * gone. The zinc/blue palette matches the pages added this sprint (/admin,
+ * /admin/users, /admin/classes).
  *
  * NOTE (by design, to be hardened later): the role is read from Firestore via
  * the existing GET /api/users endpoint, and current Firestore rules are open
@@ -21,6 +29,21 @@ export default function AdminLayout({
   const [state, setState] = useState<"loading" | "denied" | "ready">(
     "loading"
   );
+
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  /** Same contract as app/components/Sidebar.tsx: sign out, then land on "/". */
+  async function handleLogout() {
+    setLoggingOut(true);
+
+    try {
+      await signOut(getFirebaseAuth());
+      router.replace("/");
+    } catch (error) {
+      console.error("Logout failed:", error);
+      setLoggingOut(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -85,5 +108,44 @@ export default function AdminLayout({
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {/*
+        Shared admin chrome. Rendered once, here, so Log out and a way back to
+        the dashboard exist on every /admin page; the page-local Log out that
+        used to sit on /admin/professors is gone. Class strings are lifted from
+        the sprint pages (the ADMIN chip, the zinc bordered button) so the
+        header reads as part of the same UI.
+      */}
+      <header className="border-b border-zinc-200 dark:border-zinc-800">
+        <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-3 px-8 py-3">
+          <div className="flex items-center gap-3">
+            <span className="rounded bg-slate-800 px-2 py-1 text-xs font-semibold text-blue-300">
+              ADMIN
+            </span>
+            <span className="text-sm text-zinc-500">School administration</span>
+          </div>
+
+          <nav className="flex flex-wrap items-center gap-3" aria-label="Admin">
+            <Link
+              href="/admin"
+              className="rounded border border-zinc-300 px-4 py-2 font-semibold text-zinc-800 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              Admin panel
+            </Link>
+            <button
+              type="button"
+              onClick={() => void handleLogout()}
+              disabled={loggingOut}
+              className="rounded border border-zinc-300 px-4 py-2 font-semibold text-zinc-800 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              {loggingOut ? "Logging out..." : "Log out"}
+            </button>
+          </nav>
+        </div>
+      </header>
+
+      {children}
+    </>
+  );
 }

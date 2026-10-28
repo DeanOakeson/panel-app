@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import {
@@ -35,10 +36,41 @@ async function currentIdToken(): Promise<string | null> {
   return user ? await user.getIdToken() : null;
 }
 
+/**
+ * The role filter tabs are also the target of the dashboard's "View all
+ * students" / "View all professors" links: `/admin/users?role=student` opens
+ * with that tab already selected. A role this page cannot filter on is ignored
+ * and the list loads unfiltered, so a hand-typed `?role=` never dead-ends.
+ */
+function initialRoleFilter(raw: string | null): (typeof ROLE_FILTERS)[number] {
+  return (ROLE_FILTERS as readonly string[]).includes(raw ?? "")
+    ? (raw as (typeof ROLE_FILTERS)[number])
+    : "all";
+}
+
 export default function AdminUsersPage() {
+  // `useSearchParams` needs a Suspense boundary above it, which the app router
+  // requires for the page's prerender; everything else is the page itself.
+  return (
+    <Suspense fallback={<p className="p-8 text-zinc-500">Loading users...</p>}>
+      <AdminUsersInner />
+    </Suspense>
+  );
+}
+
+function AdminUsersInner() {
+  const searchParams = useSearchParams();
   const [me, setMe] = useState<{ uid: string } | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
-  const [filter, setFilter] = useState<(typeof ROLE_FILTERS)[number]>("all");
+
+  // The URL owns the filter until the admin clicks a tab: `?role=student` from
+  // the dashboard opens on the students tab, and a later tab click wins over
+  // the URL without rewriting it. Deriving `filter` from both, rather than
+  // copying the query into state in an effect, keeps a URL change and a tab
+  // click from cascading re-renders through each other.
+  const [filterOverride, setFilterOverride] =
+    useState<(typeof ROLE_FILTERS)[number] | null>(null);
+  const filter = filterOverride ?? initialRoleFilter(searchParams.get("role"));
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -264,7 +296,7 @@ export default function AdminUsersPage() {
           <button
             key={role}
             type="button"
-            onClick={() => setFilter(role)}
+            onClick={() => setFilterOverride(role)}
             className={`rounded px-3 py-1 text-sm font-semibold capitalize ${
               filter === role
                 ? "bg-blue-600 text-white"
