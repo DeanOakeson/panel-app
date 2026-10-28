@@ -1,34 +1,115 @@
-import Link from "next/link";
+"use client";
 
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { onAuthStateChanged, type User } from "firebase/auth";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
+
+/** Mirrors the ClassSummary shape returned by GET /api/admin/summary. */
 type CourseRow = {
   id: string;
   name: string;
-  professor: string | null;
+  professor: { uid: string; name: string; email: string } | null;
   studentCount: number;
 };
 
-// Placeholder data until user and course records come from Firestore
-const counts = { students: 0, professors: 0, courses: 0 };
-
-const courses: CourseRow[] = [
-  { id: "cs6300", name: "CS 6300 Software Engineering Leadership", professor: null, studentCount: 0 },
-];
+type Summary = {
+  students: number;
+  professors: number;
+  courses: number;
+  classes: CourseRow[];
+};
 
 type AdminTile = {
   label: string;
   count: number;
   action: string;
-  /** Present once the section exists; the other two are later tickets. */
-  href?: string;
+  href: string;
 };
 
-const tiles: AdminTile[] = [
-  { label: "Students", count: counts.students, action: "View all students" },
-  { label: "Professors", count: counts.professors, action: "View all professors" },
-  { label: "Courses", count: counts.courses, action: "View all courses", href: "/admin/classes" },
-];
-
+/**
+ * The admin landing page: how big the school is, and every course with its
+ * professor and enrolled-student count.
+ *
+ * Everything comes from GET /api/admin/summary — there are no placeholder
+ * constants left to drift from reality. That route shares lib/adminClasses.ts
+ * with GET /api/admin/classes, so a course here always reports what
+ * /admin/classes reports for the same document. Data is fetched with the
+ * signed-in admin's ID token, exactly like /admin/classes; the admin gate and
+ * the shared header (Admin panel link, Log out) live in app/admin/layout.tsx.
+ */
 export default function AdminHome() {
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const loadSummary = useCallback(async (user: User) => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch("/api/admin/summary", {
+        headers: { authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to load dashboard data.");
+
+      setSummary({
+        students: data.students ?? 0,
+        professors: data.professors ?? 0,
+        courses: data.courses ?? 0,
+        classes: data.classes ?? [],
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load dashboard data.");
+      setSummary(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(getFirebaseAuth(), (user) => {
+      if (user) void loadSummary(user);
+    });
+    return unsubscribe;
+  }, [loadSummary]);
+
+  function retry() {
+    const user = getFirebaseAuth().currentUser;
+    if (user) void loadSummary(user);
+  }
+
+  /**
+   * The two user tiles link into the user list with the role filter already
+   * applied: /admin/users reads `?role=` and preselects the matching tab, so
+   * these are real links now rather than "coming soon" placeholders.
+   */
+  const tiles: AdminTile[] = summary
+    ? [
+        {
+          label: "Students",
+          count: summary.students,
+          action: "View all students",
+          href: "/admin/users?role=student",
+        },
+        {
+          label: "Professors",
+          count: summary.professors,
+          action: "View all professors",
+          href: "/admin/users?role=professor",
+        },
+        {
+          label: "Courses",
+          count: summary.courses,
+          action: "View all courses",
+          href: "/admin/classes",
+        },
+      ]
+    : [];
+
   return (
     <main className="mx-auto w-full max-w-5xl p-8">
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
@@ -65,24 +146,42 @@ export default function AdminHome() {
         </div>
       </div>
 
+      {error && (
+        <div
+          role="alert"
+          className="mb-6 rounded border border-red-900 bg-red-950/40 p-4 text-sm text-red-300"
+        >
+          {error}{" "}
+          <button
+            type="button"
+            onClick={retry}
+            className="font-semibold text-red-200 underline hover:text-white"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       <div className="mb-10 grid grid-cols-1 gap-5 sm:grid-cols-3">
-        {tiles.map((t) => (
-          <div key={t.label} className="flex flex-col gap-2 rounded-xl border border-zinc-800 p-5">
-            <span className="text-sm text-zinc-400">{t.label}</span>
-            <span className="text-3xl font-bold">{t.count}</span>
-            {t.href ? (
+        {loading && !summary ? (
+          <p className="text-zinc-400">Loading dashboard data...</p>
+        ) : (
+          tiles.map((t) => (
+            <div key={t.label} className="flex flex-col gap-2 rounded-xl border border-zinc-800 p-5">
+              <span className="text-sm text-zinc-400">{t.label}</span>
+              <span className="text-3xl font-bold">{t.count}</span>
               <Link href={t.href} className="text-sm font-semibold text-blue-400 hover:underline">
                 {t.action}
               </Link>
-            ) : (
-              <span className="text-sm text-zinc-500">{t.action} · coming soon</span>
-            )}
-          </div>
-        ))}
+            </div>
+          ))
+        )}
       </div>
 
       <h2 className="mb-3 text-xl font-semibold">Courses</h2>
-      {courses.length === 0 ? (
+      {loading && !summary ? (
+        <p className="text-zinc-400">Loading courses...</p>
+      ) : !summary || summary.classes.length === 0 ? (
         <p className="text-zinc-400">No courses yet. Create one to get started.</p>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
@@ -95,10 +194,12 @@ export default function AdminHome() {
               </tr>
             </thead>
             <tbody>
-              {courses.map((c) => (
+              {summary.classes.map((c) => (
                 <tr key={c.id} className="border-t border-zinc-800">
                   <td className="px-4 py-3">{c.name}</td>
-                  <td className="px-4 py-3">{c.professor ?? <span className="text-zinc-500">Unassigned</span>}</td>
+                  <td className="px-4 py-3">
+                    {c.professor?.name || <span className="text-zinc-500">Unassigned</span>}
+                  </td>
                   <td className="px-4 py-3">{c.studentCount}</td>
                 </tr>
               ))}
