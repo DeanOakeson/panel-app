@@ -18,6 +18,8 @@ type ClassDetails = {
   term: string;
   section: string;
   professor_id?: string;
+  // Absent on classes that predate the flag; absent means open.
+  enrollmentOpen?: boolean;
 };
 
 type StudentOption = { uid: string; name: string; email: string };
@@ -57,6 +59,11 @@ export default function AdminClassDetailPage() {
   });
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState("");
+
+  // Enrollment-open switch (PANEL-26). Its own one-click control, separate
+  // from the metadata form: closing enrollment is a single deliberate action,
+  // not a field buried in an edit.
+  const [togglingEnrollment, setTogglingEnrollment] = useState(false);
 
   const startEdit = useCallback(() => {
     if (!klass) return;
@@ -145,6 +152,44 @@ export default function AdminClassDetailPage() {
       setEditError("Something went wrong. Please try again.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleToggleEnrollment() {
+    if (!klass) return;
+    const token = await getFirebaseAuth().currentUser?.getIdToken();
+    if (!token) return;
+    setTogglingEnrollment(true);
+    setActionError("");
+    setActionSuccess("");
+    try {
+      const res = await fetch(`/api/admin/classes/${classId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        // Absent flag means open, so a class that predates the flag closes
+        // correctly on the first click.
+        body: JSON.stringify({
+          enrollmentOpen: !(klass.enrollmentOpen ?? true),
+        }),
+      });
+      const data = await res.json().catch(() => ({} as Record<string, unknown>));
+      if (!res.ok) {
+        setActionError((data.error as string) || `Request failed (${res.status}).`);
+        return;
+      }
+      setActionSuccess(
+        klass.enrollmentOpen === false
+          ? "Enrollment opened."
+          : "Enrollment closed. Students can no longer join this course."
+      );
+      await getDetails(token);
+    } catch {
+      setActionError("Something went wrong. Please try again.");
+    } finally {
+      setTogglingEnrollment(false);
     }
   }
 
@@ -348,12 +393,25 @@ export default function AdminClassDetailPage() {
             Course details
           </h2>
           {!editing && (
-            <button
-              onClick={startEdit}
-              className="rounded border border-blue-300 px-3 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:hover:bg-blue-950"
-            >
-              Edit course
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => void handleToggleEnrollment()}
+                disabled={togglingEnrollment}
+                className="rounded border border-blue-300 px-3 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-800 dark:hover:bg-blue-950"
+              >
+                {togglingEnrollment
+                  ? "Saving..."
+                  : klass.enrollmentOpen === false
+                    ? "Open enrollment"
+                    : "Close enrollment"}
+              </button>
+              <button
+                onClick={startEdit}
+                className="rounded border border-blue-300 px-3 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:hover:bg-blue-950"
+              >
+                Edit course
+              </button>
+            </div>
           )}
         </div>
 
@@ -376,6 +434,12 @@ export default function AdminClassDetailPage() {
             <div>
               <dt className="text-xs text-zinc-500">Section</dt>
               <dd className="text-gray-900 dark:text-white">{klass.section}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Enrollment</dt>
+              <dd className="text-gray-900 dark:text-white">
+                {klass.enrollmentOpen === false ? "Closed" : "Open"}
+              </dd>
             </div>
           </dl>
         ) : (

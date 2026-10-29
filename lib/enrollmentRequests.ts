@@ -1,5 +1,6 @@
 import type { DocumentData } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebaseAdmin";
+import { isEnrollmentOpen } from "@/lib/classAccess";
 
 /**
  * The single place enrollment requests are read and written.
@@ -294,6 +295,11 @@ export async function approveEnrollmentRequest(
     // approving a request must not be able to hand a roster seat to a profile
     // that is not a student (a role flip between request and approval, or a
     // hand-crafted request).
+    //
+    // Deliberately NOT gated on the enrollment-open flag (PANEL-26): an admin
+    // approving a queued request is an explicit decision about a real row, so
+    // a course closed after the student asked still honors the ask. Only the
+    // student-driven path (selfEnroll) is gated.
     if (userDoc.data()?.role !== "student") return { kind: "notStudent" as const };
     if (enrollmentSnapshot.docs.length > 0) return { kind: "alreadyEnrolled" as const };
 
@@ -324,10 +330,11 @@ export async function approveEnrollmentRequest(
  * keep asking for a decision that the student has already satisfied.
  *
  * The race the transaction exists for: the student is mid-enroll while an
- * admin approves the same request. Exactly one of the two writes the roster
- * doc first; the loser sees the doc in its re-read and reports
- * `alreadyEnrolled` instead of writing a duplicate. The pending entry is
- * cleared by whichever write won, so the queue drains either way.
+ * admin approves the same request, or while an admin closes the course to
+ * enrollment (PANEL-26). Exactly one of the two writes first; the loser sees
+ * the changed state in its re-read and reports `alreadyEnrolled` or
+ * `classClosed` instead of writing through it. The pending entry is cleared
+ * by whichever write won, so the queue drains either way.
  */
 export async function selfEnroll(
   uid: string,
@@ -335,6 +342,7 @@ export async function selfEnroll(
 ): Promise<
   | { kind: "enrolled" }
   | { kind: "alreadyEnrolled" }
+  | { kind: "classClosed" }
   | { kind: "noProfile" }
   | { kind: "notStudent" }
 > {
@@ -342,11 +350,15 @@ export async function selfEnroll(
   const userRef = db.collection("users").doc(uid);
 
   return db.runTransaction(async (transaction) => {
-    const [userDoc, enrollmentSnapshot] = await Promise.all([
+    const [userDoc, enrollmentSnapshot, classDoc] = await Promise.all([
       transaction.get(userRef),
       transaction.get(
         userRef.collection("classes").where("class_id", "==", classId).limit(1)
       ),
+      // The class doc rides in the same transaction as the roster write, so
+      // the open/closed state the route checked cannot be flipped behind a
+      // POST that is already in flight (PANEL-26).
+      transaction.get(db.collection("classes").doc(classId)),
     ]);
 
     if (!userDoc.exists) return { kind: "noProfile" as const };
@@ -355,6 +367,10 @@ export async function selfEnroll(
     // check and this write must not put a professor onto a roster.
     if (userDoc.data()?.role !== "student") return { kind: "notStudent" as const };
     if (enrollmentSnapshot.docs.length > 0) return { kind: "alreadyEnrolled" as const };
+    // Checked after alreadyEnrolled on purpose: closing a course must not
+    // turn an enrolled student's repeat click into an error — the idempotent
+    // answer wins for someone already on the roster.
+    if (!isEnrollmentOpen(classDoc.data())) return { kind: "classClosed" as const };
 
     transaction.set(userRef.collection("classes").doc(classId), {
       class_id: classId,

@@ -28,8 +28,12 @@ type RouteContext = { params: Promise<{ classId: string }> };
  *   matches on the `class_id` field, not the doc id). Idempotency, unchanged
  *   from every version of this route: a double click cannot create two
  *   roster docs, and no pending entry is created behind their back.
- * - 401/403/404 — unchanged, all from `getClassAccess`: only a student who is
- *   not on the roster may enroll, and the class must exist.
+ * - 401/404 — unchanged, all from `getClassAccess`: the caller must be
+ *   signed in and the class must exist.
+ * - 403 — the caller is not a student, or the course is not open for
+ *   enrollment (PANEL-26). The open/closed state is checked here from
+ *   `getClassAccess` and checked AGAIN inside the enroll transaction, so an
+ *   admin closing the course while a POST is in flight still wins.
  */
 export async function POST(request: NextRequest, { params }: RouteContext) {
   try {
@@ -48,6 +52,17 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       return NextResponse.json(
         { enrolled: true, alreadyEnrolled: true },
         { status: 200 }
+      );
+    }
+
+    // PANEL-26: a course the admin closed does not take self-enrollments, no
+    // matter that it exists and the caller is a student. The already-enrolled
+    // check above deliberately answers first — closing a course must not
+    // break the idempotent reply for someone already on the roster.
+    if (!access.classEnrollmentOpen) {
+      return NextResponse.json(
+        { error: "This course is not open for enrollment." },
+        { status: 403 }
       );
     }
 
@@ -74,6 +89,15 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       return NextResponse.json(
         { enrolled: true, alreadyEnrolled: true },
         { status: 200 }
+      );
+    }
+
+    if (outcome.kind === "classClosed") {
+      // The course was closed between the access check and the transaction;
+      // the transactional re-read saw the flag before any roster write.
+      return NextResponse.json(
+        { error: "This course is not open for enrollment." },
+        { status: 403 }
       );
     }
 

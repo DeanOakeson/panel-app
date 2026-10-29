@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { DocumentData } from "firebase-admin/firestore";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 
 export type ClassAccess = {
@@ -10,7 +11,22 @@ export type ClassAccess = {
   /** The signed-in user is a student enrolled in this class. */
   isEnrolledStudent: boolean;
   isAdmin: boolean;
+  /** The class currently accepts self-enrollment (PANEL-26). */
+  classEnrollmentOpen: boolean;
 };
+
+/**
+ * Whether a class document is open for self-enrollment (PANEL-26).
+ *
+ * `enrollmentOpen` is the class's only open/closed state, set by an admin from
+ * the course detail page. A document without the field is OPEN: every class
+ * that predates the flag would otherwise turn into a closed course silently,
+ * and a `false` that isn't a boolean (a legacy string, say) is not trusted as
+ * a close. Only an explicit `false` closes a course.
+ */
+export function isEnrollmentOpen(classData: DocumentData | undefined): boolean {
+  return classData?.enrollmentOpen !== false;
+}
 
 type AccessError = { error: NextResponse };
 
@@ -92,5 +108,6 @@ export async function getClassAccess(
     isClassProfessor,
     isEnrolledStudent,
     isAdmin: role === "admin",
+    classEnrollmentOpen: isEnrollmentOpen(classDoc.data()),
   };
 }

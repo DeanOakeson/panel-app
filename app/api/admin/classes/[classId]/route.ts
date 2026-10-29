@@ -81,9 +81,11 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 }
 
 /**
- * Edits a class's metadata: name, course code, year, term, section, and the
- * assigned professor. Only the fields present in the body are written, so a
- * form that sends just what the admin changed can't clobber anything else.
+ * Edits a class's metadata: name, course code, year, term, section, the
+ * assigned professor, and whether the course is open for enrollment
+ * (`enrollmentOpen`, PANEL-26). Only the fields present in the body are
+ * written, so a form that sends just what the admin changed can't clobber
+ * anything else.
  */
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
   try {
@@ -195,6 +197,19 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       // field drops the class from the old professor's list and adds it to the
       // new professor's list in one write — nothing else to keep in sync.
       updates.professor_id = professorId;
+    }
+
+    if ("enrollmentOpen" in body) {
+      // PANEL-26: the course's open/closed state. Strictly boolean so a
+      // hand-crafted `"false"` string or a 1 cannot be stored and re-read as
+      // something `isEnrollmentOpen` might misjudge.
+      if (typeof body.enrollmentOpen !== "boolean") {
+        return NextResponse.json(
+          { error: "Enrollment open must be true or false." },
+          { status: 400 }
+        );
+      }
+      updates.enrollmentOpen = body.enrollmentOpen;
     }
 
     if (Object.keys(updates).length === 0) {

@@ -375,6 +375,45 @@ describe("PATCH /api/admin/classes/[classId]", () => {
     expect(page.roster).toHaveLength(1);
     expect(page.roster[0]).toMatchObject({ uid: student.uid });
   });
+
+  // PANEL-26: the open/closed enrollment state is an admin-editable field that
+  // flips both ways and reads back through the detail GET.
+  it("flips the enrollment-open flag and reads it back", async () => {
+    await seedClass();
+    const admin = await createSignedInUser("admin@example.com", "admin");
+
+    const close = await PATCH(
+      patchRequest({ enrollmentOpen: false }, admin.idToken),
+      classParams
+    );
+    expect(close.status).toBe(200);
+    expect((await close.json()).class.enrollmentOpen).toBe(false);
+    expect((await classDoc()).enrollmentOpen).toBe(false);
+
+    const readBack = await GET(classRequest("GET", admin.idToken), classParams);
+    expect((await readBack.json()).class.enrollmentOpen).toBe(false);
+
+    const reopen = await PATCH(
+      patchRequest({ enrollmentOpen: true }, admin.idToken),
+      classParams
+    );
+    expect(reopen.status).toBe(200);
+    expect((await classDoc()).enrollmentOpen).toBe(true);
+  });
+
+  it("returns 400 for an enrollmentOpen that is not a boolean", async () => {
+    await seedClass();
+    const admin = await createSignedInUser("admin@example.com", "admin");
+
+    for (const bad of ["false", 1, null]) {
+      const res = await PATCH(
+        patchRequest({ enrollmentOpen: bad }, admin.idToken),
+        classParams
+      );
+      expect(res.status).toBe(400);
+    }
+    expect((await classDoc()).enrollmentOpen).toBeUndefined();
+  });
 });
 
 describe("DELETE /api/admin/classes/[classId]", () => {
@@ -534,6 +573,32 @@ describe("POST /api/admin/classes/[classId]/enrollments", () => {
       classParams
     );
     expect(res.status).toBe(409);
+  });
+
+  // PANEL-26: the flag gates the student-driven paths only. Roster management
+  // stays an explicit admin decision, closed course or not.
+  it("enrolls a student even when the course is closed to self-enrollment", async () => {
+    await seedClass();
+    await getAdminDb()
+      .collection("classes")
+      .doc(classId)
+      .set({ enrollmentOpen: false }, { merge: true });
+    const admin = await createSignedInUser("admin@example.com", "admin");
+    const student = await seedStudent();
+
+    const res = await POST(
+      enrollRequest(admin.idToken, { studentId: student.uid }),
+      classParams
+    );
+
+    expect(res.status).toBe(201);
+    const enrollment = await getAdminDb()
+      .collection("users")
+      .doc(student.uid)
+      .collection("classes")
+      .doc(classId)
+      .get();
+    expect(enrollment.exists).toBe(true);
   });
 });
 
