@@ -1,7 +1,14 @@
 // END-23 (dashboard): the /admin dashboard replaced its placeholder tiles with
 // real data from GET /api/admin/summary, logout moved from the /admin/professors
-// page into the shared app/admin/layout.tsx header, and the two user tiles now
-// deep-link into /admin/users with the role filter applied.
+// page into the shared admin header, and the two user tiles now deep-link into
+// /admin/users with the role filter applied.
+//
+// END-61 (merge of main): since #56/PANEL-84 the shared header is no longer
+// inline in app/admin/layout.tsx — it is app/components/admin/AdminHeader.tsx
+// (the bar itself, including the link back to /admin) plus
+// app/components/admin/LogoutButton.tsx (the sign-out). The layout only gates
+// and mounts them, so the assertions below read the two components that own the
+// behavior instead of the layout.
 //
 // Like __tests__/lib/adminNavLinks.test.ts, the repo has no DOM testing stack,
 // so this pins the page sources with readFileSync + regex instead of rendering.
@@ -38,6 +45,12 @@ function stripComments(source: string): string {
 
 const adminHome = stripComments(readSource("app", "admin", "page.tsx"));
 const adminLayout = stripComments(readSource("app", "admin", "layout.tsx"));
+const adminHeader = stripComments(
+  readSource("app", "components", "admin", "AdminHeader.tsx")
+);
+const logoutButton = stripComments(
+  readSource("app", "components", "admin", "LogoutButton.tsx")
+);
 const professorsPage = stripComments(readSource("app", "admin", "professors", "page.tsx"));
 const usersPage = stripComments(readSource("app", "admin", "users", "page.tsx"));
 
@@ -58,10 +71,14 @@ describe("admin dashboard (END-23)", () => {
   );
 
   it("the shared admin header owns sign-out and links back to /admin", () => {
-    // The layout is the only logout for the section: it calls signOut and offers
-    // a route home for the dashboard.
-    expect(adminLayout).toMatch(/\bsignOut\b/);
-    expect(adminLayout).toMatch(/href="\/admin"/);
+    // The header is the only logout for the section. Since #56 those two
+    // behaviors live in the extracted components rather than in the layout, so
+    // each is pinned where it is implemented: the button must actually call
+    // signOut, and the bar must carry the href home.
+    expect(logoutButton).toMatch(/\bsignOut\b/);
+    expect(adminHeader).toMatch(/href="\/admin"/);
+    // And the layout must still mount the bar, or "shared header" is a lie.
+    expect(adminLayout).toMatch(/<AdminHeader\b/);
   });
 
   it("the professors page has no page-local logout of its own", () => {

@@ -46,6 +46,14 @@ export type AdminGuardResult = AdminGranted | AdminDenied;
  * A test needs no helper from this module: build a `Request` with the token from
  * `createSignedInUser()` in `__tests__/helpers/emulators.ts` and call it directly.
  */
+/** verifyIdToken error codes that mean the token itself is bad. */
+const TOKEN_ERROR_CODES = new Set([
+  "auth/argument-error",
+  "auth/id-token-expired",
+  "auth/id-token-revoked",
+  "auth/invalid-id-token",
+]);
+
 export async function requireAdmin(request: Request): Promise<AdminGuardResult> {
   const authHeader = request.headers.get("authorization");
   const token = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1];
@@ -59,17 +67,28 @@ export async function requireAdmin(request: Request): Promise<AdminGuardResult> 
     };
   }
 
+  // A missing Firebase Admin config throws here, before the token check, so
+  // it reaches the caller's catch (a 500) instead of becoming a 401.
+  const auth = getAdminAuth();
   let uid: string;
 
   try {
-    uid = (await getAdminAuth().verifyIdToken(token)).uid;
-  } catch {
-    return {
-      error: NextResponse.json(
-        { error: "Invalid or expired authentication token." },
-        { status: 401 }
-      ),
-    };
+    uid = (await auth.verifyIdToken(token)).uid;
+  } catch (err) {
+    const code = (err as { code?: unknown } | null)?.code;
+
+    if (typeof code === "string" && TOKEN_ERROR_CODES.has(code)) {
+      return {
+        error: NextResponse.json(
+          { error: "Invalid or expired authentication token." },
+          { status: 401 }
+        ),
+      };
+    }
+
+    // Anything else (for example, Google's signing keys can't be fetched) is
+    // an outage, not a bad token: rethrow so the route answers 500.
+    throw err;
   }
 
   const userDoc = await getAdminDb().collection("users").doc(uid).get();
