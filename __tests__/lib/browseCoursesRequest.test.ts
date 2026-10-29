@@ -1,16 +1,19 @@
-// END-57 (browse UI, re-anchored onto 5ffbd22): the student action button is a
-// REQUEST, and a pending request can be withdrawn again.
+// END-60 (browse UI): self-enrollment is the normal path again — the student
+// action button is ENROLL, and it writes the roster doc directly (PANEL-26).
+// A request that is already in flight (pre-END-60 leftovers) keeps its
+// "Requested" badge and can still be withdrawn or decided by an admin.
 //
 // The row renders three states, in precedence: enrolled -> the green "Enrolled"
-// badge; a pending request -> the "Requested" badge plus a "Withdraw" button
-// (DELETE on the enroll route); otherwise -> the "Request" action button (POST
-// on the enroll route, in-flight label "Requesting...").
+// badge; an in-flight request -> the "Requested" badge plus a "Withdraw"
+// button (DELETE on the enroll route); otherwise -> the "Enroll" action button
+// (POST on the enroll route, in-flight label "Enrolling...").
 //
 // Like __tests__/lib/adminDashboard.test.ts, the repo has no DOM testing stack,
 // so this pins the component source with readFileSync + regex instead of
 // rendering. Server behaviour is NOT asserted here:
-// __tests__/api/classes/enroll.test.ts covers the route (200 withdrawn, 404
-// nothing pending, 409 enrolled) against the emulators.
+// __tests__/api/classes/enroll.test.ts covers the route (201 enrolled, 200
+// alreadyEnrolled, 200 withdrawn, 404 nothing pending, 409 enrolled) against
+// the emulators.
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -42,13 +45,13 @@ const browse = stripComments(readSource("app", "components", "classes", "BrowseC
 function rowBranches(source: string) {
   const enrolledAt = source.indexOf("c.enrolled ?");
   const requestedAt = source.indexOf("c.requested ?", enrolledAt);
-  const requestButtonAt = source.indexOf("void request(c.id)", requestedAt);
-  return { enrolledAt, requestedAt, requestButtonAt };
+  const enrollButtonAt = source.indexOf("void enroll(c.id)", requestedAt);
+  return { enrolledAt, requestedAt, enrollButtonAt };
 }
 
-describe("browse courses request + withdraw flow (END-57)", () => {
-  it("renders a Requested badge for a pending request, separate from the Enrolled badge", () => {
-    // The pending-request row carries a static "Requested" badge...
+describe("browse courses enroll + withdraw flow (END-60)", () => {
+  it("renders a Requested badge for an in-flight request, separate from the Enrolled badge", () => {
+    // The in-flight-request row carries a static "Requested" badge...
     expect(browse).toMatch(/>[\s\S]*?>\s*Requested\s*</);
     // ...plus a small "Withdraw" button next to it ("Withdrawing..." in flight).
     expect(browse).toMatch(
@@ -60,18 +63,18 @@ describe("browse courses request + withdraw flow (END-57)", () => {
     expect(browse).not.toMatch(/>[\s\S]*?>\s*Requested[\s\S]*?text-green-100/);
   });
 
-  it("offers Withdraw for a pending request only, never for an enrollment", () => {
+  it("offers Withdraw for an in-flight request only, never for an enrollment", () => {
     // Render precedence in the ternary chain: enrolled badge, then the
-    // requested branch (which owns the Withdraw button), then the Request
+    // requested branch (which owns the Withdraw button), then the Enroll
     // button. An enrolled row therefore cannot reach the Withdraw control.
-    const { enrolledAt, requestedAt, requestButtonAt } = rowBranches(browse);
+    const { enrolledAt, requestedAt, enrollButtonAt } = rowBranches(browse);
     expect(enrolledAt).toBeGreaterThan(-1);
     expect(requestedAt).toBeGreaterThan(enrolledAt);
-    expect(requestButtonAt).toBeGreaterThan(requestedAt);
+    expect(enrollButtonAt).toBeGreaterThan(requestedAt);
 
     const withdrawAt = browse.indexOf("void withdraw(c.id)");
     expect(withdrawAt).toBeGreaterThan(requestedAt);
-    expect(withdrawAt).toBeLessThan(requestButtonAt);
+    expect(withdrawAt).toBeLessThan(enrollButtonAt);
 
     // The green Enrolled badge sits before the requested branch, so the
     // enrolled row keeps its own badge and gets no button.
@@ -81,12 +84,13 @@ describe("browse courses request + withdraw flow (END-57)", () => {
     expect(enrolledBadgeAt).toBeLessThan(requestedAt);
   });
 
-  it("labels the action button Request, and the regex cannot match Enrolled", () => {
-    // \bEnroll\b would also match "Enrolled", so the pin uses lookarounds
-    // that exclude any character after the word.
-    expect(browse).toMatch(/"\s*Request\s*"/);
-    expect(browse).toMatch(/"\s*Requesting\.\.\.\s*"/);
-    expect(browse).not.toMatch(/"\s*Enroll(?!ed)\b[^"]*"/);
+  it("labels the action button Enroll — self-enrollment is the normal path", () => {
+    expect(browse).toMatch(/"\s*Enroll\s*"/);
+    expect(browse).toMatch(/"\s*Enrolling\.\.\.\s*"/);
+    // The old request-button labels are gone: the words would describe an
+    // exception as the normal path.
+    expect(browse).not.toMatch(/"\s*Requesting\.\.\.\s*"/);
+    expect(browse).not.toMatch(/>\s*Request\s*</);
   });
 
   it("still renders Enrolled, driven by the enrolled field", () => {
@@ -97,7 +101,7 @@ describe("browse courses request + withdraw flow (END-57)", () => {
     expect(browse).toMatch(/\bc\.enrolled\s*\?[\s\S]*?\bc\.requested\b/);
   });
 
-  it("creates a request with POST /enroll and withdraws with DELETE /enroll", () => {
+  it("enrolls with POST /enroll and withdraws with DELETE /enroll", () => {
     expect(browse).toMatch(
       /fetch\(\s*`\/api\/classes\/\$\{classId\}\/enroll`\s*,\s*\{[\s\S]*?method:\s*"POST"/
     );
@@ -106,22 +110,24 @@ describe("browse courses request + withdraw flow (END-57)", () => {
     );
   });
 
-  it("a successful withdraw clears the pending request locally, a successful request sets it", () => {
-    // The POST handler must not mark the row enrolled, and the DELETE handler
-    // must drop `requested` back to false so the row shows "Request" again.
-    expect(browse).toMatch(/requested:\s*!enrolledNow/);
+  it("a successful enroll marks the row enrolled and drops the pending flag", () => {
+    // The POST handler marks the row enrolled (the roster doc was written),
+    // and the DELETE handler drops `requested` back to false so the row shows
+    // the Enroll button again.
+    expect(browse).toMatch(/enrolled:\s*true,\s*requested:\s*false/);
     expect(browse).toMatch(/requested:\s*false/);
-    expect(browse).not.toMatch(/enrolled:\s*true\s*\}/);
   });
 
-  it("keeps a Withdraw request single-flight, like the request button", () => {
+  it("keeps a Withdraw request single-flight, like the enroll button", () => {
     expect(browse).toMatch(/\bif\s*\(\s*withdrawingId\s*\)\s*return/);
     expect(browse).toMatch(/disabled=\s*\{\s*withdrawingId !== null\s*\}/);
   });
 
-  it("the helper copy says a request needs approval and no longer promises assignments", () => {
-    expect(browse).toMatch(/approv/i);
-    expect(browse).toMatch(/administrator|admin/i);
+  it("the helper copy makes self-enrollment the normal path, not the exception", () => {
+    // "Choosing Enroll adds the course to My classes right away. An
+    // administrator can still decide a request that was already waiting."
+    expect(browse).toMatch(/adds the course to My classes right away/);
+    expect(browse).toMatch(/already waiting/);
     expect(browse).not.toMatch(/assignments/i);
   });
 });

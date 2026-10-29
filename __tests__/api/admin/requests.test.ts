@@ -4,12 +4,13 @@
 //   GET   /api/admin/requests                       -> the pending queue
 //   PATCH /api/admin/requests/{classId}/{studentId} -> approve or reject one
 //
-// Both are admin-gated by lib/adminGuard.ts, and both are the only way a
-// request becomes an enrollment: a student's own POST only records intent (see
-// __tests__/api/classes/enroll.test.ts). The tests below pin the three things
-// that make the ticket real — every row carries its course AND its student,
-// approving writes the roster and empties the queue in one step, and rejecting
-// empties the queue without touching the roster.
+// Since END-60 restored self-enrollment (PANEL-26), a student's own POST
+// enrolls them directly and clears their pending entry in the same step — the
+// queue exists for requests that are already in flight. The tests below pin
+// the three things that make the ticket real — every row carries its course
+// AND its student, approving writes the roster and empties the queue in one
+// step, and an approval that arrives after the student self-enrolled is a
+// clean no-op rather than an error or a duplicate.
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
@@ -290,7 +291,43 @@ describe("PATCH /api/admin/requests/[classId]/[studentId]", () => {
     ]);
   });
 
-  it("approve on a request that is not pending is a 409, not a silent enrollment", async () => {
+  // END-60: approve on a student who is already on the roster is a no-op, not
+  // an error — the request was satisfied by their own self-enroll (the normal
+  // path), and repeating a decision must be safe.
+  it("approve after the student already self-enrolled is a clean no-op", async () => {
+    // The student asks, then (normal path) enrolls themselves, which clears
+    // the pending entry and puts them on the roster.
+    await seedPendingRequest(studentUid, "cs6300", "2026-10-01T09:00:00.000Z");
+    const enrollRes = await requestCourse(
+      new NextRequest("http://localhost/api/classes/cs6300/enroll", {
+        method: "POST",
+        headers: { authorization: `Bearer ${studentToken}` },
+      }),
+      { params: Promise.resolve({ classId: "cs6300" }) }
+    );
+    expect(enrollRes.status).toBe(201);
+    expect(await requestRows(await listRequest(adminToken))).toEqual([]);
+
+    // The admin's stale queue view still shows the request; their Approve
+    // arrives after the fact and must be a no-op 200.
+    const res = await decideRequestFor("cs6300", studentUid, adminToken, "approve");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      approved: true,
+      enrolled: true,
+      alreadyEnrolled: true,
+      classId: "cs6300",
+      studentId: studentUid,
+    });
+
+    // No duplicate roster doc, nothing re-queued, nothing left pending.
+    expect((await enrollmentDocs(studentUid)).filter((d) => d.id === "cs6300")).toHaveLength(1);
+    expect(await pendingEntries(studentUid)).toEqual([]);
+    expect(await requestRows(await listRequest(adminToken))).toEqual([]);
+  });
+
+  it("approve on a student enrolled without a request is the same no-op", async () => {
     // Enrolled by the admin's "Add a student" control, with nothing queued.
     await getAdminDb()
       .collection("users")
@@ -301,7 +338,15 @@ describe("PATCH /api/admin/requests/[classId]/[studentId]", () => {
 
     const res = await decideRequestFor("cs6300", studentUid, adminToken, "approve");
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      approved: true,
+      enrolled: true,
+      alreadyEnrolled: true,
+      classId: "cs6300",
+      studentId: studentUid,
+    });
+    // Approve never mints a second enrollment for an existing one.
     expect((await enrollmentDocs(studentUid)).filter((d) => d.id === "cs6300")).toHaveLength(1);
   });
 
@@ -348,12 +393,13 @@ describe("PATCH /api/admin/requests/[classId]/[studentId]", () => {
     expect(await enrollmentDocs(studentUid)).toEqual([]);
   });
 
-  it("a rejected student may request the course again", async () => {
+  it("a rejected student enrolls themselves the normal way", async () => {
     await seedPendingRequest(studentUid, "cs6300", "2026-10-01T09:00:00.000Z");
     await decideRequestFor("cs6300", studentUid, adminToken, "reject");
 
-    // The student's own POST is the way back into the queue: rejection clears
-    // the entry rather than storing a refusal they could never undo.
+    // Rejection clears the entry rather than storing a refusal they could
+    // never undo — so the student's next move is the normal path: they enroll
+    // themselves, and no admin decision is needed.
     const res = await requestCourse(
       new NextRequest("http://localhost/api/classes/cs6300/enroll", {
         method: "POST",
@@ -363,9 +409,9 @@ describe("PATCH /api/admin/requests/[classId]/[studentId]", () => {
     );
 
     expect(res.status).toBe(201);
-    expect((await requestRows(await listRequest(adminToken))).map((r) => r.classId)).toEqual([
-      "cs6300",
-    ]);
+    expect(await res.json()).toEqual({ enrolled: true });
+    expect(await enrollmentDocs(studentUid)).toHaveLength(1);
+    expect(await requestRows(await listRequest(adminToken))).toEqual([]);
   });
 });
 

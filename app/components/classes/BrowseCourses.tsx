@@ -13,12 +13,16 @@ type AvailableClass = {
   section: string;
   professorName: string | null;
   enrolled: boolean;
-  /** True while an admin has not yet approved this course (END-54). */
+  /**
+   * True only for a request that is already in flight (END-54 leftovers).
+   * Choosing Enroll writes the roster doc directly (PANEL-26), so new rows
+   * never pass through this state.
+   */
   requested: boolean;
 };
 
 type BrowseCoursesProps = {
-  /** Called after a request is sent so the page can refresh "My classes". */
+  /** Called after an enroll succeeds so the page can refresh "My classes". */
   onEnrolled: () => void | Promise<void>;
 };
 
@@ -63,15 +67,15 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
   }
 
   /**
-   * Sends a course request. This no longer enrolls: POST
-   * /api/classes/{classId}/enroll records a pending request an admin has to
-   * approve on /admin/requests (END-54). The server answers `{requested:true}`
-   * for a new request, `{requested:true, alreadyRequested:true}` when one is
-   * already waiting, and `{alreadyEnrolled:true}` if the student is on the
-   * roster already — all three leave the row in a settled state, so the badge
-   * is refreshed from whichever one came back.
+   * Enrolls the signed-in student directly (PANEL-26): POST
+   * /api/classes/{classId}/enroll writes the roster doc themselves and clears
+   * any pending request for the course in the same step, so the row answers
+   * `{enrolled:true}` (201) and My classes refreshes right away. An admin
+   * approval can no longer be beat to the write, and the server's
+   * `{enrolled:true, alreadyEnrolled:true}` for a repeat click keeps the row
+   * settled instead of erroring.
    */
-  async function request(classId: string) {
+  async function enroll(classId: string) {
     if (enrollingId) return;
 
     const user = getFirebaseAuth().currentUser;
@@ -89,21 +93,18 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to request the course.");
+      if (!res.ok) throw new Error(data.error || "Failed to enroll in the course.");
 
-      const enrolledNow = Boolean(data.alreadyEnrolled);
       setClasses((current) =>
         current.map((c) =>
-          c.id === classId
-            ? { ...c, enrolled: enrolledNow, requested: !enrolledNow }
-            : c
+          c.id === classId ? { ...c, enrolled: true, requested: false } : c
         )
       );
       await onEnrolled();
     } catch (err) {
       setEnrollError({
         id: classId,
-        message: err instanceof Error ? err.message : "Failed to request the course.",
+        message: err instanceof Error ? err.message : "Failed to enroll in the course.",
       });
     } finally {
       setEnrollingId(null);
@@ -113,11 +114,11 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
   /**
    * Clears the signed-in student's own pending request. DELETE
    * /api/classes/{classId}/enroll answers `{withdrawn:true}` (the row drops
-   * back to "Request"), 404 when nothing is pending, and 409 when the student
-   * is actually enrolled — leaving a course is the unenroll path, so the
-   * server refuses it and the message is shown as-is. Withdraw is only ever
-   * rendered for a pending request, never for an enrollment (the `c.enrolled`
-   * branch wins above).
+   * back to the Enroll button), 404 when nothing is pending, and 409 when the
+   * student is actually enrolled — leaving a course is the unenroll path, so
+   * the server refuses it and the message is shown as-is. Withdraw is only
+   * ever rendered for a pending request, never for an enrollment (the
+   * `c.enrolled` branch wins above).
    */
   async function withdraw(classId: string) {
     if (withdrawingId) return;
@@ -171,7 +172,8 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
             Browse courses
           </h2>
           <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">
-            Requests go to an administrator for approval before the course appears in My classes.
+            Choosing Enroll adds the course to My classes right away. An
+            administrator can still decide a request that was already waiting.
           </p>
         </div>
 
@@ -266,11 +268,11 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
               ) : (
                 <button
                   type="button"
-                  onClick={() => void request(c.id)}
+                  onClick={() => void enroll(c.id)}
                   disabled={enrollingId !== null}
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
                 >
-                  {enrollingId === c.id ? "Requesting..." : "Request"}
+                  {enrollingId === c.id ? "Enrolling..." : "Enroll"}
                 </button>
               )}
             </li>

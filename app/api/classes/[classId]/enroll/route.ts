@@ -1,33 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  addEnrollmentRequest,
   removeEnrollmentRequest,
+  selfEnroll,
 } from "@/lib/enrollmentRequests";
 import { getClassAccess } from "@/lib/classAccess";
 
 type RouteContext = { params: Promise<{ classId: string }> };
 
 /**
- * Records the signed-in student's REQUEST to join a class. It no longer
- * enrolls them.
+ * Enrolls the signed-in student directly (PANEL-26).
  *
- * Enrollment was the one place in the product where a student could write
- * themselves onto a roster with no record of the ask and no one able to undo
- * it. This route now does what the professor-application flow does — record the
- * intent on the student's own user doc, and let an admin's approval make the
- * privileged write (see lib/enrollmentRequests.ts and
- * /api/admin/requests/[classId]/[studentId]).
+ * Self-enrollment is the normal path: the student's own POST writes the
+ * enrollment doc at `users/{uid}/classes/{classId}` — the same doc an admin's
+ * approval writes — and answers 201 `{ enrolled: true }`. The pending-request
+ * flow around it survives for requests that are already in flight: any entry
+ * the student still had pending for this class is cleared by the same
+ * transaction (see lib/enrollmentRequests.ts), and an admin can still approve
+ * or reject an entry that predates the enroll (see
+ * /api/admin/requests/[classId]/[studentId], whose Approve answers a
+ * self-enrolled student with a no-op 200).
  *
  * Responses, all on purpose:
- * - 201 `{ requested: true }` — the pending entry was created.
- * - 200 `{ requested: true, alreadyRequested: true }` — a request was already
- *   pending. The old route's idempotency property is kept: a double click
- *   cannot queue two decisions.
+ * - 201 `{ enrolled: true }` — the roster doc was written, and any pending
+ *   request for this class was cleared with it.
  * - 200 `{ enrolled: true, alreadyEnrolled: true }` — the student is on the
- *   roster already, so there is nothing to ask. Unchanged from the old route,
- *   and no pending entry is created behind their back.
+ *   roster already, including the older auto-ID enrollment docs (the read
+ *   matches on the `class_id` field, not the doc id). Idempotency, unchanged
+ *   from every version of this route: a double click cannot create two
+ *   roster docs, and no pending entry is created behind their back.
  * - 401/403/404 — unchanged, all from `getClassAccess`: only a student who is
- *   not on the roster may ask, and the class must exist.
+ *   not on the roster may enroll, and the class must exist.
  */
 export async function POST(request: NextRequest, { params }: RouteContext) {
   try {
@@ -37,7 +39,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
     if (access.role !== "student") {
       return NextResponse.json(
-        { error: "Only students can request a course." },
+        { error: "Only students can enroll in a course." },
         { status: 403 }
       );
     }
@@ -49,7 +51,23 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const outcome = await addEnrollmentRequest(access.uid, classId);
+    const outcome = await selfEnroll(access.uid, classId);
+
+    if (outcome.kind === "noProfile") {
+      // The profile vanished between the access check and the transaction.
+      return NextResponse.json(
+        { error: "User profile not found." },
+        { status: 404 }
+      );
+    }
+
+    if (outcome.kind === "notStudent") {
+      // The role flipped between the access check and the transaction.
+      return NextResponse.json(
+        { error: "Only students can enroll in a course." },
+        { status: 403 }
+      );
+    }
 
     if (outcome.kind === "alreadyEnrolled") {
       // An admin approved someone between the access check and this transaction.
@@ -59,18 +77,11 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       );
     }
 
-    if (outcome.kind === "alreadyRequested") {
-      return NextResponse.json(
-        { requested: true, alreadyRequested: true },
-        { status: 200 }
-      );
-    }
-
-    return NextResponse.json({ requested: true }, { status: 201 });
+    return NextResponse.json({ enrolled: true }, { status: 201 });
   } catch (error) {
     console.error("POST /api/classes/[classId]/enroll failed:", error);
     return NextResponse.json(
-      { error: "Failed to request the course." },
+      { error: "Failed to enroll in the course." },
       { status: 500 }
     );
   }

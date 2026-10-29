@@ -315,6 +315,65 @@ export async function approveEnrollmentRequest(
 }
 
 /**
+ * Enrolls the signed-in student directly (PANEL-26).
+ *
+ * Self-enrollment is the normal path again: a student POST to
+ * /api/classes/[classId]/enroll writes the roster doc themselves, the same
+ * shape `approveEnrollmentRequest` writes, and clears their own pending
+ * request for that class in the same transaction — an admin's queue must not
+ * keep asking for a decision that the student has already satisfied.
+ *
+ * The race the transaction exists for: the student is mid-enroll while an
+ * admin approves the same request. Exactly one of the two writes the roster
+ * doc first; the loser sees the doc in its re-read and reports
+ * `alreadyEnrolled` instead of writing a duplicate. The pending entry is
+ * cleared by whichever write won, so the queue drains either way.
+ */
+export async function selfEnroll(
+  uid: string,
+  classId: string
+): Promise<
+  | { kind: "enrolled" }
+  | { kind: "alreadyEnrolled" }
+  | { kind: "noProfile" }
+  | { kind: "notStudent" }
+> {
+  const db = getAdminDb();
+  const userRef = db.collection("users").doc(uid);
+
+  return db.runTransaction(async (transaction) => {
+    const [userDoc, enrollmentSnapshot] = await Promise.all([
+      transaction.get(userRef),
+      transaction.get(
+        userRef.collection("classes").where("class_id", "==", classId).limit(1)
+      ),
+    ]);
+
+    if (!userDoc.exists) return { kind: "noProfile" as const };
+    // Re-checked inside the transaction for the same reason
+    // approveEnrollmentRequest does: a role flip between the route's access
+    // check and this write must not put a professor onto a roster.
+    if (userDoc.data()?.role !== "student") return { kind: "notStudent" as const };
+    if (enrollmentSnapshot.docs.length > 0) return { kind: "alreadyEnrolled" as const };
+
+    transaction.set(userRef.collection("classes").doc(classId), {
+      class_id: classId,
+      enrolledAt: new Date().toISOString(),
+    });
+
+    const remaining = parseRequestedCourses(userDoc.data()?.requestedCourses).filter(
+      (entry) => !(entry.classId === classId && entry.status === REQUEST_STATUS_PENDING)
+    );
+
+    transaction.update(userRef, {
+      requestedCourses: remaining,
+    });
+
+    return { kind: "enrolled" as const };
+  });
+}
+
+/**
  * The class ids this user has a pending request for. Used by the browse list so
  * a student sees "Requested" instead of a second Request button.
  *
