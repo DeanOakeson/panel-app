@@ -1,14 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
+import {
+  ALLOWED_MATERIAL_TYPES,
+  MATERIAL_FILE_ACCEPT,
+  MAX_MATERIAL_FILE_SIZE,
+  formatFileSize,
+} from "@/lib/courseMaterials";
 
 type Material = {
   id: string;
   title: string;
-  url: string;
   description?: string;
+  url?: string | null;
+  fileName?: string;
+  fileSize?: number;
+  fileUrl?: string | null;
 };
 
 const inputClass =
@@ -41,6 +50,8 @@ export default function CourseMaterials({ classId }: { classId: string }) {
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [description, setDescription] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -112,10 +123,24 @@ export default function CourseMaterials({ classId }: { classId: string }) {
       setFormError("Title is required.");
       return;
     }
-    const linkError = checkLink(url);
+    if (!description.trim()) {
+      setFormError("Description is required.");
+      return;
+    }
+    const linkError = url.trim() ? checkLink(url) : null;
     if (linkError) {
       setFormError(linkError);
       return;
+    }
+    if (file) {
+      if (file.size > MAX_MATERIAL_FILE_SIZE) {
+        setFormError("Files must be 4 MB or smaller. Share larger files as a link.");
+        return;
+      }
+      if (!ALLOWED_MATERIAL_TYPES[file.type]) {
+        setFormError("Upload a PDF, Word, PowerPoint, Excel, text, PNG, or JPEG file.");
+        return;
+      }
     }
 
     const user = getFirebaseAuth().currentUser;
@@ -126,21 +151,25 @@ export default function CourseMaterials({ classId }: { classId: string }) {
 
     setSaving(true);
     try {
+      // Form data so a file can ride along; the browser sets the content type.
+      const body = new FormData();
+      body.append("title", title.trim());
+      body.append("description", description.trim());
+      body.append("url", url.trim());
+      if (file) body.append("file", file);
+
       const res = await authedFetch(user, `/api/classes/${classId}/materials`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: title.trim(),
-          url: url.trim(),
-          description: description.trim(),
-        }),
+        body,
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to add material.");
 
       setTitle("");
       setUrl("");
       setDescription("");
+      setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       setShowForm(false);
       await reload();
     } catch (err) {
@@ -218,29 +247,42 @@ export default function CourseMaterials({ classId }: { classId: string }) {
             />
           </label>
           <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
-            Link
+            Description
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              maxLength={1000}
+              rows={3}
+              placeholder="What is this and when should students use it?"
+              className={inputClass}
+              required
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
+            Link (optional)
             <input
               type="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://drive.google.com/..."
               className={inputClass}
-              required
             />
           </label>
           <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
-            Description (optional)
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              maxLength={1000}
-              rows={3}
-              className={inputClass}
+            File (optional)
+            <input
+              ref={fileInputRef}
+              id="material-file"
+              type="file"
+              accept={MATERIAL_FILE_ACCEPT}
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-gray-800 hover:file:bg-gray-200 dark:text-gray-300 dark:file:bg-zinc-800 dark:file:text-gray-200"
             />
           </label>
           <p className="text-xs text-gray-500 dark:text-zinc-400">
-            Share files with a link (Google Drive, OneDrive, YouTube, a website).
-            Make sure students have permission to open it.
+            Files up to 4 MB: PDF, Word, PowerPoint, Excel, text, PNG, or JPEG.
+            For bigger files or videos, share a link instead and make sure
+            students have permission to open it.
           </p>
           {formError && <p className="text-sm text-red-600">{formError}</p>}
           <button
@@ -266,19 +308,41 @@ export default function CourseMaterials({ classId }: { classId: string }) {
               key={m.id}
               className="flex flex-col gap-1 rounded-lg border border-gray-200 bg-white p-4 dark:border-zinc-800 dark:bg-gray-900"
             >
-              <a
-                href={m.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-semibold text-blue-600 hover:text-blue-500 dark:text-blue-400"
-              >
-                {m.title} ↗
-              </a>
+              {m.url ? (
+                <a
+                  href={m.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-blue-600 hover:text-blue-500 dark:text-blue-400"
+                >
+                  {m.title} ↗
+                </a>
+              ) : (
+                <span className="font-semibold text-gray-900 dark:text-white">
+                  {m.title}
+                </span>
+              )}
               {m.description && (
                 <p className="whitespace-pre-line text-sm text-gray-600 dark:text-zinc-300">
                   {m.description}
                 </p>
               )}
+              {m.fileName &&
+                (m.fileUrl ? (
+                  <a
+                    href={m.fileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="self-start rounded-md border border-gray-300 px-3 py-1 text-sm font-medium text-gray-800 hover:bg-gray-100 dark:border-zinc-700 dark:text-gray-200 dark:hover:bg-zinc-800"
+                  >
+                    Download {m.fileName}
+                    {typeof m.fileSize === "number" ? ` (${formatFileSize(m.fileSize)})` : ""}
+                  </a>
+                ) : (
+                  <p className="text-sm text-gray-500 dark:text-zinc-400">
+                    {m.fileName} is unavailable right now. Try reloading the page.
+                  </p>
+                ))}
 
               {isProfessor &&
                 (confirmingId === m.id ? (
