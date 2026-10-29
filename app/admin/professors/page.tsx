@@ -134,6 +134,11 @@ export default function AdminProfessorsPage() {
           </div>
 
           <div className="flex gap-3">
+            {/*
+              Log out lives in the shared admin header (app/admin/layout.tsx)
+              now, so this page only offers its own Refresh; two logout buttons
+              on one screen is what Kevin flagged.
+            */}
             <button
               onClick={() => void loadRequests()}
               disabled={loading}

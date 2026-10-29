@@ -13,10 +13,16 @@ type AvailableClass = {
   section: string;
   professorName: string | null;
   enrolled: boolean;
+  /**
+   * True only for a request that is already in flight (END-54 leftovers).
+   * Choosing Enroll writes the roster doc directly (PANEL-26), so new rows
+   * never pass through this state.
+   */
+  requested: boolean;
 };
 
 type BrowseCoursesProps = {
-  /** Called after a successful enrollment so the page can refresh "My classes". */
+  /** Called after an enroll succeeds so the page can refresh "My classes". */
   onEnrolled: () => void | Promise<void>;
 };
 
@@ -26,6 +32,7 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [enrollingId, setEnrollingId] = useState<string | null>(null);
+  const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
   const [enrollError, setEnrollError] = useState<{ id: string; message: string } | null>(null);
 
   const load = useCallback(async (user: User) => {
@@ -59,6 +66,15 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
     if (user) void load(user);
   }
 
+  /**
+   * Enrolls the signed-in student directly (PANEL-26): POST
+   * /api/classes/{classId}/enroll writes the roster doc themselves and clears
+   * any pending request for the course in the same step, so the row answers
+   * `{enrolled:true}` (201) and My classes refreshes right away. An admin
+   * approval can no longer be beat to the write, and the server's
+   * `{enrolled:true, alreadyEnrolled:true}` for a repeat click keeps the row
+   * settled instead of erroring.
+   */
   async function enroll(classId: string) {
     if (enrollingId) return;
 
@@ -77,19 +93,63 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to enroll.");
+      if (!res.ok) throw new Error(data.error || "Failed to enroll in the course.");
 
       setClasses((current) =>
-        current.map((c) => (c.id === classId ? { ...c, enrolled: true } : c))
+        current.map((c) =>
+          c.id === classId ? { ...c, enrolled: true, requested: false } : c
+        )
       );
       await onEnrolled();
     } catch (err) {
       setEnrollError({
         id: classId,
-        message: err instanceof Error ? err.message : "Failed to enroll.",
+        message: err instanceof Error ? err.message : "Failed to enroll in the course.",
       });
     } finally {
       setEnrollingId(null);
+    }
+  }
+
+  /**
+   * Clears the signed-in student's own pending request. DELETE
+   * /api/classes/{classId}/enroll answers `{withdrawn:true}` (the row drops
+   * back to the Enroll button), 404 when nothing is pending, and 409 when the
+   * student is actually enrolled — leaving a course is the unenroll path, so
+   * the server refuses it and the message is shown as-is. Withdraw is only
+   * ever rendered for a pending request, never for an enrollment (the
+   * `c.enrolled` branch wins above).
+   */
+  async function withdraw(classId: string) {
+    if (withdrawingId) return;
+
+    const user = getFirebaseAuth().currentUser;
+    if (!user) {
+      setEnrollError({ id: classId, message: "Please sign in again." });
+      return;
+    }
+
+    setWithdrawingId(classId);
+    setEnrollError(null);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`/api/classes/${classId}/enroll`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to withdraw the request.");
+
+      setClasses((current) =>
+        current.map((c) => (c.id === classId ? { ...c, requested: false } : c))
+      );
+    } catch (err) {
+      setEnrollError({
+        id: classId,
+        message: err instanceof Error ? err.message : "Failed to withdraw the request.",
+      });
+    } finally {
+      setWithdrawingId(null);
     }
   }
 
@@ -112,7 +172,8 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
             Browse courses
           </h2>
           <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">
-            Enroll in a course to see its assignments and materials.
+            Choosing Enroll adds the course to My classes right away. An
+            administrator can still decide a request that was already waiting.
           </p>
         </div>
 
@@ -176,8 +237,33 @@ export default function BrowseCourses({ onEnrolled }: BrowseCoursesProps) {
               </div>
 
               {c.enrolled ? (
+                /* Only for an actual roster entry — a pending request must not
+                   read as enrolled (END-54). */
                 <span className="rounded-full bg-green-100 px-3 py-1 text-sm font-semibold text-green-800 dark:bg-green-900/40 dark:text-green-300">
                   Enrolled
+                </span>
+              ) : c.requested ? (
+                /* A pending request only: the c.enrolled branch above owns
+                   real roster entries, so Withdraw is never offered for an
+                   enrollment -- leaving a course is the unenroll path. */
+                <span className="flex items-center gap-2">
+                  <span
+                    className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                    title="An administrator still needs to approve this request."
+                  >
+                    Requested
+                  </span>
+                  <span className="text-xs text-gray-500 dark:text-zinc-400">
+                    Waiting for approval
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void withdraw(c.id)}
+                    disabled={withdrawingId !== null}
+                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-60 dark:border-zinc-700 dark:text-gray-300 dark:hover:bg-zinc-800"
+                  >
+                    {withdrawingId === c.id ? "Withdrawing..." : "Withdraw"}
+                  </button>
                 </span>
               ) : (
                 <button

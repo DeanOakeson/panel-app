@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { requireAdmin } from "@/lib/adminGuard";
+import { removeEnrollmentRequest } from "@/lib/enrollmentRequests";
 
 type RouteContext = { params: Promise<{ classId: string }> };
 
-/** Enrolls an existing student in the class by creating the enrollment doc. */
+/**
+ * Enrolls an existing student in the class by creating the enrollment doc.
+ *
+ * Adds a student from the admin's "Add a student" control. As of END-54 it also
+ * clears that student's pending request for the class: adding someone directly
+ * IS the answer to their ask, and leaving the entry behind would park an
+ * Approve button in /admin/requests that can only ever come back 409.
+ */
 export async function POST(request: NextRequest, { params }: RouteContext) {
   try {
     const { error } = await requireAdmin(request);
@@ -63,6 +71,12 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       class_id: classId,
       enrolledAt: Date.now(),
     });
+
+    // END-54: enrolling directly answers any pending request for this class, so
+    // the queue entry goes with it. Best-effort by design — the enrollment is
+    // the fact the response reports, and a stale entry left by a failed cleanup
+    // only ever answers 409 on Approve.
+    await removeEnrollmentRequest(studentId.trim(), classId);
 
     return NextResponse.json(
       {

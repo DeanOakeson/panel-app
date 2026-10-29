@@ -18,6 +18,8 @@ type ClassDetails = {
   term: string;
   section: string;
   professor_id?: string;
+  // Absent on classes that predate the flag; absent means open.
+  enrollmentOpen?: boolean;
 };
 
 type StudentOption = { uid: string; name: string; email: string };
@@ -33,6 +35,7 @@ export default function AdminClassDetailPage() {
   const [roster, setRoster] = useState<Student[]>([]);
 
   const [students, setStudents] = useState<StudentOption[]>([]);
+  const [professors, setProfessors] = useState<StudentOption[]>([]);
   const [selectedStudent, setSelectedStudent] = useState("");
   const [enrolling, setEnrolling] = useState(false);
   const [busyUid, setBusyUid] = useState("");
@@ -41,6 +44,154 @@ export default function AdminClassDetailPage() {
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Course metadata edit form. Mirrors the assignment edit pattern: the form
+  // only mounts in edit mode, sends only the fields that changed, and stays
+  // open with the error shown when the server rejects the payload.
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    name: "",
+    courseCode: "",
+    year: "",
+    term: "",
+    section: "",
+    professorId: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState("");
+
+  // Enrollment-open switch (PANEL-26). Its own one-click control, separate
+  // from the metadata form: closing enrollment is a single deliberate action,
+  // not a field buried in an edit.
+  const [togglingEnrollment, setTogglingEnrollment] = useState(false);
+
+  const startEdit = useCallback(() => {
+    if (!klass) return;
+    setForm({
+      name: klass.name ?? "",
+      courseCode: klass.courseCode ?? "",
+      year: String(klass.year ?? ""),
+      term: klass.term ?? "",
+      section: klass.section ?? "",
+      professorId: klass.professor_id ?? "",
+    });
+    setEditError("");
+    setEditing(true);
+  }, [klass]);
+
+  function setField(field: keyof typeof form, value: string) {
+    setForm((f) => ({ ...f, [field]: value }));
+  }
+
+  async function handleSaveEdit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!klass) return;
+
+    const yearValue = Number(form.year);
+    if (!form.name.trim()) {
+      setEditError("Course name is required.");
+      return;
+    }
+    if (!form.courseCode.trim()) {
+      setEditError("Course code is required.");
+      return;
+    }
+    if (!Number.isInteger(yearValue) || yearValue < 2000 || yearValue > 2100) {
+      setEditError("Year must be a number between 2000 and 2100.");
+      return;
+    }
+    if (!form.section.trim()) {
+      setEditError("Section is required.");
+      return;
+    }
+
+    // Send only the fields that changed so concurrent edits don't clobber
+    // each other, and so unchanged data keeps its stored type.
+    const changes: Record<string, string | number> = {};
+    if (form.name.trim() !== klass.name) changes.name = form.name.trim();
+    if (form.courseCode.trim() !== klass.courseCode)
+      changes.courseCode = form.courseCode.trim();
+    if (yearValue !== Number(klass.year)) changes.year = yearValue;
+    if (form.term !== klass.term) changes.term = form.term;
+    if (form.section.trim() !== klass.section)
+      changes.section = form.section.trim();
+    if (form.professorId !== (klass.professor_id ?? ""))
+      changes.professorId = form.professorId;
+
+    if (Object.keys(changes).length === 0) {
+      setEditing(false);
+      return;
+    }
+
+    const token = await getFirebaseAuth().currentUser?.getIdToken();
+    if (!token) return;
+    setSaving(true);
+    setEditError("");
+    setActionError("");
+    setActionSuccess("");
+    try {
+      const res = await fetch(`/api/admin/classes/${classId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(changes),
+      });
+      const data = await res.json().catch(() => ({} as Record<string, unknown>));
+      if (!res.ok) {
+        // Keep the form open with the admin's input intact, showing the
+        // server's reason.
+        setEditError((data.error as string) || `Request failed (${res.status}).`);
+        return;
+      }
+      setEditing(false);
+      setActionSuccess("Course updated.");
+      await getDetails(token);
+    } catch {
+      setEditError("Something went wrong. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleToggleEnrollment() {
+    if (!klass) return;
+    const token = await getFirebaseAuth().currentUser?.getIdToken();
+    if (!token) return;
+    setTogglingEnrollment(true);
+    setActionError("");
+    setActionSuccess("");
+    try {
+      const res = await fetch(`/api/admin/classes/${classId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        // Absent flag means open, so a class that predates the flag closes
+        // correctly on the first click.
+        body: JSON.stringify({
+          enrollmentOpen: !(klass.enrollmentOpen ?? true),
+        }),
+      });
+      const data = await res.json().catch(() => ({} as Record<string, unknown>));
+      if (!res.ok) {
+        setActionError((data.error as string) || `Request failed (${res.status}).`);
+        return;
+      }
+      setActionSuccess(
+        klass.enrollmentOpen === false
+          ? "Enrollment opened."
+          : "Enrollment closed. Students can no longer join this course."
+      );
+      await getDetails(token);
+    } catch {
+      setActionError("Something went wrong. Please try again.");
+    } finally {
+      setTogglingEnrollment(false);
+    }
+  }
 
   const getDetails = useCallback(
     async (token: string) => {
@@ -70,6 +221,15 @@ export default function AdminClassDetailPage() {
         const studentsData = await studentsRes.json().catch(() => ({}));
         if (studentsRes.ok) {
           setStudents((studentsData.users as StudentOption[]) ?? []);
+        }
+        // The edit form needs the same list for its professor dropdown.
+        const professorsRes = await fetch("/api/admin/users?role=professor", {
+          headers: { authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+        const professorsData = await professorsRes.json().catch(() => ({}));
+        if (professorsRes.ok) {
+          setProfessors((professorsData.users as StudentOption[]) ?? []);
         }
       } catch (err) {
         setLoadError(
@@ -225,6 +385,159 @@ export default function AdminClassDetailPage() {
       {actionSuccess && (
         <p className="mb-4 text-sm text-green-600">{actionSuccess}</p>
       )}
+
+      {/* Course details + edit form */}
+      <section className="mb-6 rounded border p-5 bg-white dark:bg-gray-800">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+            Course details
+          </h2>
+          {!editing && (
+            <div className="flex gap-2">
+              <button
+                onClick={() => void handleToggleEnrollment()}
+                disabled={togglingEnrollment}
+                className="rounded border border-blue-300 px-3 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-800 dark:hover:bg-blue-950"
+              >
+                {togglingEnrollment
+                  ? "Saving..."
+                  : klass.enrollmentOpen === false
+                    ? "Open enrollment"
+                    : "Close enrollment"}
+              </button>
+              <button
+                onClick={startEdit}
+                className="rounded border border-blue-300 px-3 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:hover:bg-blue-950"
+              >
+                Edit course
+              </button>
+            </div>
+          )}
+        </div>
+
+        {!editing ? (
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+            <div>
+              <dt className="text-xs text-zinc-500">Name</dt>
+              <dd className="text-gray-900 dark:text-white">{klass.name}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Course code</dt>
+              <dd className="text-gray-900 dark:text-white">{klass.courseCode}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Term</dt>
+              <dd className="text-gray-900 dark:text-white">
+                {klass.term} {klass.year}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Section</dt>
+              <dd className="text-gray-900 dark:text-white">{klass.section}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Enrollment</dt>
+              <dd className="text-gray-900 dark:text-white">
+                {klass.enrollmentOpen === false ? "Closed" : "Open"}
+              </dd>
+            </div>
+          </dl>
+        ) : (
+          <form onSubmit={handleSaveEdit} className="flex flex-col gap-3">
+            {editError && <p className="text-sm text-red-600">{editError}</p>}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
+                Course name
+                <input
+                  value={form.name}
+                  onChange={(e) => setField("name", e.target.value)}
+                  maxLength={150}
+                  className={inputClass}
+                  required
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
+                Course code
+                <input
+                  value={form.courseCode}
+                  onChange={(e) => setField("courseCode", e.target.value)}
+                  maxLength={30}
+                  className={inputClass}
+                  required
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
+                Term
+                <select
+                  value={form.term}
+                  onChange={(e) => setField("term", e.target.value)}
+                  className={inputClass}
+                >
+                  {["Spring", "Summer", "Fall", "Winter"].map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
+                Year
+                <input
+                  type="number"
+                  min={2000}
+                  max={2100}
+                  value={form.year}
+                  onChange={(e) => setField("year", e.target.value)}
+                  className={inputClass}
+                  required
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
+                Section
+                <input
+                  value={form.section}
+                  onChange={(e) => setField("section", e.target.value)}
+                  maxLength={20}
+                  className={inputClass}
+                  required
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
+                Professor
+                <select
+                  value={form.professorId}
+                  onChange={(e) => setField("professorId", e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">Select a professor...</option>
+                  {professors.map((p) => (
+                    <option key={p.uid} value={p.uid}>
+                      {p.name} ({p.email})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={saving}
+                className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {saving ? "Saving..." : "Save changes"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                disabled={saving}
+                className="rounded border px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+      </section>
 
       {/* Professor */}
       <section className="mb-6 rounded border p-5 bg-white dark:bg-gray-800">
