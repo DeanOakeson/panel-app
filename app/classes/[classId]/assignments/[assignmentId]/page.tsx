@@ -5,13 +5,14 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
+import { formatClosesAt, hasClosed, whenPassed } from "@/lib/assignmentDeadline";
 
 import AssignmentInfo from "../../../../components/assignments/AssignmentInfo";
 import StudentSubmission from "../../../../components/assignments/StudentSubmission";
 import ProfessorSubmissions from "../../../../components/assignments/ProfessorSubmission";
 import SubmissionUploadForm from "../../../../components/assignments/SubmissionUploadForm";
 
-import type { Assignment, Submission } from "../../../../components/Types";
+import type { Assignment, Grade, Submission } from "../../../../components/Types";
 
 export default function AssignmentDetailPage() {
     const { classId, assignmentId } = useParams<{
@@ -35,6 +36,7 @@ export default function AssignmentDetailPage() {
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [submitting, setSubmitting] = useState(false);
     const [submitMessage, setSubmitMessage] = useState("");
+    const [submissionsClosed, setSubmissionsClosed] = useState(false);
 
     const loadSubmission = useCallback(
         async (user: User) => {
@@ -147,6 +149,24 @@ export default function AssignmentDetailPage() {
         }
     }
 
+    // Updates only the graded submission, so other students' grade forms
+    // stay mounted and keep their unsaved drafts
+    function handleGraded(studentId: string, grade: Grade) {
+        setStudentSubmissions((current) =>
+            current.map((studentSubmission) =>
+                studentSubmission.studentId === studentId
+                    ? {
+                          ...studentSubmission,
+                          grade: grade.score,
+                          feedback: grade.feedback,
+                          gradedAt: grade.gradedAt,
+                          resubmittedAfterGrading: false,
+                      }
+                    : studentSubmission
+            )
+        );
+    }
+
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(
             getFirebaseAuth(),
@@ -181,6 +201,7 @@ export default function AssignmentDetailPage() {
                     }
 
                     setAssignment(data.assignment);
+                    setSubmissionsClosed(hasClosed(data.assignment.closesAt));
 
                     await loadSubmission(user);
                 } catch (err) {
@@ -197,6 +218,17 @@ export default function AssignmentDetailPage() {
 
         return unsubscribe;
     }, [classId, assignmentId, router, loadSubmission]);
+
+    const closesAt = assignment?.closesAt;
+
+    // Closes the form on a page left open past the cutoff
+    useEffect(() => {
+        if (!closesAt) {
+            return;
+        }
+
+        return whenPassed(closesAt, () => setSubmissionsClosed(true));
+    }, [closesAt]);
 
     return (
         <div className="mx-auto w-full max-w-3xl">
@@ -219,9 +251,12 @@ export default function AssignmentDetailPage() {
 
                     {isProfessor ? (
                         <ProfessorSubmissions
+                            classId={classId}
+                            assignment={assignment}
                             submissions={studentSubmissions}
                             loading={submissionLoading}
                             error={submissionError}
+                            onGraded={handleGraded}
                         />
                     ) : (
                         <>
@@ -232,14 +267,20 @@ export default function AssignmentDetailPage() {
                                 error={submissionError}
                             />
 
-                            <SubmissionUploadForm
-                                submission={!!submission}
-                                selectedFile={selectedFile}
-                                submitting={submitting}
-                                message={submitMessage}
-                                onFileChange={setSelectedFile}
-                                onSubmit={handleSubmit}
-                            />
+                            {submissionsClosed && closesAt ? (
+                                <p className="mt-6 rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-600 dark:border-zinc-800 dark:bg-gray-900 dark:text-zinc-300">
+                                    Submissions closed {formatClosesAt(closesAt)}
+                                </p>
+                            ) : (
+                                <SubmissionUploadForm
+                                    submission={!!submission}
+                                    selectedFile={selectedFile}
+                                    submitting={submitting}
+                                    message={submitMessage}
+                                    onFileChange={setSelectedFile}
+                                    onSubmit={handleSubmit}
+                                />
+                            )}
                         </>
                     )}
                 </>
