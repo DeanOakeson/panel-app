@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { getClassAccess } from "@/lib/classAccess";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  ALLOWED_MATERIAL_TYPES,
+  MATERIALS_BUCKET,
+  MATERIALS_PREFIX,
+  MAX_MATERIAL_FILE_SIZE,
+} from "@/lib/courseMaterials";
 
 type RouteContext = { params: Promise<{ classId: string }> };
+
+/** How long a download link for a material file stays valid. */
+const DOWNLOAD_LINK_SECONDS = 60 * 10;
 
 /**
  * Returns the URL if it is a well-formed http(s) link, otherwise null.
@@ -45,10 +55,27 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       .orderBy("createdAt")
       .get();
 
-    const materials = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const materials = await Promise.all(
+      snapshot.docs.map(async (doc) => {
+        const data = doc.data();
+        const { filePath, ...rest } = data;
+
+        if (typeof filePath !== "string" || !filePath) {
+          return { id: doc.id, ...rest, fileUrl: null };
+        }
+
+        // Files are private; hand out a short-lived download link instead.
+        const { data: signed, error } = await getSupabaseAdmin()
+          .storage.from(MATERIALS_BUCKET)
+          .createSignedUrl(filePath, DOWNLOAD_LINK_SECONDS);
+
+        if (error) {
+          console.error("Create course material download link failed:", error);
+        }
+
+        return { id: doc.id, ...rest, fileUrl: error ? null : signed.signedUrl };
+      })
+    );
 
     return NextResponse.json({ materials }, { status: 200 });
   } catch (error) {
@@ -60,7 +87,11 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
   }
 }
 
-/** Adds a course material link. Only the class's professor may do this. */
+/**
+ * Adds a course material: a title and description, plus an optional link and
+ * an optional file. Send JSON, or multipart form data when attaching a file.
+ * Only the class's professor may do this.
+ */
 export async function POST(request: NextRequest, { params }: RouteContext) {
   try {
     const { classId } = await params;
@@ -74,21 +105,37 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       );
     }
 
-    let body: Record<string, unknown>;
+    let fields: Record<string, unknown>;
+    let file: File | null = null;
+    const isForm = (request.headers.get("content-type") ?? "").includes(
+      "multipart/form-data"
+    );
 
     try {
-      body = await request.json();
+      if (isForm) {
+        const form = await request.formData();
+        const upload = form.get("file");
+        file = upload instanceof File && upload.size > 0 ? upload : null;
+        fields = {
+          title: form.get("title"),
+          description: form.get("description"),
+          url: form.get("url"),
+        };
+      } else {
+        fields = (await request.json()) ?? {};
+      }
     } catch {
       return NextResponse.json(
-        { error: "Invalid JSON request body." },
+        { error: "Invalid request body." },
         { status: 400 }
       );
     }
 
-    const title = typeof body.title === "string" ? body.title.trim() : "";
+    const title = typeof fields.title === "string" ? fields.title.trim() : "";
     const description =
-      typeof body.description === "string" ? body.description.trim() : "";
-    const url = parseLink(body.url);
+      typeof fields.description === "string" ? fields.description.trim() : "";
+    const rawUrl = typeof fields.url === "string" ? fields.url.trim() : "";
+    const url = rawUrl ? parseLink(rawUrl) : null;
 
     if (!title || title.length > 150) {
       return NextResponse.json(
@@ -97,18 +144,37 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       );
     }
 
-    if (!url) {
+    if (!description || description.length > 1000) {
       return NextResponse.json(
-        { error: "Enter a valid link starting with http:// or https://." },
+        { error: "Description is required (1000 characters max)." },
         { status: 400 }
       );
     }
 
-    if (description.length > 1000) {
+    if (rawUrl && !url) {
       return NextResponse.json(
-        { error: "Description must be 1000 characters or fewer." },
+        { error: "Enter a valid link starting with http:// or https://, or leave it blank." },
         { status: 400 }
       );
+    }
+
+    if (file) {
+      if (file.size > MAX_MATERIAL_FILE_SIZE) {
+        return NextResponse.json(
+          { error: "Files must be 4 MB or smaller. Share larger files as a link." },
+          { status: 400 }
+        );
+      }
+
+      if (!ALLOWED_MATERIAL_TYPES[file.type]) {
+        return NextResponse.json(
+          {
+            error:
+              "Upload a PDF, Word, PowerPoint, Excel, text, PNG, or JPEG file.",
+          },
+          { status: 400 }
+        );
+      }
     }
 
     const materialRef = getAdminDb()
@@ -117,20 +183,61 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       .collection("materials")
       .doc();
 
+    let fileFields: Record<string, string | number> = {};
+
+    if (file) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const filePath = `${MATERIALS_PREFIX}/${classId}/${materialRef.id}/${safeName}`;
+
+      const { error: uploadError } = await getSupabaseAdmin()
+        .storage.from(MATERIALS_BUCKET)
+        .upload(filePath, Buffer.from(await file.arrayBuffer()), {
+          contentType: file.type,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error("Course material upload failed:", uploadError);
+        return NextResponse.json(
+          { error: "The file couldn't be uploaded. Please try again." },
+          { status: 500 }
+        );
+      }
+
+      fileFields = {
+        filePath,
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+      };
+    }
+
     const material = {
       title,
-      url,
       description,
+      url,
+      ...fileFields,
       createdBy: access.uid,
       createdAt: new Date().toISOString(),
     };
 
-    await materialRef.set(material);
+    try {
+      await materialRef.set(material);
+    } catch (error) {
+      // Don't leave an orphaned file behind if the record can't be saved.
+      if (typeof fileFields.filePath === "string") {
+        await getSupabaseAdmin()
+          .storage.from(MATERIALS_BUCKET)
+          .remove([fileFields.filePath]);
+      }
+      throw error;
+    }
 
-    return NextResponse.json(
-      { material: { id: materialRef.id, ...material } },
-      { status: 201 }
-    );
+    // The storage path stays on the server; clients get download links from GET.
+    const publicMaterial: Record<string, unknown> = { id: materialRef.id, ...material };
+    delete publicMaterial.filePath;
+
+    return NextResponse.json({ material: publicMaterial }, { status: 201 });
   } catch (error) {
     console.error("POST /api/classes/[classId]/materials failed:", error);
     return NextResponse.json(
