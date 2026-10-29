@@ -1,7 +1,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { getDeadline } from "@/lib/assignmentDeadline";
 
 type RouteContext = {
   params: Promise<{
@@ -12,7 +13,6 @@ type RouteContext = {
 
 const BUCKET = "assignment-submissions";
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const TIME_ZONE = "America/Denver";
 
 const ALLOWED_TYPES = [
   "application/pdf",
@@ -20,77 +20,6 @@ const ALLOWED_TYPES = [
   "image/png",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ];
-
-
-
-function getDeadline(dueDate: unknown): Date | null {
-  if (typeof dueDate !== "string") {
-    return null;
-  }
-
-  // Expect a date-only string: YYYY-MM-DD.
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
-    throw new Error("Invalid assignment due date.");
-  }
-
-  const [year, month, day] = dueDate.split("-").map(Number);
-
-  // Validate that the date actually exists.
-  const calendarDate = new Date(Date.UTC(year, month - 1, day));
-
-  if (
-    calendarDate.getUTCFullYear() !== year ||
-    calendarDate.getUTCMonth() !== month - 1 ||
-    calendarDate.getUTCDate() !== day
-  ) {
-    throw new Error("Invalid assignment due date.");
-  }
-
-  // Find the UTC offset for Mountain Time on the following
-  // calendar day, then convert local midnight to UTC.
-  const nextDay = new Date(
-    Date.UTC(year, month - 1, day + 1)
-  );
-
-  const nextDateString = [
-    nextDay.getUTCFullYear(),
-    String(nextDay.getUTCMonth() + 1).padStart(2, "0"),
-    String(nextDay.getUTCDate()).padStart(2, "0"),
-  ].join("-");
-
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: TIME_ZONE,
-    timeZoneName: "longOffset",
-    year: "numeric",
-  }).formatToParts(
-    new Date(`${nextDateString}T12:00:00Z`)
-  );
-
-  const offsetText =
-    parts.find((part) => part.type === "timeZoneName")?.value;
-
-  const offsetMatch = offsetText?.match(
-    /^GMT([+-])(\d{2}):(\d{2})$/
-  );
-
-  if (!offsetMatch) {
-    throw new Error("Could not determine assignment deadline timezone.");
-  }
-
-  const sign = offsetMatch[1] === "+" ? 1 : -1;
-  const offsetMinutes =
-    sign *
-    (Number(offsetMatch[2]) * 60 + Number(offsetMatch[3]));
-
-  // Midnight at the start of the following local day, minus 1 ms.
-  // This correctly handles daylight saving time.
-  return new Date(
-    nextDay.getTime() -
-      offsetMinutes * 60 * 1000 -
-      1
-  );
-}
-
 
 export async function POST(
   request: NextRequest,
@@ -215,7 +144,7 @@ export async function POST(
       `${classId}/${assignmentId}/${uid}/` +
       `${Date.now()}-${safeName}`;
 
-    const { error: uploadError } = await supabaseAdmin.storage
+    const { error: uploadError } = await getSupabaseAdmin().storage
       .from(BUCKET)
       .upload(filePath, Buffer.from(await file.arrayBuffer()), {
         contentType: file.type,
@@ -240,9 +169,6 @@ export async function POST(
         .collection("submissions")
         .doc(uid);
 
-      const previousSubmission = await submissionRef.get();
-      const previousData = previousSubmission.data();
-
       await submissionRef.set({
         studentId: uid,
         filePath,
@@ -251,11 +177,9 @@ export async function POST(
         fileSize: file.size,
         submittedAt: new Date().toISOString(),
         status: "submitted",
-        grade: previousData?.grade ?? null,
-        feedback: previousData?.feedback ?? "",
       });
     } catch (error) {
-      await supabaseAdmin.storage
+      await getSupabaseAdmin().storage
         .from(BUCKET)
         .remove([filePath]);
 
@@ -388,16 +312,35 @@ export async function GET(
     }
 
     const submissionsRef = assignmentRef.collection("submissions");
+    const gradesRef = assignmentRef.collection("grades");
 
     // Professors can view all submissions for their own class.
     if (role === "professor") {
-      const snapshot = await submissionsRef.get();
+      const [snapshot, gradeSnapshot] = await Promise.all([
+        submissionsRef.get(),
+        gradesRef.get(),
+      ]);
+
+      // getAll() rejects an empty argument list
+      const studentDocs = snapshot.empty
+        ? []
+        : await db.getAll(
+            ...snapshot.docs.map((doc) => db.collection("users").doc(doc.id))
+          );
+      const students = new Map(
+        studentDocs.map((studentDoc) => [studentDoc.id, studentDoc.data()])
+      );
+      const grades = new Map(
+        gradeSnapshot.docs.map((gradeDoc) => [gradeDoc.id, gradeDoc.data()])
+      );
 
       const submissions = await Promise.all(
         snapshot.docs.map(async (doc) => {
           const submission = doc.data();
+          const student = students.get(doc.id);
+          const grade = grades.get(doc.id);
 
-          const { data, error } = await supabaseAdmin.storage
+          const { data, error } = await getSupabaseAdmin().storage
             .from(BUCKET)
             .createSignedUrl(submission.filePath, 60 * 10);
 
@@ -406,33 +349,41 @@ export async function GET(
               "Create submission download URL failed:",
               error
             );
-
-            return {
-              studentId: submission.studentId || doc.id,
-              fileName: submission.fileName,
-              fileType: submission.fileType,
-              fileSize: submission.fileSize,
-              submittedAt: submission.submittedAt,
-              status: submission.status || "submitted",
-              grade: submission.grade ?? null,
-              feedback: submission.feedback ?? "",
-              fileUrl: null,
-            };
           }
 
           return {
             studentId: submission.studentId || doc.id,
+            studentName: (student?.name as string | undefined) ?? null,
+            studentEmail: (student?.email as string | undefined) ?? null,
             fileName: submission.fileName,
             fileType: submission.fileType,
             fileSize: submission.fileSize,
             submittedAt: submission.submittedAt,
             status: submission.status || "submitted",
-            grade: submission.grade ?? null,
-            feedback: submission.feedback ?? "",
-            fileUrl: data.signedUrl,
+            grade: grade?.score ?? null,
+            feedback: grade?.feedback ?? "",
+            gradedAt: grade?.gradedAt ?? null,
+            resubmittedAfterGrading:
+              !!grade && submission.submittedAt !== grade.submittedAt,
+            fileUrl: error ? null : data.signedUrl,
           };
         })
       );
+
+      // Rows shown as "Unknown student" go after every named student
+      submissions.sort((first, second) => {
+        const firstName = first.studentName ?? first.studentEmail;
+        const secondName = second.studentName ?? second.studentEmail;
+
+        if (firstName !== null && secondName !== null) {
+          return firstName.localeCompare(secondName);
+        }
+
+        if (firstName !== null) return -1;
+        if (secondName !== null) return 1;
+
+        return first.studentId.localeCompare(second.studentId);
+      });
 
       return NextResponse.json({
         role,
@@ -441,7 +392,10 @@ export async function GET(
     }
 
     // Students can access only their own submission.
-    const submissionDoc = await submissionsRef.doc(uid).get();
+    const [submissionDoc, gradeDoc] = await Promise.all([
+      submissionsRef.doc(uid).get(),
+      gradesRef.doc(uid).get(),
+    ]);
 
     if (!submissionDoc.exists) {
       return NextResponse.json({
@@ -451,8 +405,9 @@ export async function GET(
     }
 
     const submission = submissionDoc.data()!;
+    const grade = gradeDoc.data();
 
-    const { data, error } = await supabaseAdmin.storage
+    const { data, error } = await getSupabaseAdmin().storage
       .from(BUCKET)
       .createSignedUrl(submission.filePath, 60 * 10);
 
@@ -474,8 +429,11 @@ export async function GET(
         fileSize: submission.fileSize,
         submittedAt: submission.submittedAt,
         status: submission.status || "submitted",
-        grade: submission.grade ?? null,
-        feedback: submission.feedback ?? "",
+        grade: grade?.score ?? null,
+        feedback: grade?.feedback ?? "",
+        gradedAt: grade?.gradedAt ?? null,
+        resubmittedAfterGrading:
+          !!grade && submission.submittedAt !== grade.submittedAt,
         fileUrl: data.signedUrl,
       },
     });

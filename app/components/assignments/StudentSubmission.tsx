@@ -104,6 +104,12 @@ export default function StudentSubmission({
                                 ? `${submission.grade} / ${assignment.points}`
                                 : "Not graded yet"}
                         </p>
+
+                        {submission.resubmittedAfterGrading && (
+                            <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
+                                Graded before your latest submission
+                            </p>
+                        )}
                     </div>
 
                     {submission.feedback && (

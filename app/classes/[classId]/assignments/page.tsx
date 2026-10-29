@@ -7,14 +7,9 @@ import Link from "next/link";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import CreateAssignment from "../../../components/assignments/CreateAssignment";
-
-type Assignment = {
-  id: string;
-  name: string;
-  description?: string;
-  points: number;
-  dueDate: string | null;
-};
+import AssignmentItem, {
+  type Assignment,
+} from "../../../components/assignments/AssignmentItem";
 
 type UserProfile = {
   role?: string;
@@ -98,14 +93,23 @@ export default function AssignmentsPage() {
     return unsubscribe;
   }, [loadAssignments, router]);
 
-  async function handleCreated() {
-    setShowForm(false);
-
+  async function reloadAssignments() {
     const user = getFirebaseAuth().currentUser;
 
     if (user) {
       await loadAssignments(user);
     }
+  }
+
+  async function handleCreated() {
+    setShowForm(false);
+    await reloadAssignments();
+  }
+
+  // Editing or deleting only refreshes the list, so an open create form
+  // (and any draft in it) stays put.
+  async function handleChanged() {
+    await reloadAssignments();
   }
 
   return (
@@ -189,35 +193,14 @@ export default function AssignmentsPage() {
       ) : (
         <ul className="flex flex-col gap-3">
           {assignments.map((assignment) => (
-            <li
+            <AssignmentItem
               key={assignment.id}
-              className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-zinc-800 dark:bg-gray-900"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <Link
-                  href={`/classes/${classId}/assignments/${assignment.id}`}
-                  className="font-semibold text-blue-600 hover:text-blue-500 dark:text-blue-400"
-                >
-                  {assignment.name}
-                </Link>
-
-                <span className="whitespace-nowrap text-sm text-gray-500 dark:text-zinc-400">
-                  {assignment.points} pts
-                </span>
-              </div>
-
-              {assignment.description && (
-                <p className="whitespace-pre-line text-sm text-gray-600 dark:text-zinc-300">
-                  {assignment.description}
-                </p>
-              )}
-
-              <div className="border-t border-gray-100 pt-2 text-sm text-gray-500 dark:border-zinc-800 dark:text-zinc-400">
-                {assignment.dueDate
-                  ? `Due ${assignment.dueDate}`
-                  : "No due date"}
-              </div>
-            </li>
+              classId={classId}
+              assignment={assignment}
+              canEdit={isProfessor}
+              href={`/classes/${classId}/assignments/${assignment.id}`}
+              onChanged={handleChanged}
+            />
           ))}
         </ul>
       )}
