@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
@@ -13,12 +13,41 @@ import {
   type AssignableRole,
 } from "@/lib/adminUserEdit";
 
+/** Mirrors one row of GET /api/admin/users (see lib/adminClasses.ts). */
 type AdminUser = {
   uid: string;
   name: string;
   email: string;
   role: string;
+  /** Classes the student is enrolled in (PANEL-22). */
+  courses: { id: string; name: string; courseCode: string; term: string; year: number | null; section: string }[];
+  /** Classes the professor teaches, each with its roster (PANEL-23). */
+  teaching: {
+    id: string;
+    name: string;
+    courseCode: string;
+    term: string;
+    year: number | null;
+    section: string;
+    students: { uid: string; name: string; email: string }[];
+  }[];
 };
+
+/** "CS 6300 · Fall 2026 · Section 001" — the same course text the other admin pages show. */
+function courseLabel(course: { courseCode: string; name: string; term: string; year: number | null; section: string }) {
+  const parts = [
+    course.courseCode,
+    course.name,
+    course.term && course.year ? `${course.term} ${course.year}` : "",
+    course.section ? `Section ${course.section}` : "",
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : "Untitled course";
+}
+
+/** "Sam Student" (fallback: the email) — how a roster member is displayed. */
+function rosterMemberLabel(member: { name: string; email: string }) {
+  return member.name || member.email;
+}
 
 const ROLE_FILTERS = ["all", "student", "professor", "admin"] as const;
 
@@ -83,6 +112,9 @@ function AdminUsersInner() {
   const [editRole, setEditRole] = useState<AssignableRole>("student");
   const [savingUid, setSavingUid] = useState("");
 
+  // Expanded course detail: one row open at a time (PANEL-22/23).
+  const [expandedUid, setExpandedUid] = useState("");
+
   // Delete confirmation state. `pending` holds the row that is waiting for the
   // admin to type the name, so the dialog can name the user it will remove.
   const [pendingDelete, setPendingDelete] = useState<AdminUser | null>(null);
@@ -106,7 +138,15 @@ function AdminUsersInner() {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Failed to load users.");
-        setUsers((data.users as AdminUser[]) ?? []);
+        // Older servers omit the course fields; default them so a row always
+        // has something to expand.
+        setUsers(
+          ((data.users as AdminUser[]) ?? []).map((user) => ({
+            ...user,
+            courses: user.courses ?? [],
+            teaching: user.teaching ?? [],
+          }))
+        );
       } catch (err) {
         setLoadError(
           err instanceof Error ? err.message : "Failed to load users."
@@ -273,6 +313,8 @@ function AdminUsersInner() {
           <p className="mt-1 text-sm text-zinc-500">
             Edit a user&apos;s name or role, or remove their account. Admin
             accounts are listed but their role cannot be changed from here.
+            Expand a row to see the courses behind it — what a student is
+            enrolled in, or what a professor teaches and who is in each class.
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -383,16 +425,20 @@ function AdminUsersInner() {
                 <th className="px-4 py-3 font-semibold">Name</th>
                 <th className="px-4 py-3 font-semibold">Email</th>
                 <th className="px-4 py-3 font-semibold">Role</th>
+                <th className="px-4 py-3 font-semibold">Courses</th>
                 <th className="px-4 py-3 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {users.map((user) => {
                 const isMe = user.uid === me?.uid;
+                const isProfessor = user.role === "professor";
+                const courseCount = isProfessor ? user.teaching.length : user.courses.length;
+                const expanded = expandedUid === user.uid;
 
                 return (
+                  <Fragment key={user.uid}>
                   <tr
-                    key={user.uid}
                     className="border-t border-zinc-200 dark:border-gray-700"
                   >
                     <td className="px-4 py-3">
@@ -440,6 +486,24 @@ function AdminUsersInner() {
                       ) : (
                         <span className="capitalize">{user.role}</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedUid((current) => (current === user.uid ? "" : user.uid))
+                        }
+                        aria-expanded={expanded}
+                        title={
+                          isProfessor
+                            ? "Show the courses this professor teaches and who is in each"
+                            : "Show the courses this student is enrolled in"
+                        }
+                        className="rounded border border-zinc-300 px-2 py-1 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-gray-600 dark:text-zinc-200 dark:hover:bg-gray-800"
+                      >
+                        {expanded ? "Hide" : "Show"}{" "}
+                        {courseCount} {courseCount === 1 ? "course" : "courses"}
+                      </button>
                     </td>
                     <td className="px-4 py-3 text-right">
                       {editingUid === user.uid ? (
@@ -489,6 +553,54 @@ function AdminUsersInner() {
                       )}
                     </td>
                   </tr>
+                  {expanded && (
+                    <tr className="border-t border-zinc-200 bg-zinc-50 dark:border-gray-700 dark:bg-gray-900">
+                      <td colSpan={5} className="px-4 py-3">
+                        {isProfessor ? (
+                          user.teaching.length === 0 ? (
+                            <p className="text-zinc-500">No courses assigned.</p>
+                          ) : (
+                            <ul className="space-y-3">
+                              {user.teaching.map((course) => (
+                                <li key={course.id}>
+                                  <p className="font-semibold text-zinc-800 dark:text-zinc-100">
+                                    {courseLabel(course)}
+                                  </p>
+                                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                                    {course.students.length === 0
+                                      ? "No students enrolled."
+                                      : `${course.students.length} enrolled: ${course.students
+                                          .map(rosterMemberLabel)
+                                          .join(", ")}`}
+                                  </p>
+                                </li>
+                              ))}
+                            </ul>
+                          )
+                        ) : user.role === "student" ? (
+                          user.courses.length === 0 ? (
+                            <p className="text-zinc-500">Not enrolled in any courses.</p>
+                          ) : (
+                            <ul className="space-y-1">
+                              {user.courses.map((course) => (
+                                <li
+                                  key={course.id}
+                                  className="text-zinc-800 dark:text-zinc-100"
+                                >
+                                  {courseLabel(course)}
+                                </li>
+                              ))}
+                            </ul>
+                          )
+                        ) : (
+                          <p className="text-zinc-500">
+                            Admin accounts do not hold course rosters.
+                          </p>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>

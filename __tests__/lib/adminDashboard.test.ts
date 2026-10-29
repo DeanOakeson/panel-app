@@ -39,6 +39,7 @@ function stripComments(source: string): string {
 const adminHome = stripComments(readSource("app", "admin", "page.tsx"));
 const adminLayout = stripComments(readSource("app", "admin", "layout.tsx"));
 const professorsPage = stripComments(readSource("app", "admin", "professors", "page.tsx"));
+const usersPage = stripComments(readSource("app", "admin", "users", "page.tsx"));
 
 describe("admin dashboard (END-23)", () => {
   it("the admin home fetches /api/admin/summary", () => {
@@ -68,5 +69,41 @@ describe("admin dashboard (END-23)", () => {
     // above the page is now the only one.
     expect(professorsPage).not.toMatch(/\bsignOut\b/);
     expect(professorsPage).not.toContain("Log out");
+  });
+});
+
+// PANEL-22/23: the dashboard's "View all students" / "View all professors"
+// tiles deep-link into /admin/users?role=..., so that page is where the
+// per-user course data has to show up: each student's enrolled courses, each
+// professor's courses with the students in each roster. The repo has no DOM
+// stack, so like the dashboard tests above this pins the page source.
+describe("admin users page course data (END-60 / PANEL-22/23)", () => {
+  it("renders the per-user course data the user list API returns", () => {
+    // A student row's courses and a professor row's taught courses are both
+    // driven by the payload's fields.
+    expect(usersPage).toMatch(/\buser\.courses\b/);
+    expect(usersPage).toMatch(/\buser\.teaching\b/);
+  });
+
+  it("expands a row into a detail cell rather than replacing the table", () => {
+    // One row open at a time, toggled by the Courses cell; the detail is a
+    // full-width second row, so edit/delete on the main row stay untouched.
+    expect(usersPage).toMatch(/\bexpandedUid\b/);
+    expect(usersPage).toMatch(/aria-expanded=/);
+    expect(usersPage).toMatch(/colSpan=/);
+  });
+
+  it("professor detail shows each course's roster, student detail shows their courses", () => {
+    // The roster renders member labels (name with email fallback)...
+    expect(usersPage).toMatch(/rosterMemberLabel/);
+    expect(usersPage).toMatch(/course\.students\b/);
+    // ...and both roles fall back to a quiet empty state, never a blank cell.
+    expect(usersPage).toMatch(/No students enrolled\./);
+    expect(usersPage).toMatch(/Not enrolled in any courses\./);
+  });
+
+  it("keeps the role filter tabs that the dashboard tiles link to", () => {
+    expect(usersPage).toMatch(/setFilterOverride/);
+    expect(usersPage).toMatch(/ROLE_FILTERS/);
   });
 });

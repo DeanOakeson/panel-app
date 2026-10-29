@@ -26,6 +26,34 @@ export type ClassSummary = {
   studentCount: number;
 };
 
+/** One student on a class roster, as the admin user list shows them. */
+export type RosterMember = { uid: string; name: string; email: string };
+
+/** The fields of a `classes/{classId}` doc the admin user list shows. */
+export type UserCourseSummary = {
+  id: string;
+  name: string;
+  courseCode: string;
+  term: string;
+  year: number | null;
+  section: string;
+};
+
+/** A course a professor teaches, with the students on its roster. */
+export type TeachingCourse = UserCourseSummary & { students: RosterMember[] };
+
+/**
+ * Per-user course data for the admin user list (PANEL-22/23): the classes a
+ * student is enrolled in, or the classes a professor teaches with each
+ * course's roster.
+ */
+export type UserCourseData = {
+  /** Populated for students; empty for everyone else. */
+  courses: UserCourseSummary[];
+  /** Populated for professors; empty for everyone else. */
+  teaching: TeachingCourse[];
+};
+
 function str(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
@@ -36,6 +64,22 @@ function sortClasses(classes: ClassSummary[]) {
     const code = a.courseCode.localeCompare(b.courseCode);
     return code !== 0 ? code : a.name.localeCompare(b.name);
   });
+}
+
+/** Same ordering as the course list, so both surfaces agree row by row. */
+function byCourseCode(a: { courseCode: string; name: string }, b: { courseCode: string; name: string }) {
+  const code = a.courseCode.localeCompare(b.courseCode);
+  return code !== 0 ? code : a.name.localeCompare(b.name);
+}
+
+/** Stable roster order: by name, then email as a tiebreaker. */
+function sortRoster(members: RosterMember[]) {
+  return members.sort(
+    (a, b) =>
+      a.name.localeCompare(b.name) ||
+      a.email.localeCompare(b.email) ||
+      a.uid.localeCompare(b.uid)
+  );
 }
 
 /**
@@ -67,40 +111,82 @@ async function getProfessors(professorIds: (string | null)[]) {
 }
 
 /**
- * Counts enrolled students per class.
+ * One walk over every student and their enrollment docs.
  *
  * Enrollment is stored as users/{uid}/classes/{doc} with a class_id field (see
- * lib/classAccess.ts), so totalling it means walking the students. A school has
- * far more students than classes and Firestore has no cross-collection count
- * without such a scan; one subcollection read per student keeps this correct
+ * lib/classAccess.ts), so any roster question means walking the students —
+ * Firestore has no cross-collection read. This walk is THE source the admin
+ * surface shares: `loadAdminClasses`' studentCount, the user list's per-student
+ * course lists, and every professor roster it shows are all derived from this
+ * single read, so two admin pages can never report different numbers for the
+ * same course (the failure two copies of the join caused before).
+ *
+ * Returns, per class, its deduplicated roster (a student with the older
+ * auto-ID enrollment doc plus a real one for the same class is one member,
+ * matching the count's `seen` rule), and per student the deduplicated class
+ * ids they are enrolled in. A school has far more students than classes; one
+ * subcollection read per student, issued in parallel, keeps this correct
  * today. If the roster grows past a few thousand students, mirror enrollment
  * into classes/{classId}/enrollments and count there instead.
  */
-async function getEnrollmentCounts(classIds: Set<string>) {
+async function loadEnrollmentWalk(): Promise<{
+  rosters: Map<string, RosterMember[]>;
+  studentCourseIds: Map<string, string[]>;
+}> {
   const db = getAdminDb();
+  const students = await db.collection("users").where("role", "==", "student").get();
+
+  const rosters = new Map<string, RosterMember[]>();
+  const studentCourseIds = new Map<string, string[]>();
+
+  if (students.empty) return { rosters, studentCourseIds };
+
+  const enrollments = await Promise.all(
+    students.docs.map(async (doc) => ({
+      uid: doc.id,
+      name: str(doc.data().name),
+      email: str(doc.data().email),
+      classes: await db.collection("users").doc(doc.id).collection("classes").get(),
+    }))
+  );
+
+  for (const student of enrollments) {
+    const seen = new Set<string>();
+    const courseIds: string[] = [];
+
+    for (const enrollment of student.classes.docs) {
+      const classId = enrollment.data().class_id;
+      if (typeof classId !== "string" || seen.has(classId)) continue;
+
+      seen.add(classId);
+      courseIds.push(classId);
+
+      const roster = rosters.get(classId) ?? [];
+      roster.push({ uid: student.uid, name: student.name, email: student.email });
+      rosters.set(classId, roster);
+    }
+
+    if (courseIds.length > 0) studentCourseIds.set(student.uid, courseIds);
+  }
+
+  return { rosters, studentCourseIds };
+}
+
+/**
+ * Counts enrolled students per class, derived from the shared enrollment walk
+ * so the course list, the dashboard, and the user list cannot disagree.
+ */
+async function getEnrollmentCounts(classIds: Set<string>) {
   const counts = new Map<string, number>();
 
   if (classIds.size === 0) return counts;
 
   classIds.forEach((id) => counts.set(id, 0));
 
-  const students = await db.collection("users").where("role", "==", "student").get();
+  const { rosters } = await loadEnrollmentWalk();
 
-  const enrollments = await Promise.all(
-    students.docs.map((doc) => db.collection("users").doc(doc.id).collection("classes").get())
-  );
-
-  for (const snapshot of enrollments) {
-    const seen = new Set<string>();
-
-    for (const enrollment of snapshot.docs) {
-      const classId = enrollment.data().class_id;
-
-      if (typeof classId !== "string" || !counts.has(classId) || seen.has(classId)) continue;
-
-      seen.add(classId);
-      counts.set(classId, (counts.get(classId) ?? 0) + 1);
-    }
+  for (const [classId, members] of rosters) {
+    if (counts.has(classId)) counts.set(classId, members.length);
   }
 
   return counts;
@@ -149,6 +235,97 @@ export async function loadAdminClasses(search = ""): Promise<ClassSummary[]> {
       studentCount: counts.get(row.id) ?? 0,
     }))
   );
+}
+
+/**
+ * Per-user course data for the admin user list (PANEL-22/23), one row per uid
+ * in the given order.
+ *
+ * Students get the classes they are enrolled in; professors get the classes
+ * whose `professor_id` is them, each with the students on its roster. Both
+ * come from the same reads the course list and dashboard already make — the
+ * classes collection once, plus the shared enrollment walk — so a professor's
+ * roster here and the same course's `studentCount` on /admin/classes are two
+ * views of one source, never two numbers.
+ *
+ * Reads are batched at the collection level: 2 round trips regardless of how
+ * many users are listed, no per-row queries. A class deleted after an
+ * enrollment, or one whose doc lost its professor, drops out of the lists the
+ * same way it drops out of the course table — a course with no doc cannot be
+ * named, so showing it would be a lie.
+ */
+export async function loadAdminUserCourses(
+  users: { uid: string; role: string }[]
+): Promise<Map<string, UserCourseData>> {
+  const db = getAdminDb();
+  const data = new Map<string, UserCourseData>();
+  for (const user of users) {
+    data.set(user.uid, { courses: [], teaching: [] });
+  }
+
+  if (users.length === 0) return data;
+
+  const [classSnapshot, walk] = await Promise.all([
+    db.collection("classes").get(),
+    loadEnrollmentWalk(),
+  ]);
+
+  const courseById = new Map<string, UserCourseSummary & { professorId: string | null }>();
+  for (const doc of classSnapshot.docs) {
+    const d = doc.data();
+    courseById.set(doc.id, {
+      id: doc.id,
+      name: str(d.name),
+      courseCode: str(d.courseCode),
+      term: str(d.term),
+      year: typeof d.year === "number" ? d.year : null,
+      section: str(d.section),
+      professorId: typeof d.professor_id === "string" && d.professor_id ? d.professor_id : null,
+    });
+  }
+
+  // Professors teach the classes pointing at them; the roster under each is
+  // the same one the course table counts.
+  const teachingByProfessor = new Map<string, TeachingCourse[]>();
+  for (const course of courseById.values()) {
+    if (!course.professorId) continue;
+    const entry: TeachingCourse = {
+      id: course.id,
+      name: course.name,
+      courseCode: course.courseCode,
+      term: course.term,
+      year: course.year,
+      section: course.section,
+      students: sortRoster([...(walk.rosters.get(course.id) ?? [])]),
+    };
+    const existing = teachingByProfessor.get(course.professorId) ?? [];
+    existing.push(entry);
+    teachingByProfessor.set(course.professorId, existing);
+  }
+
+  for (const user of users) {
+    const row = data.get(user.uid);
+    if (!row) continue;
+
+    if (user.role === "student") {
+      row.courses = (walk.studentCourseIds.get(user.uid) ?? [])
+        .map((classId) => courseById.get(classId))
+        .filter((course) => course !== undefined)
+        .map(({ id, name, courseCode, term, year, section }) => ({
+          id,
+          name,
+          courseCode,
+          term,
+          year,
+          section,
+        }))
+        .sort(byCourseCode);
+    } else if (user.role === "professor") {
+      row.teaching = (teachingByProfessor.get(user.uid) ?? []).sort(byCourseCode);
+    }
+  }
+
+  return data;
 }
 
 /**

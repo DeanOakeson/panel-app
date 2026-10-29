@@ -1,4 +1,5 @@
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { loadAdminUserCourses } from "@/lib/adminClasses";
 
 /**
  * ADMIN-ONLY. Creates a Firebase Auth account + a users/{uid} profile record
@@ -155,8 +156,12 @@ export async function POST(req: Request) {
 /**
  * ADMIN-ONLY. Lists users, optionally filtered by role:
  * GET /api/admin/users?role=professor
- * Returns uid, name, email, and role. Role is included because the admin user
- * list edits it; the filter values are unchanged.
+ * Returns uid, name, email, and role — plus each user's course data (PANEL-22/23):
+ * the classes a student is enrolled in, or the classes a professor teaches with
+ * the students on each roster. The join lives in lib/adminClasses.ts, so the
+ * course list, the dashboard, and this page cannot report different numbers for
+ * the same course. Role is included because the admin user list edits it; the
+ * filter values are unchanged.
  */
 export async function GET(req: Request) {
   try {
@@ -199,7 +204,21 @@ export async function GET(req: Request) {
       }))
       .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
 
-    return Response.json({ users }, { status: 200 });
+    // One shared join for the whole page: 2 collection reads regardless of how
+    // many users are listed, no per-row queries.
+    const courseData = await loadAdminUserCourses(
+      users.map((user) => ({ uid: user.uid, role: user.role }))
+    );
+
+    return Response.json(
+      {
+        users: users.map((user) => ({
+          ...user,
+          ...courseData.get(user.uid),
+        })),
+      },
+      { status: 200 }
+    );
   } catch (error) {
     console.error("GET /api/admin/users error:", error);
     return Response.json({ error: "Failed to load users." }, { status: 500 });
