@@ -1,58 +1,22 @@
 import { NextResponse } from "next/server";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { getAdminDb } from "@/lib/firebaseAdmin";
+import { requireAdmin } from "@/lib/adminGuard";
 
 export async function GET(req: Request) {
   try {
-    // 1. Require a Firebase Authentication ID token.
-    const authorization = req.headers.get("authorization");
-    const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
-
-    if (!token) {
-      return NextResponse.json(
-        { error: "Missing authentication token." },
-        { status: 401 }
-      );
-    }
-
-    // 2. Verify the token.
-    let decoded: { uid: string };
-
-    try {
-      decoded = await getAdminAuth().verifyIdToken(token);
-    } catch {
-      return NextResponse.json(
-        { error: "Invalid or expired token." },
-        { status: 401 }
-      );
-    }
-
-    // 3. Require the configured administrator.
-    if (decoded.uid !== process.env.ADMIN_UID) {
-      return NextResponse.json(
-        { error: "Administrator access required." },
-        { status: 403 }
-      );
-    }
+    // 1. Only admins may list students (role-based, see lib/adminGuard.ts).
+    const { error } = await requireAdmin(req);
+    if (error) return error;
 
     const db = getAdminDb();
 
-    // 4. Verify that the account also has the admin role in Firestore.
-    const adminDoc = await db.collection("users").doc(decoded.uid).get();
-
-    if (!adminDoc.exists || adminDoc.data()?.role !== "admin") {
-      return NextResponse.json(
-        { error: "Your account does not have the admin role." },
-        { status: 403 }
-      );
-    }
-
-    // 5. Retrieve all student profiles.
+    // 2. Retrieve all student profiles.
     const studentsSnapshot = await db
       .collection("users")
       .where("role", "==", "student")
       .get();
 
-    // 6. Read each student's enrollments.
+    // 3. Read each student's enrollments.
     const studentsWithEnrollments = await Promise.all(
       studentsSnapshot.docs.map(async (studentDoc) => {
         const studentData = studentDoc.data();
@@ -83,7 +47,7 @@ export async function GET(req: Request) {
       })
     );
 
-    // 7. Fetch each unique course document only once.
+    // 4. Fetch each unique course document only once.
     const allClassIds = [
       ...new Set(studentsWithEnrollments.flatMap((student) => student.courses)),
     ];
@@ -109,7 +73,7 @@ export async function GET(req: Request) {
         .map((course) => [course.id, course])
     );
 
-    // 8. Replace course IDs with course details.
+    // 5. Replace course IDs with course details.
     const students = studentsWithEnrollments
       .map((student) => ({
         uid: student.uid,
@@ -123,7 +87,7 @@ export async function GET(req: Request) {
         (a.name || a.email).localeCompare(b.name || b.email)
       );
 
-    // 9. Return the students and their courses.
+    // 6. Return the students and their courses.
     return NextResponse.json({ students }, { status: 200 });
   } catch (error) {
     console.error("GET /api/admin/students error:", error);
