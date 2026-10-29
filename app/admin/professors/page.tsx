@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 
@@ -21,7 +21,6 @@ export default function AdminProfessorsPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [processingUid, setProcessingUid] = useState<string | null>(null);
-  const [loggingOut, setLoggingOut] = useState(false);
 
   const loadRequests = useCallback(async () => {
     setLoading(true);
@@ -70,18 +69,6 @@ export default function AdminProfessorsPage() {
 
     return unsubscribe;
   }, [loadRequests, router]);
-
-  async function handleLogout() {
-    setLoggingOut(true);
-
-    try {
-      await signOut(getFirebaseAuth());
-      router.replace("/");
-    } catch {
-      setError("Unable to log out. Please try again.");
-      setLoggingOut(false);
-    }
-  }
 
   async function updateRequest(
     uid: string,
@@ -155,13 +142,6 @@ export default function AdminProfessorsPage() {
               Refresh
             </button>
 
-            <button
-              onClick={() => void handleLogout()}
-              disabled={loggingOut}
-              className="rounded bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:opacity-50"
-            >
-              {loggingOut ? "Logging out..." : "Log out"}
-            </button>
           </div>
         </div>
 
