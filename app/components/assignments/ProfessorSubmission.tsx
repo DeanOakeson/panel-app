@@ -32,7 +32,10 @@ function formatFileSize(bytes: number) {
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-/** Lists a class's submissions for an assignment, with a grade form on each ungraded one. */
+/**
+ * Lists a class's submissions for an assignment, with a grade form on each
+ * ungraded one and an editor for each graded one.
+ */
 export default function ProfessorSubmissions({
     classId,
     assignment,
@@ -44,12 +47,40 @@ export default function ProfessorSubmissions({
     const [alreadyGradedIds, setAlreadyGradedIds] = useState<ReadonlySet<string>>(
         new Set()
     );
+    const [editingIds, setEditingIds] = useState<ReadonlySet<string>>(new Set());
 
-    /** Passes a stored grade up, and remembers a row that was graded elsewhere first. */
+    /** Opens or closes the grade editor on a student's row. */
+    function setEditing(studentId: string, open: boolean) {
+        setEditingIds((current) => {
+            const next = new Set(current);
+
+            if (open) {
+                next.add(studentId);
+            } else {
+                next.delete(studentId);
+            }
+
+            return next;
+        });
+    }
+
+    /**
+     * Passes a stored grade up, closes the row's editor, and remembers whether
+     * the row was saved elsewhere first.
+     */
     function handleSaved(studentId: string, grade: Grade, alreadyGraded: boolean) {
-        if (alreadyGraded) {
-            setAlreadyGradedIds((current) => new Set(current).add(studentId));
-        }
+        setAlreadyGradedIds((current) => {
+            const next = new Set(current);
+
+            if (alreadyGraded) {
+                next.add(studentId);
+            } else {
+                next.delete(studentId);
+            }
+
+            return next;
+        });
+        setEditing(studentId, false);
 
         onGraded(studentId, grade);
     }
@@ -130,10 +161,16 @@ export default function ProfessorSubmissions({
                                     </p>
                                 )}
 
+                                {submission.gradeUpdatedAt && (
+                                    <p className="text-xs text-gray-500 dark:text-zinc-400">
+                                        Updated {formatDate(submission.gradeUpdatedAt)}
+                                    </p>
+                                )}
+
                                 {submission.studentId &&
                                     alreadyGradedIds.has(submission.studentId) && (
                                         <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
-                                            Already graded elsewhere. Showing the saved grade.
+                                            Saved elsewhere first. Showing the saved grade.
                                         </p>
                                     )}
 
@@ -179,6 +216,40 @@ export default function ProfessorSubmissions({
                                     />
                                 </div>
                             )}
+
+                            {submission.grade !== null &&
+                                submission.gradedAt &&
+                                submission.studentId &&
+                                (editingIds.has(submission.studentId) ? (
+                                    <div className="mt-4 border-t border-gray-200 pt-4 dark:border-zinc-700">
+                                        <GradeForm
+                                            classId={classId}
+                                            assignmentId={assignment.id}
+                                            studentId={submission.studentId}
+                                            submittedAt={submission.submittedAt}
+                                            points={assignment.points}
+                                            editing={{
+                                                score: submission.grade,
+                                                feedback: submission.feedback,
+                                                lastSavedAt:
+                                                    submission.gradeUpdatedAt ??
+                                                    submission.gradedAt,
+                                            }}
+                                            onSaved={handleSaved}
+                                            onCancel={() =>
+                                                setEditing(submission.studentId!, false)
+                                            }
+                                        />
+                                    </div>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => setEditing(submission.studentId!, true)}
+                                        className={`mt-4 ${submission.fileUrl ? "ml-2" : ""} inline-block rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-zinc-700 dark:text-gray-300 dark:hover:bg-zinc-800`}
+                                    >
+                                        Edit grade
+                                    </button>
+                                ))}
                         </article>
                     ))}
                 </div>
