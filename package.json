@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "firebase emulators:exec --project demo-panel-app --only auth,firestore \"vitest run\"",
     "test:watch": "firebase emulators:exec --project demo-panel-app --only auth,firestore vitest",
+    "test:e2e": "firebase emulators:exec --project demo-panel-app --only auth,firestore \"playwright test\"",
     "emulators": "firebase emulators:start --project demo-panel-app --import=./.emulator-data --export-on-exit"
   },
   "dependencies": {
@@ -20,6 +21,7 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
