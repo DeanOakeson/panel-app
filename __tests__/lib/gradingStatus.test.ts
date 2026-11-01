@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   countGradingStatuses,
   getGradingStatus,
+  gradingStatusLabel,
   gradingStatusRank,
 } from "@/lib/gradingStatus";
 
@@ -23,6 +24,25 @@ describe("getGradingStatus", () => {
 
   it("returns resubmitted when the grade covers an earlier version", () => {
     expect(getGradingStatus(laterVersion, version)).toBe("resubmitted");
+  });
+});
+
+describe("gradingStatusLabel", () => {
+  it("labels a student without a submission Not submitted while submissions are open", () => {
+    expect(gradingStatusLabel("missing", false)).toBe("Not submitted");
+  });
+
+  it("labels a student without a submission Missing once submissions close", () => {
+    expect(gradingStatusLabel("missing", true)).toBe("Missing");
+  });
+
+  it.each([
+    ["needs-grading", "Needs grading"],
+    ["resubmitted", "Resubmitted"],
+    ["graded", "Graded"],
+  ] as const)("labels %s the same whether open or closed", (status, label) => {
+    expect(gradingStatusLabel(status, false)).toBe(label);
+    expect(gradingStatusLabel(status, true)).toBe(label);
   });
 });
 

@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatTimestamp } from "@/lib/assignmentDeadline";
 import {
     countGradingStatuses,
+    getGradingStatus,
+    gradingStatusLabel,
     needsGrade,
     type GradingCounts,
     type GradingStatus,
@@ -18,37 +20,33 @@ type Props = {
     students: RosterStudent[];
     loading: boolean;
     error: string;
+    /** Whether submissions have closed, which labels students without one as missing. */
+    closed: boolean;
     /** Receives the grade the server saved for a student's submission. */
     onGraded: (studentId: string, grade: Grade) => void;
 };
 
 type Filter = "all" | "to-grade" | "graded" | "missing";
 
-const FILTERS: { value: Filter; label: string; empty: string }[] = [
-    { value: "all", label: "All", empty: "" },
-    { value: "to-grade", label: "Needs grading", empty: "Nothing needs grading." },
-    { value: "graded", label: "Graded", empty: "No submissions are graded yet." },
-    { value: "missing", label: "Missing", empty: "Every student has submitted." },
+const FILTERS: { value: Filter; empty: string }[] = [
+    { value: "all", empty: "" },
+    { value: "to-grade", empty: "Nothing needs grading." },
+    { value: "graded", empty: "No submissions are graded yet." },
+    { value: "missing", empty: "Every student has submitted." },
 ];
 
-const BADGES: Record<GradingStatus, { label: string; className: string }> = {
-    "needs-grading": {
-        label: "Needs grading",
-        className: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200",
-    },
-    resubmitted: {
-        label: "Resubmitted",
-        className: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
-    },
-    graded: {
-        label: "Graded",
-        className: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200",
-    },
-    missing: {
-        label: "Missing",
-        className: "bg-gray-100 text-gray-700 dark:bg-zinc-800 dark:text-zinc-300",
-    },
+const BADGE_CLASSES: Record<GradingStatus, string> = {
+    "needs-grading": "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200",
+    resubmitted: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+    graded: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200",
+    missing: "bg-gray-100 text-gray-700 dark:bg-zinc-800 dark:text-zinc-300",
 };
+
+/** How long a card graded under Needs grading stays before it leaves the view. */
+const LEAVE_DELAY = 1500;
+
+/** How often a card waiting to leave checks again while the professor is typing. */
+const LEAVE_RETRY = 500;
 
 const secondaryButtonClass =
     "inline-block rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-zinc-700 dark:text-gray-300 dark:hover:bg-zinc-800";
@@ -76,6 +74,18 @@ function matchesFilter(status: GradingStatus, filter: Filter) {
     }
 }
 
+/** Returns a filter button's label. */
+function filterLabel(filter: Filter, closed: boolean) {
+    switch (filter) {
+        case "all":
+            return "All";
+        case "to-grade":
+            return "Needs grading";
+        default:
+            return gradingStatusLabel(filter, closed);
+    }
+}
+
 /** Returns how many students a filter shows. */
 function filterCount(counts: GradingCounts, filter: Filter) {
     switch (filter) {
@@ -90,8 +100,11 @@ function filterCount(counts: GradingCounts, filter: Filter) {
     }
 }
 
-/** Returns the summary line, like "5 of 6 submitted · 3 need grading (1 resubmitted)". */
-function describeCounts(counts: GradingCounts) {
+/**
+ * Returns the summary line, like
+ * "5 of 6 submitted · 3 need grading (1 resubmitted) · 1 missing".
+ */
+function describeCounts(counts: GradingCounts, closed: boolean) {
     const parts = [`${counts.submitted} of ${counts.students} submitted`];
 
     if (counts.toGrade > 0) {
@@ -104,29 +117,38 @@ function describeCounts(counts: GradingCounts) {
         parts.push("all graded");
     }
 
+    if (counts.missing > 0 && counts.submitted > 0) {
+        parts.push(
+            `${counts.missing} ${gradingStatusLabel("missing", closed).toLowerCase()}`
+        );
+    }
+
     return parts.join(" · ");
 }
 
-/** Shows a student's grading status as a colored label. */
-function StatusBadge({ status }: { status: GradingStatus }) {
-    const badge = BADGES[status];
+/** Returns the name a professor knows a student by. */
+function displayName(student: RosterStudent) {
+    return student.studentName ?? student.studentEmail ?? "Unknown student";
+}
 
+/** Shows a student's grading status as a colored label. */
+function StatusBadge({ status, closed }: { status: GradingStatus; closed: boolean }) {
     return (
         <span
-            className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${badge.className}`}
+            className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${BADGE_CLASSES[status]}`}
         >
-            {badge.label}
+            {gradingStatusLabel(status, closed)}
         </span>
     );
 }
 
-/** Shows a student's name, with their email or ID beneath it. */
-function StudentHeading({ student }: { student: RosterStudent }) {
+/** Shows a student's name, with their email or ID beneath it, and their status. */
+function StudentHeading({ student, closed }: { student: RosterStudent; closed: boolean }) {
     return (
         <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
                 <p className="break-all font-semibold text-gray-900 dark:text-white">
-                    {student.studentName ?? student.studentEmail ?? "Unknown student"}
+                    {displayName(student)}
                 </p>
 
                 {student.studentName && student.studentEmail && (
@@ -142,7 +164,7 @@ function StudentHeading({ student }: { student: RosterStudent }) {
                 )}
             </div>
 
-            <StatusBadge status={student.gradingStatus} />
+            <StatusBadge status={student.gradingStatus} closed={closed} />
         </div>
     );
 }
@@ -157,6 +179,7 @@ export default function ProfessorSubmissions({
     students,
     loading,
     error,
+    closed,
     onGraded,
 }: Props) {
     const [alreadyGradedIds, setAlreadyGradedIds] = useState<ReadonlySet<string>>(
@@ -164,8 +187,18 @@ export default function ProfessorSubmissions({
     );
     const [editingIds, setEditingIds] = useState<ReadonlySet<string>>(new Set());
     const [filter, setFilter] = useState<Filter>("all");
-    // Students graded under the current filter stay visible until it changes
+    // Students graded under the current filter stay visible after they stop
+    // matching it: until the filter changes, or briefly under Needs grading
     const [keptIds, setKeptIds] = useState<ReadonlySet<string>>(new Set());
+    const [announcement, setAnnouncement] = useState("");
+    const sectionRef = useRef<HTMLElement>(null);
+    const leaveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+    useEffect(() => {
+        const timers = leaveTimers.current;
+
+        return () => timers.forEach((timer) => clearTimeout(timer));
+    }, []);
 
     const counts = countGradingStatuses(
         students.map((student) => student.gradingStatus)
@@ -176,8 +209,16 @@ export default function ProfessorSubmissions({
             keptIds.has(student.studentId)
     );
 
-    /** Opens or closes the grade editor on a student's row. */
+    /**
+     * Opens or closes the grade editor on a student's row. An open editor
+     * keeps its card in view until the grade is saved again.
+     */
     function setEditing(studentId: string, open: boolean) {
+        if (open) {
+            clearTimeout(leaveTimers.current.get(studentId));
+            leaveTimers.current.delete(studentId);
+        }
+
         setEditingIds((current) => {
             const next = new Set(current);
 
@@ -193,8 +234,66 @@ export default function ProfessorSubmissions({
 
     /** Shows the students under a filter. */
     function chooseFilter(next: Filter) {
+        leaveTimers.current.forEach((timer) => clearTimeout(timer));
+        leaveTimers.current.clear();
         setFilter(next);
         setKeptIds(new Set());
+    }
+
+    /** Returns whether the professor is typing in a field on this list. */
+    function isTyping() {
+        const active = document.activeElement;
+
+        return (
+            (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) &&
+            !!sectionRef.current?.contains(active)
+        );
+    }
+
+    /**
+     * Drops a graded card from the Needs grading view after a pause, waiting
+     * while the professor types elsewhere so the cards around the field stay put.
+     */
+    function scheduleLeave(studentId: string, delay = LEAVE_DELAY) {
+        clearTimeout(leaveTimers.current.get(studentId));
+        leaveTimers.current.set(
+            studentId,
+            setTimeout(() => {
+                if (isTyping()) {
+                    scheduleLeave(studentId, LEAVE_RETRY);
+                    return;
+                }
+
+                leaveTimers.current.delete(studentId);
+                setKeptIds((current) => {
+                    const next = new Set(current);
+                    next.delete(studentId);
+                    return next;
+                });
+            }, delay)
+        );
+    }
+
+    /** Announces a saved grade and how much is left to grade. */
+    function announceSaved(studentId: string, grade: Grade, alreadyGraded: boolean) {
+        const saved = students.find((student) => student.studentId === studentId);
+        const savedStillToGrade =
+            !!saved &&
+            saved.gradingStatus !== "missing" &&
+            needsGrade(getGradingStatus(saved, grade));
+        const left =
+            students.filter(
+                (student) =>
+                    student.studentId !== studentId && needsGrade(student.gradingStatus)
+            ).length + (savedStillToGrade ? 1 : 0);
+
+        const name = saved ? displayName(saved) : "this student";
+        const result = alreadyGraded
+            ? `${name} was already graded elsewhere. Showing the saved grade.`
+            : `Grade saved for ${name}.`;
+        const remaining = left === 0 ? "Nothing left to grade." : `${left} left to grade.`;
+
+        setAnnouncement(`${result} ${remaining}`);
     }
 
     /**
@@ -215,12 +314,20 @@ export default function ProfessorSubmissions({
         });
         setKeptIds((current) => new Set(current).add(studentId));
         setEditing(studentId, false);
+        announceSaved(studentId, grade, alreadyGraded);
+
+        if (filter === "to-grade") {
+            scheduleLeave(studentId);
+        }
 
         onGraded(studentId, grade);
     }
 
     return (
-        <section className="mt-6 rounded-lg border border-gray-200 bg-white p-6 dark:border-zinc-800 dark:bg-gray-900">
+        <section
+            ref={sectionRef}
+            className="mt-6 rounded-lg border border-gray-200 bg-white p-6 dark:border-zinc-800 dark:bg-gray-900"
+        >
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
                 Student submissions
             </h2>
@@ -238,7 +345,11 @@ export default function ProfessorSubmissions({
             ) : (
                 <>
                     <p className="mt-1 text-sm text-gray-600 dark:text-zinc-300">
-                        {describeCounts(counts)}
+                        {describeCounts(counts, closed)}
+                    </p>
+
+                    <p role="status" aria-live="polite" className="sr-only">
+                        {announcement}
                     </p>
 
                     <div
@@ -261,7 +372,7 @@ export default function ProfessorSubmissions({
                                             : "border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-zinc-700 dark:text-gray-300 dark:hover:bg-zinc-800"
                                     }`}
                                 >
-                                    {option.label} ({filterCount(counts, option.value)})
+                                    {`${filterLabel(option.value, closed)} (${filterCount(counts, option.value)})`}
                                 </button>
                             );
                         })}
@@ -279,7 +390,7 @@ export default function ProfessorSubmissions({
                                         key={student.studentId}
                                         className="rounded-lg border border-gray-200 p-4 dark:border-zinc-700"
                                     >
-                                        <StudentHeading student={student} />
+                                        <StudentHeading student={student} closed={closed} />
 
                                         <p className="mt-2 text-sm text-gray-500 dark:text-zinc-400">
                                             No submission
@@ -291,6 +402,7 @@ export default function ProfessorSubmissions({
                                         classId={classId}
                                         assignment={assignment}
                                         student={student}
+                                        closed={closed}
                                         editing={editingIds.has(student.studentId)}
                                         savedElsewhere={alreadyGradedIds.has(
                                             student.studentId
@@ -314,6 +426,8 @@ type SubmissionCardProps = {
     classId: string;
     assignment: Assignment;
     student: SubmittedStudent;
+    /** Whether submissions have closed. */
+    closed: boolean;
     /** Whether the grade editor is open. */
     editing: boolean;
     /** Whether another session saved the grade before this one. */
@@ -327,6 +441,7 @@ function SubmissionCard({
     classId,
     assignment,
     student,
+    closed,
     editing,
     savedElsewhere,
     onEditingChange,
@@ -336,7 +451,7 @@ function SubmissionCard({
 
     return (
         <article className="rounded-lg border border-gray-200 p-4 dark:border-zinc-700">
-            <StudentHeading student={student} />
+            <StudentHeading student={student} closed={closed} />
 
             <div className="mt-3">
                 <p className="break-all font-medium text-gray-900 dark:text-white">

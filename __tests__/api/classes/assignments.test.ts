@@ -103,6 +103,52 @@ beforeEach(async () => {
   await addWork("graded-work", "ungraded", firstVersion);
 });
 
+describe("GET /api/classes/[classId]/assignments closing times", () => {
+  it("returns when submissions close for each due date", async () => {
+    const res = await listAssignments(ownerToken);
+
+    expect(res.status).toBe(200);
+    const { assignments } = await res.json();
+    expect(
+      assignments.map((assignment: { id: string; closesAt: unknown }) => [
+        assignment.id,
+        assignment.closesAt,
+      ])
+    ).toEqual([
+      ["no-work", "2026-12-01T06:59:59.999Z"],
+      ["graded-work", "2026-11-01T05:59:59.999Z"],
+    ]);
+  });
+
+  it("returns the closing time to an enrolled student", async () => {
+    const { uid, idToken } = await createSignedInUser("student@example.com", "student");
+    await getAdminDb()
+      .collection("users")
+      .doc(uid)
+      .collection("classes")
+      .add({ class_id: classId });
+
+    const res = await listAssignments(idToken);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).assignments[1].closesAt).toBe("2026-11-01T05:59:59.999Z");
+  });
+
+  it("returns a null closing time for a missing or malformed due date", async () => {
+    await assignmentDoc("no-work").update({ dueDate: null });
+    await assignmentDoc("graded-work").update({ dueDate: "2026-02-30" });
+
+    const res = await listAssignments(ownerToken);
+
+    expect(res.status).toBe(200);
+    const { assignments } = await res.json();
+    expect(assignments.map((assignment: { closesAt: unknown }) => assignment.closesAt)).toEqual([
+      null,
+      null,
+    ]);
+  });
+});
+
 describe("GET /api/classes/[classId]/assignments grading counts", () => {
   it("gives the class's professor each assignment's grading counts", async () => {
     const res = await listAssignments(ownerToken);

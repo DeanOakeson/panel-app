@@ -265,6 +265,7 @@ export default function AssignmentDetailPage() {
                             students={students}
                             loading={submissionLoading}
                             error={submissionError}
+                            closed={submissionsClosed}
                             onGraded={handleGraded}
                         />
                     ) : (

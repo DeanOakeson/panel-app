@@ -61,6 +61,24 @@ export function gradingStatusRank(status: GradingStatus): number {
   return status === "graded" ? 1 : 2;
 }
 
+/**
+ * Returns the label a professor sees for a status. A student without a
+ * submission is "Not submitted" while submissions are open and "Missing" once
+ * they have closed.
+ */
+export function gradingStatusLabel(status: GradingStatus, closed: boolean): string {
+  switch (status) {
+    case "needs-grading":
+      return "Needs grading";
+    case "resubmitted":
+      return "Resubmitted";
+    case "graded":
+      return "Graded";
+    case "missing":
+      return closed ? "Missing" : "Not submitted";
+  }
+}
+
 /** Tallies one status per student into counts. */
 export function countGradingStatuses(statuses: Iterable<GradingStatus>): GradingCounts {
   const counts: GradingCounts = {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { getClosesAt } from "@/lib/assignmentDeadline";
 import { loadEnrolledStudentIds, loadGradingCounts } from "@/lib/classRoster";
 
 type RouteContext = { params: Promise<{ classId: string }> };
@@ -150,9 +151,19 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
 }
 
+/** Returns when submissions close for a due date, or null when it has none or is malformed. */
+function closesAtOrNull(dueDate: unknown): string | null {
+  try {
+    return getClosesAt(dueDate);
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Lists assignments for the class professor, admin, or enrolled students. The
- * professor and admin also get each assignment's grading counts.
+ * Lists assignments for the class professor, admin, or enrolled students, each
+ * with `closesAt`. The professor and admin also get each assignment's grading
+ * counts.
  */
 export async function GET(request: NextRequest, { params }: RouteContext) {
   try {
@@ -204,6 +215,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     const assignments = snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
+      closesAt: closesAtOrNull(doc.data().dueDate),
     }));
 
     if (isStudent) {
