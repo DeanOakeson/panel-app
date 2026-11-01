@@ -11,7 +11,7 @@
 // 500.
 //
 // This test reads the repo source (no network, no emulators, no Admin SDK)
-// and fails if any `app/api/**/route.ts` contains a `.collectionGroup(...)`
+// and fails if any `app/api/**/route.ts` or `lib/*.ts` contains a `.collectionGroup(...)`
 // call whose `.where(...)` filter is not covered by a COLLECTION_GROUP-scoped
 // index entry in the real `firestore.indexes.json` at the repo root. It reads
 // the actual file, not a copy of the expectations: emptying fieldOverrides
@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
 const apiDir = path.join(repoRoot, "app", "api");
+const libDir = path.join(repoRoot, "lib");
 const indexesFile = path.join(repoRoot, "firestore.indexes.json");
 
 function collectRouteFiles(dir: string): string[] {
@@ -43,6 +44,13 @@ function collectRouteFiles(dir: string): string[] {
     }
   }
   return out;
+}
+
+/** Every server helper in lib/, which routes call for shared queries. */
+function collectLibFiles(): string[] {
+  return readdirSync(libDir)
+    .filter((entry) => entry.endsWith(".ts"))
+    .map((entry) => path.relative(repoRoot, path.join(libDir, entry)).split(path.sep).join("/"));
 }
 
 /**
@@ -109,7 +117,7 @@ describe("collection-group index drift (END-62)", () => {
     );
 
     const missing: string[] = [];
-    for (const relPath of routeFiles) {
+    for (const relPath of [...routeFiles, ...collectLibFiles()]) {
       const source = readFileSync(path.join(repoRoot, relPath), "utf8");
       for (const { collectionGroup, fieldPath } of findFilteredCollectionGroups(source)) {
         const scopes = indexScopesFor(file, collectionGroup, fieldPath);

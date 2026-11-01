@@ -116,6 +116,32 @@ async function addGrade(
   return grade;
 }
 
+/**
+ * Stores a student's profile and enrolls them in a class, without signing
+ * them in. Returns the student's uid.
+ */
+async function enrollStudent(uid: string, name: string, toClass = classId) {
+  await getAdminDb()
+    .collection("users")
+    .doc(uid)
+    .set({ name, email: `${uid}@example.com`, role: "student" });
+  await getAdminDb()
+    .collection("users")
+    .doc(uid)
+    .collection("classes")
+    .doc(toClass)
+    .set({ class_id: toClass });
+
+  return uid;
+}
+
+type ListedStudent = { studentId: string; gradingStatus: string };
+
+/** Returns the row for one student from a professor's list. */
+function rowFor(students: ListedStudent[], studentId: string) {
+  return students.find((student) => student.studentId === studentId);
+}
+
 /** Creates a signed-in student enrolled in the class. */
 async function createEnrolledStudent(email = "student@example.com") {
   const student = await createSignedInUser(email, "student");
@@ -204,11 +230,104 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       expect(res.status).toBe(404);
     });
 
-    it("returns an empty list when nobody has submitted", async () => {
+    it("returns an empty list when nobody is enrolled or has submitted", async () => {
       const res = await getSubmissions(ownerToken);
 
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ role: "professor", submissions: [] });
+      expect(await res.json()).toEqual({ role: "professor", students: [] });
+    });
+
+    it("lists enrolled students who have not submitted as missing", async () => {
+      await enrollStudent("ada", "Ada Lovelace");
+      await enrollStudent("zoe", "Zoe Zhang");
+      await addSubmission("zoe", "Zoe Zhang");
+
+      const res = await getSubmissions(ownerToken);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).students).toEqual([
+        {
+          ...submissionResponse("zoe"),
+          studentName: "Zoe Zhang",
+          studentEmail: "zoe@example.com",
+          gradingStatus: "needs-grading",
+        },
+        {
+          studentId: "ada",
+          studentName: "Ada Lovelace",
+          studentEmail: "ada@example.com",
+          gradingStatus: "missing",
+        },
+      ]);
+    });
+
+    it("leaves out students enrolled only in another class", async () => {
+      await enrollStudent("ada", "Ada Lovelace");
+      await enrollStudent("bob", "Bob Brown", "class-2");
+
+      const res = await getSubmissions(ownerToken);
+
+      expect(res.status).toBe(200);
+      expect(
+        (await res.json()).students.map((student: ListedStudent) => student.studentId)
+      ).toEqual(["ada"]);
+    });
+
+    it("lists a student with two enrollment documents once", async () => {
+      await enrollStudent("ada", "Ada Lovelace");
+      await getAdminDb()
+        .collection("users")
+        .doc("ada")
+        .collection("classes")
+        .add({ class_id: classId });
+
+      const res = await getSubmissions(ownerToken);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).students).toHaveLength(1);
+    });
+
+    it("lists a student who submitted but is no longer enrolled", async () => {
+      await enrollStudent("ada", "Ada Lovelace");
+      await addSubmission("zoe", "Zoe Zhang");
+
+      const res = await getSubmissions(ownerToken);
+
+      expect(res.status).toBe(200);
+      const { students } = await res.json();
+      expect(rowFor(students, "zoe")?.gradingStatus).toBe("needs-grading");
+      expect(rowFor(students, "ada")?.gradingStatus).toBe("missing");
+    });
+
+    it("orders work to grade, then graded work, then missing, by name in each", async () => {
+      await enrollStudent("missing-amy", "Amy Adams");
+      await enrollStudent("graded-ben", "Ben Brown");
+      await enrollStudent("resubmitted-cal", "Cal Cole");
+      await enrollStudent("ungraded-dee", "Dee Dunn");
+      await enrollStudent("graded-abe", "Abe Ames");
+      await addSubmission("graded-ben", "Ben Brown");
+      await addSubmission("graded-abe", "Abe Ames");
+      await addSubmission("resubmitted-cal", "Cal Cole", "2026-11-03T09:00:00.000Z");
+      await addSubmission("ungraded-dee", "Dee Dunn");
+      await addGrade("graded-ben", 70);
+      await addGrade("graded-abe", 90);
+      await addGrade("resubmitted-cal", 60, "", "2026-11-01T09:00:00.000Z");
+
+      const res = await getSubmissions(ownerToken);
+
+      expect(res.status).toBe(200);
+      expect(
+        (await res.json()).students.map((student: ListedStudent) => [
+          student.studentId,
+          student.gradingStatus,
+        ])
+      ).toEqual([
+        ["resubmitted-cal", "resubmitted"],
+        ["ungraded-dee", "needs-grading"],
+        ["graded-abe", "graded"],
+        ["graded-ben", "graded"],
+        ["missing-amy", "missing"],
+      ]);
     });
 
     it("lists the assignment's submissions by student name, with names and emails", async () => {
@@ -220,16 +339,18 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       const res = await getSubmissions(ownerToken);
 
       expect(res.status).toBe(200);
-      expect((await res.json()).submissions).toEqual([
+      expect((await res.json()).students).toEqual([
         {
           ...submissionResponse("ada", "2026-10-31T09:00:00.000Z"),
           studentName: "Ada Lovelace",
           studentEmail: "ada@example.com",
+          gradingStatus: "needs-grading",
         },
         {
           ...submissionResponse("zoe", "2026-10-30T09:00:00.000Z"),
           studentName: "Zoe Zhang",
           studentEmail: "zoe@example.com",
+          gradingStatus: "needs-grading",
         },
       ]);
     });
@@ -243,26 +364,30 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       const res = await getSubmissions(ownerToken);
 
       expect(res.status).toBe(200);
-      expect((await res.json()).submissions).toEqual([
+      expect((await res.json()).students).toEqual([
         {
           ...submissionResponse("ada"),
           studentName: "Ada Lovelace",
           studentEmail: "ada@example.com",
+          gradingStatus: "needs-grading",
         },
         {
           ...submissionResponse("zoe"),
           studentName: "Zoe Zhang",
           studentEmail: "zoe@example.com",
+          gradingStatus: "needs-grading",
         },
         {
           ...submissionResponse("abe"),
           studentName: null,
           studentEmail: null,
+          gradingStatus: "needs-grading",
         },
         {
           ...submissionResponse("ghost"),
           studentName: null,
           studentEmail: null,
+          gradingStatus: "needs-grading",
         },
       ]);
     });
@@ -275,16 +400,16 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       const res = await getSubmissions(ownerToken);
 
       expect(res.status).toBe(200);
-      const { submissions } = await res.json();
-      expect(submissions[0]).toMatchObject({
-        studentId: "ada",
+      const { students } = await res.json();
+      expect(rowFor(students, "ada")).toMatchObject({
         grade: 87.5,
         feedback: "Strong work",
         gradedAt: grade.gradedAt,
         gradeUpdatedAt: null,
+        gradingStatus: "graded",
       });
-      expect(submissions[1]).toMatchObject({
-        studentId: "zoe",
+      expect(rowFor(students, "zoe")).toMatchObject({
+        gradingStatus: "needs-grading",
         grade: null,
         feedback: "",
         gradedAt: null,
@@ -304,16 +429,14 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       const res = await getSubmissions(ownerToken);
 
       expect(res.status).toBe(200);
-      const { submissions } = await res.json();
-      expect(submissions[0]).toMatchObject({
-        studentId: "ada",
+      const { students } = await res.json();
+      expect(rowFor(students, "ada")).toMatchObject({
         grade: 92,
         feedback: "Regraded",
         gradedAt: edited.gradedAt,
         gradeUpdatedAt: edited.updatedAt,
       });
-      expect(submissions[1]).toMatchObject({
-        studentId: "zoe",
+      expect(rowFor(students, "zoe")).toMatchObject({
         grade: 80,
         gradeUpdatedAt: null,
       });
@@ -328,16 +451,16 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       const res = await getSubmissions(ownerToken);
 
       expect(res.status).toBe(200);
-      const { submissions } = await res.json();
-      expect(submissions[0]).toMatchObject({
-        studentId: "ada",
+      const { students } = await res.json();
+      expect(rowFor(students, "ada")).toMatchObject({
         grade: 90,
         resubmittedAfterGrading: true,
+        gradingStatus: "resubmitted",
       });
-      expect(submissions[1]).toMatchObject({
-        studentId: "zoe",
+      expect(rowFor(students, "zoe")).toMatchObject({
         grade: 80,
         resubmittedAfterGrading: false,
+        gradingStatus: "graded",
       });
     });
 
@@ -352,7 +475,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       const res = await getSubmissions(ownerToken);
 
       expect(res.status).toBe(200);
-      expect((await res.json()).submissions[0].fileUrl).toBeNull();
+      expect((await res.json()).students[0].fileUrl).toBeNull();
     });
   });
 

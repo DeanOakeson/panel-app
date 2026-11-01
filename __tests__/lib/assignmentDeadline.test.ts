@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   formatClosesAt,
+  formatTimestamp,
   getClosesAt,
   getDeadline,
   hasClosed,
@@ -76,6 +77,16 @@ describe("getClosesAt", () => {
 describe("formatClosesAt", () => {
   it("formats the closing instant in Mountain Time", () => {
     expect(formatClosesAt("2026-10-31T05:59:59.999Z")).toMatch(/^Oct 30, 11:59\sPM MT$/);
+  });
+});
+
+describe("formatTimestamp", () => {
+  it("formats an instant in Mountain Time without seconds", () => {
+    expect(formatTimestamp("2026-10-16T21:31:45.123Z")).toMatch(/^Oct 16, 3:31\sPM MT$/);
+  });
+
+  it("returns text that is not a date unchanged", () => {
+    expect(formatTimestamp("not a date")).toBe("not a date");
   });
 });
 

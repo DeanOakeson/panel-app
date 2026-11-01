@@ -1,3 +1,5 @@
+import type { SubmittedStatus } from "@/lib/gradingStatus";
+
 
 export type ClassItem = {
   id: string;
@@ -40,6 +42,25 @@ export type Submission = {
     resubmittedAfterGrading: boolean;
     fileUrl: string | null;
 };
+
+/** A student on a professor's list for an assignment. */
+type ListedStudent = {
+    studentId: string;
+    /** Null when the student has no profile. */
+    studentName: string | null;
+    /** Null when the student has no profile. */
+    studentEmail: string | null;
+};
+
+/** A student on the professor's list who has not submitted. */
+export type MissingStudent = ListedStudent & { gradingStatus: "missing" };
+
+/** A student on the professor's list with their submission and grade. */
+export type SubmittedStudent = ListedStudent &
+    Submission & { gradingStatus: SubmittedStatus };
+
+/** One row of a professor's list: every enrolled student, submitted or not. */
+export type RosterStudent = MissingStudent | SubmittedStudent;
 
 /**
  * A professor's grade for one submission, stored at

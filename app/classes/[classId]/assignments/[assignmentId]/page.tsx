@@ -6,13 +6,19 @@ import Link from "next/link";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { formatClosesAt, hasClosed, whenPassed } from "@/lib/assignmentDeadline";
+import { getGradingStatus } from "@/lib/gradingStatus";
 
 import AssignmentInfo from "../../../../components/assignments/AssignmentInfo";
 import StudentSubmission from "../../../../components/assignments/StudentSubmission";
 import ProfessorSubmissions from "../../../../components/assignments/ProfessorSubmission";
 import SubmissionUploadForm from "../../../../components/assignments/SubmissionUploadForm";
 
-import type { Assignment, Grade, Submission } from "../../../../components/Types";
+import type {
+    Assignment,
+    Grade,
+    RosterStudent,
+    Submission,
+} from "../../../../components/Types";
 
 export default function AssignmentDetailPage() {
     const { classId, assignmentId } = useParams<{
@@ -24,7 +30,7 @@ export default function AssignmentDetailPage() {
 
     const [assignment, setAssignment] = useState<Assignment | null>(null);
     const [submission, setSubmission] = useState<Submission | null>(null);
-    const [studentSubmissions, setStudentSubmissions] = useState<Submission[]>([]);
+    const [students, setStudents] = useState<RosterStudent[]>([]);
     const [isProfessor, setIsProfessor] = useState(false);
 
     const [loading, setLoading] = useState(true);
@@ -66,12 +72,12 @@ export default function AssignmentDetailPage() {
 
                 if (data.role === "professor") {
                     setIsProfessor(true);
-                    setStudentSubmissions(data.submissions ?? []);
+                    setStudents(data.students ?? []);
                     setSubmission(null);
                 } else {
                     setIsProfessor(false);
                     setSubmission(data.submission ?? null);
-                    setStudentSubmissions([]);
+                    setStudents([]);
                 }
             } catch (err) {
                 setSubmissionError(
@@ -149,22 +155,23 @@ export default function AssignmentDetailPage() {
         }
     }
 
-    // Updates only the graded submission, so other students' grade forms
-    // stay mounted and keep their unsaved drafts
+    // Updates only the graded student in place, so other students' grade
+    // forms stay mounted with their unsaved drafts and the list keeps its order
     function handleGraded(studentId: string, grade: Grade) {
-        setStudentSubmissions((current) =>
-            current.map((studentSubmission) =>
-                studentSubmission.studentId === studentId
+        setStudents((current) =>
+            current.map((student) =>
+                student.studentId === studentId && student.gradingStatus !== "missing"
                     ? {
-                          ...studentSubmission,
+                          ...student,
                           grade: grade.score,
                           feedback: grade.feedback,
                           gradedAt: grade.gradedAt,
                           gradeUpdatedAt: grade.updatedAt ?? null,
                           resubmittedAfterGrading:
-                              grade.submittedAt !== studentSubmission.submittedAt,
+                              grade.submittedAt !== student.submittedAt,
+                          gradingStatus: getGradingStatus(student, grade),
                       }
-                    : studentSubmission
+                    : student
             )
         );
     }
@@ -249,13 +256,13 @@ export default function AssignmentDetailPage() {
                 <p className="mt-6 text-red-600">{error}</p>
             ) : assignment ? (
                 <>
-                    <AssignmentInfo assignment={assignment} />
+                    <AssignmentInfo assignment={assignment} showDueTime={isProfessor} />
 
                     {isProfessor ? (
                         <ProfessorSubmissions
                             classId={classId}
                             assignment={assignment}
-                            submissions={studentSubmissions}
+                            students={students}
                             loading={submissionLoading}
                             error={submissionError}
                             onGraded={handleGraded}
