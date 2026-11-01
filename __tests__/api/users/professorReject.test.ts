@@ -16,11 +16,8 @@ import { getHomePath, HOME_PATHS, PENDING_APPROVAL_PATH } from "@/lib/homePath";
 import { clearEmulators, createSignedInUser } from "../../helpers/emulators";
 
 /**
- * `PATCH /api/users` still authorizes with the stale `verifyAdmin`/`ADMIN_UID`
- * path (allowlisted in `__tests__/lib/adminGuardDrift.test.ts`; migrating it is
- * out of END-49 scope). Vitest does not load `.env.local`, so tests that expect
- * an admin to be granted must name that admin in the env var the route reads —
- * exactly the shape Kevin's live environment has.
+ * Creates a signed-in admin and names it in ADMIN_UID, as the live environment does.
+ * The route only reads ADMIN_UID to keep approve/reject off that account.
  */
 async function makeAdmin(email = "admin@example.com") {
   const user = await createSignedInUser(email, "admin");
@@ -179,6 +176,37 @@ describe("PATCH /api/users — reject a pending professor request", () => {
       role: "professor",
       professorStatus: "approved",
     });
+  });
+
+  it("lets an admin who is not ADMIN_UID approve and reject", async () => {
+    await makeAdmin();
+    const secondAdmin = await createSignedInUser("second-admin@example.com", "admin");
+    const approved = await registerSelf("wendy@example.com", "professor", "Wendy W");
+    const rejected = await registerSelf("xavier@example.com", "professor", "Xavier X");
+
+    const approve = await patchUsers(secondAdmin.idToken, { uid: approved.uid, action: "approve" });
+    const reject = await patchUsers(secondAdmin.idToken, { uid: rejected.uid, action: "reject" });
+
+    expect(approve.status).toBe(200);
+    expect(reject.status).toBe(200);
+    expect(await readProfile(approved.uid)).toMatchObject({
+      role: "professor",
+      professorStatus: "approved",
+    });
+    expect(await readProfile(rejected.uid)).toMatchObject({
+      role: "student",
+      professorStatus: "rejected",
+    });
+  });
+
+  it("answers 401 for an invalid token and leaves the applicant pending", async () => {
+    await makeAdmin();
+    const applicant = await registerSelf("wendy@example.com", "professor", "Wendy W");
+
+    const res = await patchUsers("not-a-real-token", { uid: applicant.uid, action: "reject" });
+
+    expect(res.status).toBe(401);
+    expect(await readProfile(applicant.uid)).toMatchObject({ professorStatus: "pending" });
   });
 
   it("answers 401 with no token and leaves the applicant pending", async () => {

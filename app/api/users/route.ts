@@ -1,34 +1,11 @@
 
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { requireAdmin } from "@/lib/adminGuard";
 import { FieldValue } from "firebase-admin/firestore";
 
 function getBearerToken(req: Request): string | null {
   const authorization = req.headers.get("authorization");
   return authorization?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
-}
-
-async function verifyAdmin(req: Request) {
-  const token = getBearerToken(req);
-
-  if (!token) {
-    throw new Error("UNAUTHORIZED");
-  }
-
-  const decoded = await getAdminAuth().verifyIdToken(token);
-  const adminUid = process.env.ADMIN_UID;
-
-  if (!adminUid || decoded.uid !== adminUid) {
-    throw new Error("FORBIDDEN");
-  }
-
-  const db = getAdminDb();
-  const adminDoc = await db.collection("users").doc(decoded.uid).get();
-
-  if (!adminDoc.exists || adminDoc.data()?.role !== "admin") {
-    throw new Error("FORBIDDEN");
-  }
-
-  return { db, decoded };
 }
 
 // GET /api/users
@@ -176,7 +153,10 @@ export async function POST(req: Request) {
 // Admin-only: approve or reject a professor application.
 export async function PATCH(req: Request) {
   try {
-    const { db } = await verifyAdmin(req);
+    const { error } = await requireAdmin(req);
+    if (error) return error;
+
+    const db = getAdminDb();
     const body = await req.json();
 
     const uid = typeof body.uid === "string" ? body.uid.trim() : "";
@@ -233,14 +213,6 @@ export async function PATCH(req: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
-
-    if (message === "UNAUTHORIZED") {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    if (message === "FORBIDDEN") {
-      return Response.json({ error: "Admin access required" }, { status: 403 });
-    }
 
     if (message === "APPLICANT_NOT_FOUND") {
       return Response.json({ error: "Applicant not found" }, { status: 404 });
