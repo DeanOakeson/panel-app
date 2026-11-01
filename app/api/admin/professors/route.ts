@@ -1,39 +1,13 @@
 import { NextResponse } from "next/server";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { getAdminDb } from "@/lib/firebaseAdmin";
+import { requireAdmin } from "@/lib/adminGuard";
 
 export async function GET(req: Request) {
   try {
-    const authorization = req.headers.get("authorization");
-    const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
-
-    if (!token) {
-      return NextResponse.json(
-        { error: "Missing authentication token." },
-        { status: 401 }
-      );
-    }
-
-    const decoded = await getAdminAuth().verifyIdToken(token);
-
-    // Only the configured administrator can view requests.
-    if (decoded.uid !== process.env.ADMIN_UID) {
-      return NextResponse.json(
-        { error: "Administrator access required." },
-        { status: 403 }
-      );
-    }
+    const { error } = await requireAdmin(req);
+    if (error) return error;
 
     const db = getAdminDb();
-
-    // Verify the administrator's Firestore role too.
-    const adminDoc = await db.collection("users").doc(decoded.uid).get();
-
-    if (!adminDoc.exists || adminDoc.data()?.role !== "admin") {
-      return NextResponse.json(
-        { error: "Your account does not have the admin role." },
-        { status: 403 }
-      );
-    }
 
     const snapshot = await db
       .collection("users")

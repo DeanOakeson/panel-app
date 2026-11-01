@@ -105,6 +105,12 @@ export default function StudentSubmission({
                                 : "Not graded yet"}
                         </p>
 
+                        {submission.gradeUpdatedAt && (
+                            <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">
+                                Updated {formatDate(submission.gradeUpdatedAt)}
+                            </p>
+                        )}
+
                         {submission.resubmittedAfterGrading && (
                             <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
                                 Graded before your latest submission

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
+import AdminHeader from "../components/admin/AdminHeader";
+import LogoutButton from "../components/admin/LogoutButton";
 
 /**
  * Gates everything under /admin: must be signed in AND have role === "admin".
@@ -21,6 +23,7 @@ export default function AdminLayout({
   const [state, setState] = useState<"loading" | "denied" | "ready">(
     "loading"
   );
+  const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -32,6 +35,8 @@ export default function AdminLayout({
           router.replace("/login");
           return;
         }
+
+        if (active) setEmail(user.email);
 
         try {
           const token = await user.getIdToken();
@@ -74,16 +79,25 @@ export default function AdminLayout({
           <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
             You don&apos;t have permission to view this page.
           </p>
-          <button
-            onClick={() => router.replace("/dashboard")}
-            className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
-          >
-            Back to dashboard
-          </button>
+          <div className="flex flex-wrap items-start justify-center gap-3">
+            <button
+              onClick={() => router.replace("/dashboard")}
+              className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
+            >
+              Back to dashboard
+            </button>
+            {/* Signed in with the wrong account? Let them switch. */}
+            <LogoutButton className="py-2" />
+          </div>
         </div>
       </div>
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      <AdminHeader email={email} />
+      {children}
+    </>
+  );
 }

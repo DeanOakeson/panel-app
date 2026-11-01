@@ -160,6 +160,9 @@ export async function POST(request: NextRequest) {
       term,
       section,
       professor_id: professorId,
+      // PANEL-26: a new course takes enrollment by default; the flag the
+      // admin flips to close it lives on the doc from birth, not missing.
+      enrollmentOpen: true,
       createdBy: uid,
       createdAt: new Date().toISOString(),
     };

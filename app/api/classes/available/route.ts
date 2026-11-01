@@ -1,9 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { getPendingRequestedClassIds } from "@/lib/enrollmentRequests";
+import { isEnrollmentOpen } from "@/lib/classAccess";
 
 /**
- * Lists every class a student could enroll in, with the professor's name and
- * whether the signed-in student is already enrolled. Students only.
+ * Lists every class a student could REQUEST, with the professor's name, whether
+ * the signed-in student is already enrolled, and whether they already have a
+ * request pending. Students only.
+ *
+ * Classes closed to enrollment (PANEL-26) are not listed at all: the browse
+ * list is the catalog of courses a student can join, and a closed course is
+ * not one of them. Legacy docs without the flag count as open, so nothing
+ * that predates the flag disappears.
+ *
+ * `requested` is what lets the browse list say "Requested" instead of offering a
+ * second Request button: enrollment now waits on an admin's approval, so the
+ * enrolled flag alone would keep advertising a course the student already asked
+ * for.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -38,19 +51,27 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const [classSnapshot, enrollmentSnapshot] = await Promise.all([
+    const [classSnapshot, enrollmentSnapshot, requestedIds] = await Promise.all([
       db.collection("classes").get(),
       userRef.collection("classes").get(),
+      getPendingRequestedClassIds(uid),
     ]);
 
     const enrolledIds = new Set(
       enrollmentSnapshot.docs.map((doc) => doc.data().class_id)
     );
 
+    // PANEL-26: closed courses drop out before anything downstream — the
+    // professor lookups and the response rows — so a closed course costs
+    // nothing and cannot leak back into the list.
+    const openClassDocs = classSnapshot.docs.filter((doc) =>
+      isEnrollmentOpen(doc.data())
+    );
+
     // Look up each professor's name once. getAll() rejects an empty list.
     const professorIds = [
       ...new Set(
-        classSnapshot.docs
+        openClassDocs
           .map((doc) => doc.data().professor_id)
           .filter((id): id is string => typeof id === "string" && id !== "")
       ),
@@ -69,7 +90,7 @@ export async function GET(request: NextRequest) {
       ])
     );
 
-    const classes = classSnapshot.docs
+    const classes = openClassDocs
       .map((doc) => {
         const data = doc.data();
         // Older classes may store numbers or leave fields out, so normalize
@@ -84,6 +105,7 @@ export async function GET(request: NextRequest) {
           section: String(data.section ?? ""),
           professorName: professorNames.get(data.professor_id) ?? null,
           enrolled: enrolledIds.has(doc.id),
+          requested: requestedIds.has(doc.id),
         };
       })
       .sort(

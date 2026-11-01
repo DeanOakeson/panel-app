@@ -65,6 +65,7 @@ function submissionResponse(studentUid: string, submittedAt?: string) {
     grade: null,
     feedback: "",
     gradedAt: null,
+    gradeUpdatedAt: null,
     resubmittedAfterGrading: false,
     fileUrl: `https://files.example.com/${filePath}`,
   };
@@ -92,13 +93,15 @@ async function addSubmission(
 
 /**
  * Stores a grade for a student's submission. `submittedAt` is the version it
- * graded, the stored submission's by default.
+ * graded, the stored submission's by default. `edit` adds the fields a later
+ * edit of the grade stores.
  */
 async function addGrade(
   studentUid: string,
   score: number,
   feedback = "",
-  submittedAt = fileSubmission(studentUid).submittedAt
+  submittedAt = fileSubmission(studentUid).submittedAt,
+  edit: { updatedAt: string; updatedBy: string } | null = null
 ) {
   const grade = {
     score,
@@ -106,6 +109,7 @@ async function addGrade(
     submittedAt,
     gradedBy: "owner",
     gradedAt: "2026-11-02T09:00:00.000Z",
+    ...edit,
   };
   await assignmentDoc().collection("grades").doc(studentUid).set(grade);
 
@@ -277,12 +281,41 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
         grade: 87.5,
         feedback: "Strong work",
         gradedAt: grade.gradedAt,
+        gradeUpdatedAt: null,
       });
       expect(submissions[1]).toMatchObject({
         studentId: "zoe",
         grade: null,
         feedback: "",
         gradedAt: null,
+        gradeUpdatedAt: null,
+      });
+    });
+
+    it("includes when each edited grade was last updated", async () => {
+      await addSubmission("ada", "Ada Lovelace");
+      await addSubmission("zoe", "Zoe Zhang");
+      const edited = await addGrade("ada", 92, "Regraded", undefined, {
+        updatedAt: "2026-11-04T09:00:00.000Z",
+        updatedBy: "owner",
+      });
+      await addGrade("zoe", 80);
+
+      const res = await getSubmissions(ownerToken);
+
+      expect(res.status).toBe(200);
+      const { submissions } = await res.json();
+      expect(submissions[0]).toMatchObject({
+        studentId: "ada",
+        grade: 92,
+        feedback: "Regraded",
+        gradedAt: edited.gradedAt,
+        gradeUpdatedAt: edited.updatedAt,
+      });
+      expect(submissions[1]).toMatchObject({
+        studentId: "zoe",
+        grade: 80,
+        gradeUpdatedAt: null,
       });
     });
 
@@ -361,6 +394,27 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
         grade: 0,
         feedback: "Missing the second half",
         gradedAt: grade.gradedAt,
+      });
+    });
+
+    it("returns the student's edited grade and when it was updated", async () => {
+      const { uid, idToken } = await createEnrolledStudent();
+      await addSubmission(uid, null);
+      const grade = await addGrade(uid, 95, "Regraded part 2", undefined, {
+        updatedAt: "2026-11-04T09:00:00.000Z",
+        updatedBy: "owner",
+      });
+
+      const res = await getSubmissions(idToken);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).submission).toEqual({
+        ...submissionResponse(uid),
+        grade: 95,
+        feedback: "Regraded part 2",
+        gradedAt: grade.gradedAt,
+        gradeUpdatedAt: "2026-11-04T09:00:00.000Z",
+        resubmittedAfterGrading: false,
       });
     });
 

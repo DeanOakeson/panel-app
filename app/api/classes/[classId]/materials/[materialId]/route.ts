@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { getClassAccess } from "@/lib/classAccess";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { MATERIALS_BUCKET } from "@/lib/courseMaterials";
 
 type RouteContext = {
   params: Promise<{ classId: string; materialId: string }>;
@@ -26,7 +28,9 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
       .collection("materials")
       .doc(materialId);
 
-    if (!(await materialRef.get()).exists) {
+    const materialDoc = await materialRef.get();
+
+    if (!materialDoc.exists) {
       return NextResponse.json(
         { error: "Course material not found." },
         { status: 404 }
@@ -34,6 +38,16 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     }
 
     await materialRef.delete();
+
+    // Remove the attached file too. A failure here only leaves an unused
+    // file in storage, so log it rather than failing the request.
+    const filePath = materialDoc.data()?.filePath;
+    if (typeof filePath === "string" && filePath) {
+      const { error } = await getSupabaseAdmin()
+        .storage.from(MATERIALS_BUCKET)
+        .remove([filePath]);
+      if (error) console.error("Remove course material file failed:", error);
+    }
 
     return NextResponse.json({ deleted: true, id: materialId }, { status: 200 });
   } catch (error) {

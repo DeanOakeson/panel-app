@@ -4,6 +4,14 @@ import { useState, type FormEvent } from "react";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import type { Grade } from "../Types";
 
+/** The stored grade a form edits. */
+export type EditedGrade = {
+  score: number;
+  feedback: string;
+  /** The grade's updatedAt, or its gradedAt when never edited. */
+  lastSavedAt: string;
+};
+
 type GradeFormProps = {
   classId: string;
   assignmentId: string;
@@ -12,27 +20,33 @@ type GradeFormProps = {
   /** The submittedAt of the submission the professor is looking at. */
   submittedAt: string;
   points: number;
+  /** The grade being edited. Without it the form creates a grade. */
+  editing?: EditedGrade;
   /**
    * Receives the student's uid, the stored grade, and whether another session
-   * had already saved it.
+   * had saved a grade first.
    */
   onSaved: (studentId: string, grade: Grade, alreadyGraded: boolean) => void;
+  /** Shows a Cancel button that calls this. */
+  onCancel?: () => void;
 };
 
 const inputClass =
   "rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white";
 
-/** Score and feedback form for an ungraded submission. */
+/** Score and feedback form that grades a submission or edits its grade. */
 export default function GradeForm({
   classId,
   assignmentId,
   studentId,
   submittedAt,
   points,
+  editing,
   onSaved,
+  onCancel,
 }: GradeFormProps) {
-  const [score, setScore] = useState("");
-  const [feedback, setFeedback] = useState("");
+  const [score, setScore] = useState(editing ? String(editing.score) : "");
+  const [feedback, setFeedback] = useState(editing?.feedback ?? "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -66,7 +80,7 @@ export default function GradeForm({
       const response = await fetch(
         `/api/classes/${classId}/assignments/${assignmentId}/submissions/${studentId}/grade`,
         {
-          method: "POST",
+          method: editing ? "PATCH" : "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
@@ -75,6 +89,7 @@ export default function GradeForm({
             score: scoreValue,
             feedback: feedback.trim(),
             submittedAt,
+            ...(editing && { lastSavedAt: editing.lastSavedAt }),
           }),
         }
       );
@@ -130,14 +145,25 @@ export default function GradeForm({
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div>
+      <div className="flex gap-2">
         <button
           type="submit"
           disabled={busy}
           className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
         >
-          {busy ? "Saving..." : "Save grade"}
+          {busy ? "Saving..." : editing ? "Save changes" : "Save grade"}
         </button>
+
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-zinc-700 dark:text-gray-300 dark:hover:bg-zinc-800"
+          >
+            Cancel
+          </button>
+        )}
       </div>
     </form>
   );

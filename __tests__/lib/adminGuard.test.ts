@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { requireAdmin } from "@/lib/adminGuard";
-import { getAdminDb } from "@/lib/firebaseAdmin";
+import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { clearEmulators, createSignedInUser } from "../helpers/emulators";
 
 /** A request shaped like the ones the admin routes receive. */
@@ -94,9 +94,27 @@ describe("requireAdmin", () => {
     const { uid, idToken } = await createSignedInUser("nobody@example.com", "student");
     process.env.ADMIN_UID = uid;
 
-    const { error } = await requireAdmin(adminRequest(idToken));
+    try {
+      const { error } = await requireAdmin(adminRequest(idToken));
 
-    expect(error?.status).toBe(403);
-    delete process.env.ADMIN_UID;
+      expect(error?.status).toBe(403);
+    } finally {
+      delete process.env.ADMIN_UID;
+    }
+  });
+
+  it("throws instead of returning 401 when the token can't be checked", async () => {
+    // Simulates an outage, such as Google's signing keys being unreachable.
+    // Only verifyIdToken is replaced, and only for this test.
+    const outage = Object.assign(new Error("Error fetching public keys"), {
+      code: "app/network-error",
+    });
+    const spy = vi.spyOn(getAdminAuth(), "verifyIdToken").mockRejectedValueOnce(outage);
+
+    try {
+      await expect(requireAdmin(adminRequest("any-token"))).rejects.toBe(outage);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

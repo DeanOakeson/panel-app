@@ -54,3 +54,6 @@ ui-debug.log
 .firebase/
 # per-developer local emulator config (off-default ports, not for the team)
 firebase.emulator-test.json
+
+# local run logs (dev server / emulator stdout captured by our harness)
+/logs/

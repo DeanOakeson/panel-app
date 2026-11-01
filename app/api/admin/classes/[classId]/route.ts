@@ -5,6 +5,9 @@ import type { DocumentReference } from "firebase-admin/firestore";
 
 type RouteContext = { params: Promise<{ classId: string }> };
 
+/** Same guard as `POST /api/classes` — a class term is one of these four. */
+const VALID_TERMS = ["Spring", "Summer", "Fall", "Winter"];
+
 /**
  * Finds every student enrollment for a class. Enrollments are stored in
  * users/{uid}/classes/{classId}; the shared class_id field is what lets us
@@ -72,6 +75,159 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     console.error("GET /api/admin/classes/[classId] failed:", error);
     return NextResponse.json(
       { error: "Failed to load class" },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * Edits a class's metadata: name, course code, year, term, section, the
+ * assigned professor, and whether the course is open for enrollment
+ * (`enrollmentOpen`, PANEL-26). Only the fields present in the body are
+ * written, so a form that sends just what the admin changed can't clobber
+ * anything else.
+ */
+export async function PATCH(request: NextRequest, { params }: RouteContext) {
+  try {
+    const { error } = await requireAdmin(request);
+    if (error) return error;
+    const { classId } = await params;
+
+    const db = getAdminDb();
+    const classRef = db.collection("classes").doc(classId);
+    const classDoc = await classRef.get();
+    if (!classDoc.exists) {
+      return NextResponse.json({ error: "Class not found" }, { status: 404 });
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid JSON request body." },
+        { status: 400 }
+      );
+    }
+
+    const updates: Record<string, unknown> = {};
+
+    if ("name" in body) {
+      const name = typeof body.name === "string" ? body.name.trim() : "";
+      if (!name || name.length > 150) {
+        return NextResponse.json(
+          { error: "Course name is required (150 characters max)." },
+          { status: 400 }
+        );
+      }
+      updates.name = name;
+    }
+
+    if ("courseCode" in body) {
+      const courseCode =
+        typeof body.courseCode === "string" ? body.courseCode.trim() : "";
+      if (!courseCode || courseCode.length > 30) {
+        return NextResponse.json(
+          { error: "Course code is required (30 characters max)." },
+          { status: 400 }
+        );
+      }
+      updates.courseCode = courseCode;
+    }
+
+    if ("year" in body) {
+      const year = body.year;
+      if (
+        typeof year !== "number" ||
+        !Number.isInteger(year) ||
+        year < 2000 ||
+        year > 2100
+      ) {
+        return NextResponse.json(
+          { error: "Year must be a valid number between 2000 and 2100." },
+          { status: 400 }
+        );
+      }
+      updates.year = year;
+    }
+
+    if ("term" in body) {
+      const term = typeof body.term === "string" ? body.term : "";
+      if (!VALID_TERMS.includes(term)) {
+        return NextResponse.json(
+          { error: "Term must be Spring, Summer, Fall, or Winter." },
+          { status: 400 }
+        );
+      }
+      updates.term = term;
+    }
+
+    if ("section" in body) {
+      const section =
+        typeof body.section === "string" ? body.section.trim() : "";
+      if (!section || section.length > 20) {
+        return NextResponse.json(
+          { error: "Section is required (20 characters max)." },
+          { status: 400 }
+        );
+      }
+      updates.section = section;
+    }
+
+    if ("professorId" in body) {
+      const professorId =
+        typeof body.professorId === "string" ? body.professorId.trim() : "";
+      if (!professorId) {
+        return NextResponse.json(
+          { error: "Choose a professor for this class." },
+          { status: 400 }
+        );
+      }
+
+      const professorDoc = await db.collection("users").doc(professorId).get();
+      if (!professorDoc.exists || professorDoc.data()?.role !== "professor") {
+        return NextResponse.json(
+          { error: "The selected user is not a professor." },
+          { status: 400 }
+        );
+      }
+
+      // Both professors' class lists are read with
+      // `classes.where("professor_id", "==", uid)`, so rewriting this single
+      // field drops the class from the old professor's list and adds it to the
+      // new professor's list in one write — nothing else to keep in sync.
+      updates.professor_id = professorId;
+    }
+
+    if ("enrollmentOpen" in body) {
+      // PANEL-26: the course's open/closed state. Strictly boolean so a
+      // hand-crafted `"false"` string or a 1 cannot be stored and re-read as
+      // something `isEnrollmentOpen` might misjudge.
+      if (typeof body.enrollmentOpen !== "boolean") {
+        return NextResponse.json(
+          { error: "Enrollment open must be true or false." },
+          { status: 400 }
+        );
+      }
+      updates.enrollmentOpen = body.enrollmentOpen;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
+    }
+
+    updates.updatedAt = new Date().toISOString();
+    await classRef.update(updates);
+
+    const updated = await classRef.get();
+
+    return NextResponse.json({
+      class: { id: classId, ...(updated.data() ?? {}) },
+    });
+  } catch (error) {
+    console.error("PATCH /api/admin/classes/[classId] failed:", error);
+    return NextResponse.json(
+      { error: "Failed to update class" },
       { status: 500 }
     );
   }

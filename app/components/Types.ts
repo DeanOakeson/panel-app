@@ -34,6 +34,8 @@ export type Submission = {
     feedback: string;
     /** ISO 8601 string. Null until graded. */
     gradedAt: string | null;
+    /** ISO 8601 string. Null until the grade is edited. */
+    gradeUpdatedAt: string | null;
     /** True when the graded file has been replaced. */
     resubmittedAfterGrading: boolean;
     fileUrl: string | null;
@@ -56,4 +58,8 @@ export type Grade = {
     gradedBy: string;
     /** ISO 8601 string. */
     gradedAt: string;
+    /** ISO 8601 string of the latest edit. Absent until edited. */
+    updatedAt?: string;
+    /** The uid of the professor who last edited the grade. Absent until edited. */
+    updatedBy?: string;
 };
