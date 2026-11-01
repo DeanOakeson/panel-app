@@ -213,7 +213,7 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => 
       ),
       { params: Promise.resolve({ classId, assignmentId }) }
     );
-    expect((await list.json()).submissions).toEqual([
+    expect((await list.json()).students).toEqual([
       expect.objectContaining({
         studentId: uid,
         fileName: "second.pdf",
@@ -221,6 +221,7 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => 
         feedback: "Good",
         gradedAt: grade.gradedAt,
         resubmittedAfterGrading: true,
+        gradingStatus: "resubmitted",
       }),
     ]);
   });

@@ -82,13 +82,27 @@ export function getClosesAt(dueDate: unknown): string | null {
 
 /** Formats a closing instant in Mountain Time, like "Oct 30, 11:59 PM MT". */
 export function formatClosesAt(closesAt: string): string {
+  return formatTimestamp(closesAt);
+}
+
+/**
+ * Formats an ISO instant in Mountain Time to the minute, like
+ * "Oct 30, 3:05 PM MT". Returns the input unchanged when it is not a date.
+ */
+export function formatTimestamp(instant: string): string {
+  const date = new Date(instant);
+
+  if (Number.isNaN(date.getTime())) {
+    return instant;
+  }
+
   const formatted = new Intl.DateTimeFormat("en-US", {
     timeZone: DEADLINE_TIME_ZONE,
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  }).format(new Date(closesAt));
+  }).format(date);
 
   return `${formatted} MT`;
 }

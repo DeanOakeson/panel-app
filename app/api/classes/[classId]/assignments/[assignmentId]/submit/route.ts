@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { getDeadline } from "@/lib/assignmentDeadline";
+import { loadEnrolledStudentIds } from "@/lib/classRoster";
+import { getGradingStatus, gradingStatusRank } from "@/lib/gradingStatus";
 
 type RouteContext = {
   params: Promise<{
@@ -314,31 +316,49 @@ export async function GET(
     const submissionsRef = assignmentRef.collection("submissions");
     const gradesRef = assignmentRef.collection("grades");
 
-    // Professors can view all submissions for their own class.
+    // Professors see every enrolled student, and anyone else who submitted
     if (role === "professor") {
-      const [snapshot, gradeSnapshot] = await Promise.all([
+      const [snapshot, gradeSnapshot, enrolledIds] = await Promise.all([
         submissionsRef.get(),
         gradesRef.get(),
+        loadEnrolledStudentIds(classId),
       ]);
 
-      // getAll() rejects an empty argument list
-      const studentDocs = snapshot.empty
-        ? []
-        : await db.getAll(
-            ...snapshot.docs.map((doc) => db.collection("users").doc(doc.id))
-          );
-      const students = new Map(
-        studentDocs.map((studentDoc) => [studentDoc.id, studentDoc.data()])
+      const submissionsById = new Map(
+        snapshot.docs.map((doc) => [doc.id, doc.data()])
       );
       const grades = new Map(
         gradeSnapshot.docs.map((gradeDoc) => [gradeDoc.id, gradeDoc.data()])
       );
+      const studentIds = [
+        ...new Set([...enrolledIds, ...submissionsById.keys()]),
+      ];
 
-      const submissions = await Promise.all(
-        snapshot.docs.map(async (doc) => {
-          const submission = doc.data();
-          const student = students.get(doc.id);
-          const grade = grades.get(doc.id);
+      // getAll() rejects an empty argument list
+      const studentDocs = studentIds.length === 0
+        ? []
+        : await db.getAll(
+            ...studentIds.map((studentId) => db.collection("users").doc(studentId))
+          );
+      const students = new Map(
+        studentDocs.map((studentDoc) => [studentDoc.id, studentDoc.data()])
+      );
+
+      const rows = await Promise.all(
+        studentIds.map(async (studentId) => {
+          const student = students.get(studentId);
+          const submission = submissionsById.get(studentId);
+          const grade = grades.get(studentId);
+          const identity = {
+            studentId,
+            studentName: (student?.name as string | undefined) ?? null,
+            studentEmail: (student?.email as string | undefined) ?? null,
+            gradingStatus: getGradingStatus(submission, grade),
+          };
+
+          if (!submission) {
+            return identity;
+          }
 
           const { data, error } = await getSupabaseAdmin().storage
             .from(BUCKET)
@@ -352,9 +372,7 @@ export async function GET(
           }
 
           return {
-            studentId: submission.studentId || doc.id,
-            studentName: (student?.name as string | undefined) ?? null,
-            studentEmail: (student?.email as string | undefined) ?? null,
+            ...identity,
             fileName: submission.fileName,
             fileType: submission.fileType,
             fileSize: submission.fileSize,
@@ -371,8 +389,15 @@ export async function GET(
         })
       );
 
-      // Rows shown as "Unknown student" go after every named student
-      submissions.sort((first, second) => {
+      // Work to grade first, then graded, then missing. Within a group, rows
+      // shown as "Unknown student" go after every named student.
+      rows.sort((first, second) => {
+        const rankDifference =
+          gradingStatusRank(first.gradingStatus) -
+          gradingStatusRank(second.gradingStatus);
+
+        if (rankDifference !== 0) return rankDifference;
+
         const firstName = first.studentName ?? first.studentEmail;
         const secondName = second.studentName ?? second.studentEmail;
 
@@ -388,7 +413,7 @@ export async function GET(
 
       return NextResponse.json({
         role,
-        submissions,
+        students: rows,
       });
     }
 

@@ -3,6 +3,8 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
+import { formatClosesAt } from "@/lib/assignmentDeadline";
+import type { GradingCounts } from "@/lib/gradingStatus";
 
 export type Assignment = {
   id: string;
@@ -10,6 +12,10 @@ export type Assignment = {
   description?: string;
   points: number;
   dueDate: string | null;
+  /** When submissions close, as an ISO instant. Null without a valid due date. */
+  closesAt?: string | null;
+  /** Sent to the class's professor and admins only. */
+  grading?: GradingCounts;
 };
 
 type AssignmentItemProps = {
@@ -23,6 +29,47 @@ type AssignmentItemProps = {
 
 const inputClass =
   "rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white";
+
+/** Returns the due line, like "Due Oct 16, 11:59 PM MT". */
+function describeDue(assignment: Assignment) {
+  if (assignment.closesAt) {
+    return `Due ${formatClosesAt(assignment.closesAt)}`;
+  }
+
+  return assignment.dueDate ? `Due ${assignment.dueDate}` : "No due date";
+}
+
+/** Shows how many students submitted and how much is left to grade. */
+function GradingProgress({ counts }: { counts: GradingCounts }) {
+  if (counts.students === 0) {
+    return (
+      <p className="text-sm text-gray-600 dark:text-zinc-300">
+        No students enrolled
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-sm text-gray-600 dark:text-zinc-300">
+      {counts.submitted}/{counts.students} submitted
+      {counts.submitted > 0 && (
+        <>
+          {" · "}
+          {counts.toGrade > 0 ? (
+            <span className="font-semibold text-amber-700 dark:text-amber-400">
+              {counts.toGrade} to grade
+              {counts.resubmitted > 0 && ` (${counts.resubmitted} resubmitted)`}
+            </span>
+          ) : (
+            <span className="font-semibold text-green-700 dark:text-green-400">
+              All graded
+            </span>
+          )}
+        </>
+      )}
+    </p>
+  );
+}
 
 export default function AssignmentItem({
   classId,
@@ -213,9 +260,11 @@ export default function AssignmentItem({
           </span>
         )}
         <span className="text-sm text-gray-500 dark:text-zinc-400">
-          {a.points} pts · {a.dueDate ? `Due ${a.dueDate}` : "No due date"}
+          {a.points} pts · {describeDue(a)}
         </span>
       </div>
+
+      {a.grading && <GradingProgress counts={a.grading} />}
 
       {a.description && (
         <p className="whitespace-pre-line text-sm text-gray-600 dark:text-zinc-300">

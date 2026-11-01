@@ -1,28 +1,58 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { formatTimestamp } from "@/lib/assignmentDeadline";
+import {
+    countGradingStatuses,
+    getGradingStatus,
+    gradingStatusLabel,
+    needsGrade,
+    type GradingCounts,
+    type GradingStatus,
+} from "@/lib/gradingStatus";
 import GradeForm from "./GradeForm";
-import type { Assignment, Grade, Submission } from "../Types";
+import type { Assignment, Grade, RosterStudent, SubmittedStudent } from "../Types";
 
 type Props = {
     classId: string;
     assignment: Assignment;
-    submissions: Submission[];
+    /** Every student on the assignment, in the order the server sorted them. */
+    students: RosterStudent[];
     loading: boolean;
     error: string;
+    /** Whether submissions have closed, which labels students without one as missing. */
+    closed: boolean;
     /** Receives the grade the server saved for a student's submission. */
     onGraded: (studentId: string, grade: Grade) => void;
 };
 
-function formatDate(dateString: string) {
-    const date = new Date(dateString);
+type Filter = "all" | "to-grade" | "graded" | "missing";
 
-    if (Number.isNaN(date.getTime())) {
-        return dateString;
-    }
+const FILTERS: { value: Filter; empty: string }[] = [
+    { value: "all", empty: "" },
+    { value: "to-grade", empty: "Nothing needs grading." },
+    { value: "graded", empty: "No submissions are graded yet." },
+    { value: "missing", empty: "Every student has submitted." },
+];
 
-    return date.toLocaleString();
-}
+const BADGE_CLASSES: Record<GradingStatus, string> = {
+    "needs-grading": "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200",
+    resubmitted: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+    graded: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200",
+    missing: "bg-gray-100 text-gray-700 dark:bg-zinc-800 dark:text-zinc-300",
+};
+
+/** How long a card graded under Needs grading stays before it leaves the view. */
+const LEAVE_DELAY = 1500;
+
+/** How often a card waiting to leave checks again while the professor is typing. */
+const LEAVE_RETRY = 500;
+
+const secondaryButtonClass =
+    "inline-block rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-zinc-700 dark:text-gray-300 dark:hover:bg-zinc-800";
+
+const primaryButtonClass =
+    "inline-block rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500";
 
 function formatFileSize(bytes: number) {
     if (bytes < 1024 * 1024) {
@@ -32,25 +62,163 @@ function formatFileSize(bytes: number) {
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+/** Returns whether a student's status belongs under a filter. */
+function matchesFilter(status: GradingStatus, filter: Filter) {
+    switch (filter) {
+        case "all":
+            return true;
+        case "to-grade":
+            return needsGrade(status);
+        default:
+            return status === filter;
+    }
+}
+
+/** Returns a filter button's label. */
+function filterLabel(filter: Filter, closed: boolean) {
+    switch (filter) {
+        case "all":
+            return "All";
+        case "to-grade":
+            return "Needs grading";
+        default:
+            return gradingStatusLabel(filter, closed);
+    }
+}
+
+/** Returns how many students a filter shows. */
+function filterCount(counts: GradingCounts, filter: Filter) {
+    switch (filter) {
+        case "all":
+            return counts.students;
+        case "to-grade":
+            return counts.toGrade;
+        case "graded":
+            return counts.graded;
+        case "missing":
+            return counts.missing;
+    }
+}
+
 /**
- * Lists a class's submissions for an assignment, with a grade form on each
- * ungraded one and an editor for each graded one.
+ * Returns the summary line, like
+ * "5 of 6 submitted · 3 need grading (1 resubmitted) · 1 missing".
+ */
+function describeCounts(counts: GradingCounts, closed: boolean) {
+    const parts = [`${counts.submitted} of ${counts.students} submitted`];
+
+    if (counts.toGrade > 0) {
+        const verb = counts.toGrade === 1 ? "needs" : "need";
+        const resubmitted =
+            counts.resubmitted > 0 ? ` (${counts.resubmitted} resubmitted)` : "";
+
+        parts.push(`${counts.toGrade} ${verb} grading${resubmitted}`);
+    } else if (counts.submitted > 0) {
+        parts.push("all graded");
+    }
+
+    if (counts.missing > 0 && counts.submitted > 0) {
+        parts.push(
+            `${counts.missing} ${gradingStatusLabel("missing", closed).toLowerCase()}`
+        );
+    }
+
+    return parts.join(" · ");
+}
+
+/** Returns the name a professor knows a student by. */
+function displayName(student: RosterStudent) {
+    return student.studentName ?? student.studentEmail ?? "Unknown student";
+}
+
+/** Shows a student's grading status as a colored label. */
+function StatusBadge({ status, closed }: { status: GradingStatus; closed: boolean }) {
+    return (
+        <span
+            className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${BADGE_CLASSES[status]}`}
+        >
+            {gradingStatusLabel(status, closed)}
+        </span>
+    );
+}
+
+/** Shows a student's name, with their email or ID beneath it, and their status. */
+function StudentHeading({ student, closed }: { student: RosterStudent; closed: boolean }) {
+    return (
+        <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+                <p className="break-all font-semibold text-gray-900 dark:text-white">
+                    {displayName(student)}
+                </p>
+
+                {student.studentName && student.studentEmail && (
+                    <p className="break-all text-sm text-gray-500 dark:text-zinc-400">
+                        {student.studentEmail}
+                    </p>
+                )}
+
+                {!student.studentName && !student.studentEmail && (
+                    <p className="break-all text-sm text-gray-500 dark:text-zinc-400">
+                        Student ID: {student.studentId}
+                    </p>
+                )}
+            </div>
+
+            <StatusBadge status={student.gradingStatus} closed={closed} />
+        </div>
+    );
+}
+
+/**
+ * Lists every student on an assignment with their grading status, a filter,
+ * a grade form on each ungraded submission and an editor for each graded one.
  */
 export default function ProfessorSubmissions({
     classId,
     assignment,
-    submissions,
+    students,
     loading,
     error,
+    closed,
     onGraded,
 }: Props) {
     const [alreadyGradedIds, setAlreadyGradedIds] = useState<ReadonlySet<string>>(
         new Set()
     );
     const [editingIds, setEditingIds] = useState<ReadonlySet<string>>(new Set());
+    const [filter, setFilter] = useState<Filter>("all");
+    // Students graded under the current filter stay visible after they stop
+    // matching it: until the filter changes, or briefly under Needs grading
+    const [keptIds, setKeptIds] = useState<ReadonlySet<string>>(new Set());
+    const [announcement, setAnnouncement] = useState("");
+    const sectionRef = useRef<HTMLElement>(null);
+    const leaveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
-    /** Opens or closes the grade editor on a student's row. */
+    useEffect(() => {
+        const timers = leaveTimers.current;
+
+        return () => timers.forEach((timer) => clearTimeout(timer));
+    }, []);
+
+    const counts = countGradingStatuses(
+        students.map((student) => student.gradingStatus)
+    );
+    const visibleStudents = students.filter(
+        (student) =>
+            matchesFilter(student.gradingStatus, filter) ||
+            keptIds.has(student.studentId)
+    );
+
+    /**
+     * Opens or closes the grade editor on a student's row. An open editor
+     * keeps its card in view until the grade is saved again.
+     */
     function setEditing(studentId: string, open: boolean) {
+        if (open) {
+            clearTimeout(leaveTimers.current.get(studentId));
+            leaveTimers.current.delete(studentId);
+        }
+
         setEditingIds((current) => {
             const next = new Set(current);
 
@@ -62,6 +230,70 @@ export default function ProfessorSubmissions({
 
             return next;
         });
+    }
+
+    /** Shows the students under a filter. */
+    function chooseFilter(next: Filter) {
+        leaveTimers.current.forEach((timer) => clearTimeout(timer));
+        leaveTimers.current.clear();
+        setFilter(next);
+        setKeptIds(new Set());
+    }
+
+    /** Returns whether the professor is typing in a field on this list. */
+    function isTyping() {
+        const active = document.activeElement;
+
+        return (
+            (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) &&
+            !!sectionRef.current?.contains(active)
+        );
+    }
+
+    /**
+     * Drops a graded card from the Needs grading view after a pause, waiting
+     * while the professor types elsewhere so the cards around the field stay put.
+     */
+    function scheduleLeave(studentId: string, delay = LEAVE_DELAY) {
+        clearTimeout(leaveTimers.current.get(studentId));
+        leaveTimers.current.set(
+            studentId,
+            setTimeout(() => {
+                if (isTyping()) {
+                    scheduleLeave(studentId, LEAVE_RETRY);
+                    return;
+                }
+
+                leaveTimers.current.delete(studentId);
+                setKeptIds((current) => {
+                    const next = new Set(current);
+                    next.delete(studentId);
+                    return next;
+                });
+            }, delay)
+        );
+    }
+
+    /** Announces a saved grade and how much is left to grade. */
+    function announceSaved(studentId: string, grade: Grade, alreadyGraded: boolean) {
+        const saved = students.find((student) => student.studentId === studentId);
+        const savedStillToGrade =
+            !!saved &&
+            saved.gradingStatus !== "missing" &&
+            needsGrade(getGradingStatus(saved, grade));
+        const left =
+            students.filter(
+                (student) =>
+                    student.studentId !== studentId && needsGrade(student.gradingStatus)
+            ).length + (savedStillToGrade ? 1 : 0);
+
+        const name = saved ? displayName(saved) : "this student";
+        const result = alreadyGraded
+            ? `${name} was already graded elsewhere. Showing the saved grade.`
+            : `Grade saved for ${name}.`;
+        const remaining = left === 0 ? "Nothing left to grade." : `${left} left to grade.`;
+
+        setAnnouncement(`${result} ${remaining}`);
     }
 
     /**
@@ -80,15 +312,24 @@ export default function ProfessorSubmissions({
 
             return next;
         });
+        setKeptIds((current) => new Set(current).add(studentId));
         setEditing(studentId, false);
+        announceSaved(studentId, grade, alreadyGraded);
+
+        if (filter === "to-grade") {
+            scheduleLeave(studentId);
+        }
 
         onGraded(studentId, grade);
     }
 
     return (
-        <section className="mt-6 rounded-lg border border-gray-200 bg-white p-6 dark:border-zinc-800 dark:bg-gray-900">
+        <section
+            ref={sectionRef}
+            className="mt-6 rounded-lg border border-gray-200 bg-white p-6 dark:border-zinc-800 dark:bg-gray-900"
+        >
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Student submissions ({submissions.length})
+                Student submissions
             </h2>
 
             {loading ? (
@@ -97,163 +338,238 @@ export default function ProfessorSubmissions({
                 </p>
             ) : error ? (
                 <p className="mt-3 text-sm text-red-600">{error}</p>
-            ) : submissions.length === 0 ? (
+            ) : students.length === 0 ? (
                 <p className="mt-3 text-sm text-gray-500 dark:text-zinc-400">
-                    No students have submitted this assignment yet.
+                    No students are enrolled in this course yet.
                 </p>
             ) : (
-                <div className="mt-4 space-y-4">
-                    {submissions.map((submission) => (
-                        <article
-                            key={submission.studentId}
-                            className="rounded-lg border border-gray-200 p-4 dark:border-zinc-700"
-                        >
-                            <p className="break-all font-semibold text-gray-900 dark:text-white">
-                                {submission.studentName ??
-                                    submission.studentEmail ??
-                                    "Unknown student"}
-                            </p>
+                <>
+                    <p className="mt-1 text-sm text-gray-600 dark:text-zinc-300">
+                        {describeCounts(counts, closed)}
+                    </p>
 
-                            {submission.studentName && submission.studentEmail && (
-                                <p className="break-all text-sm text-gray-500 dark:text-zinc-400">
-                                    {submission.studentEmail}
-                                </p>
-                            )}
+                    <p role="status" aria-live="polite" className="sr-only">
+                        {announcement}
+                    </p>
 
-                            {!submission.studentName && !submission.studentEmail && (
-                                <p className="break-all text-sm text-gray-500 dark:text-zinc-400">
-                                    Student ID: {submission.studentId}
-                                </p>
-                            )}
+                    <div
+                        role="group"
+                        aria-label="Show students"
+                        className="mt-4 flex flex-wrap gap-2"
+                    >
+                        {FILTERS.map((option) => {
+                            const selected = filter === option.value;
 
-                            <div className="mt-3">
-                                <p className="break-all font-medium text-gray-900 dark:text-white">
-                                    {submission.fileName}
-                                </p>
-
-                                <p className="text-sm text-gray-500 dark:text-zinc-400">
-                                    {formatFileSize(submission.fileSize)}
-                                </p>
-
-                                <p className="mt-2 text-sm text-gray-500 dark:text-zinc-400">
-                                    Submitted: {formatDate(submission.submittedAt)}
-                                </p>
-
-                                <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">
-                                    Status: {submission.status}
-                                </p>
-                            </div>
-
-                            <div className="mt-3">
-                                <p className="text-sm text-gray-500 dark:text-zinc-400">
-                                    Grade
-                                </p>
-
-                                <p className="font-medium text-gray-900 dark:text-white">
-                                    {submission.grade !== null
-                                        ? `${submission.grade} / ${assignment.points}`
-                                        : "Not graded"}
-                                </p>
-
-                                {submission.gradedAt && (
-                                    <p className="text-xs text-gray-500 dark:text-zinc-400">
-                                        Graded {formatDate(submission.gradedAt)}
-                                    </p>
-                                )}
-
-                                {submission.gradeUpdatedAt && (
-                                    <p className="text-xs text-gray-500 dark:text-zinc-400">
-                                        Updated {formatDate(submission.gradeUpdatedAt)}
-                                    </p>
-                                )}
-
-                                {submission.studentId &&
-                                    alreadyGradedIds.has(submission.studentId) && (
-                                        <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
-                                            Saved elsewhere first. Showing the saved grade.
-                                        </p>
-                                    )}
-
-                                {submission.resubmittedAfterGrading && (
-                                    <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
-                                        Resubmitted after grading
-                                    </p>
-                                )}
-                            </div>
-
-                            {submission.feedback && (
-                                <div className="mt-3">
-                                    <p className="text-sm text-gray-500 dark:text-zinc-400">
-                                        Feedback
-                                    </p>
-
-                                    <p className="whitespace-pre-line text-gray-900 dark:text-white">
-                                        {submission.feedback}
-                                    </p>
-                                </div>
-                            )}
-
-                            {submission.fileUrl && (
-                                <a
-                                    href={submission.fileUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="mt-4 inline-block rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-gray-50 dark:border-zinc-700 dark:text-blue-400 dark:hover:bg-zinc-800"
+                            return (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    aria-pressed={selected}
+                                    onClick={() => chooseFilter(option.value)}
+                                    className={`rounded-full border px-3 py-1 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${
+                                        selected
+                                            ? "border-blue-600 bg-blue-600 text-white"
+                                            : "border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-zinc-700 dark:text-gray-300 dark:hover:bg-zinc-800"
+                                    }`}
                                 >
-                                    View / Download file
-                                </a>
-                            )}
+                                    {`${filterLabel(option.value, closed)} (${filterCount(counts, option.value)})`}
+                                </button>
+                            );
+                        })}
+                    </div>
 
-                            {submission.grade === null && submission.studentId && (
-                                <div className="mt-4 border-t border-gray-200 pt-4 dark:border-zinc-700">
-                                    <GradeForm
+                    {visibleStudents.length === 0 ? (
+                        <p className="mt-4 text-sm text-gray-500 dark:text-zinc-400">
+                            {FILTERS.find((option) => option.value === filter)?.empty}
+                        </p>
+                    ) : (
+                        <div className="mt-4 space-y-4">
+                            {visibleStudents.map((student) =>
+                                student.gradingStatus === "missing" ? (
+                                    <article
+                                        key={student.studentId}
+                                        className="rounded-lg border border-gray-200 p-4 dark:border-zinc-700"
+                                    >
+                                        <StudentHeading student={student} closed={closed} />
+
+                                        <p className="mt-2 text-sm text-gray-500 dark:text-zinc-400">
+                                            No submission
+                                        </p>
+                                    </article>
+                                ) : (
+                                    <SubmissionCard
+                                        key={student.studentId}
                                         classId={classId}
-                                        assignmentId={assignment.id}
-                                        studentId={submission.studentId}
-                                        submittedAt={submission.submittedAt}
-                                        points={assignment.points}
+                                        assignment={assignment}
+                                        student={student}
+                                        closed={closed}
+                                        editing={editingIds.has(student.studentId)}
+                                        savedElsewhere={alreadyGradedIds.has(
+                                            student.studentId
+                                        )}
+                                        onEditingChange={(open) =>
+                                            setEditing(student.studentId, open)
+                                        }
                                         onSaved={handleSaved}
                                     />
-                                </div>
+                                )
                             )}
-
-                            {submission.grade !== null &&
-                                submission.gradedAt &&
-                                submission.studentId &&
-                                (editingIds.has(submission.studentId) ? (
-                                    <div className="mt-4 border-t border-gray-200 pt-4 dark:border-zinc-700">
-                                        <GradeForm
-                                            classId={classId}
-                                            assignmentId={assignment.id}
-                                            studentId={submission.studentId}
-                                            submittedAt={submission.submittedAt}
-                                            points={assignment.points}
-                                            editing={{
-                                                score: submission.grade,
-                                                feedback: submission.feedback,
-                                                lastSavedAt:
-                                                    submission.gradeUpdatedAt ??
-                                                    submission.gradedAt,
-                                            }}
-                                            onSaved={handleSaved}
-                                            onCancel={() =>
-                                                setEditing(submission.studentId!, false)
-                                            }
-                                        />
-                                    </div>
-                                ) : (
-                                    <button
-                                        type="button"
-                                        onClick={() => setEditing(submission.studentId!, true)}
-                                        className={`mt-4 ${submission.fileUrl ? "ml-2" : ""} inline-block rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-zinc-700 dark:text-gray-300 dark:hover:bg-zinc-800`}
-                                    >
-                                        Edit grade
-                                    </button>
-                                ))}
-                        </article>
-                    ))}
-                </div>
+                        </div>
+                    )}
+                </>
             )}
         </section>
+    );
+}
+
+type SubmissionCardProps = {
+    classId: string;
+    assignment: Assignment;
+    student: SubmittedStudent;
+    /** Whether submissions have closed. */
+    closed: boolean;
+    /** Whether the grade editor is open. */
+    editing: boolean;
+    /** Whether another session saved the grade before this one. */
+    savedElsewhere: boolean;
+    onEditingChange: (open: boolean) => void;
+    onSaved: (studentId: string, grade: Grade, alreadyGraded: boolean) => void;
+};
+
+/** Shows one student's submission, its grade and the form to grade or edit it. */
+function SubmissionCard({
+    classId,
+    assignment,
+    student,
+    closed,
+    editing,
+    savedElsewhere,
+    onEditingChange,
+    onSaved,
+}: SubmissionCardProps) {
+    const graded = student.grade !== null && !!student.gradedAt;
+
+    return (
+        <article className="rounded-lg border border-gray-200 p-4 dark:border-zinc-700">
+            <StudentHeading student={student} closed={closed} />
+
+            <div className="mt-3">
+                <p className="break-all font-medium text-gray-900 dark:text-white">
+                    {student.fileName}
+                </p>
+
+                <p className="text-sm text-gray-500 dark:text-zinc-400">
+                    {formatFileSize(student.fileSize)} · Submitted{" "}
+                    {formatTimestamp(student.submittedAt)}
+                </p>
+            </div>
+
+            <div className="mt-3">
+                <p className="text-sm text-gray-500 dark:text-zinc-400">Grade</p>
+
+                <p className="font-medium text-gray-900 dark:text-white">
+                    {student.grade !== null
+                        ? `${student.grade} / ${assignment.points}`
+                        : "Not graded"}
+                </p>
+
+                {student.gradedAt && (
+                    <p className="text-xs text-gray-500 dark:text-zinc-400">
+                        Graded {formatTimestamp(student.gradedAt)}
+                    </p>
+                )}
+
+                {student.gradeUpdatedAt && (
+                    <p className="text-xs text-gray-500 dark:text-zinc-400">
+                        Updated {formatTimestamp(student.gradeUpdatedAt)}
+                    </p>
+                )}
+
+                {savedElsewhere && (
+                    <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
+                        Saved elsewhere first. Showing the saved grade.
+                    </p>
+                )}
+
+                {student.resubmittedAfterGrading && (
+                    <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
+                        Resubmitted after grading
+                    </p>
+                )}
+            </div>
+
+            {student.feedback && (
+                <div className="mt-3">
+                    <p className="text-sm text-gray-500 dark:text-zinc-400">Feedback</p>
+
+                    <p className="whitespace-pre-line text-gray-900 dark:text-white">
+                        {student.feedback}
+                    </p>
+                </div>
+            )}
+
+            {(student.fileUrl || (graded && !editing)) && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                    {student.fileUrl && (
+                        <a
+                            href={student.fileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-block rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-gray-50 dark:border-zinc-700 dark:text-blue-400 dark:hover:bg-zinc-800"
+                        >
+                            View / Download file
+                        </a>
+                    )}
+
+                    {graded && !editing && (
+                        <button
+                            type="button"
+                            onClick={() => onEditingChange(true)}
+                            className={
+                                student.resubmittedAfterGrading
+                                    ? primaryButtonClass
+                                    : secondaryButtonClass
+                            }
+                        >
+                            {student.resubmittedAfterGrading
+                                ? "Grade new version"
+                                : "Edit grade"}
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {student.grade === null && (
+                <div className="mt-4 border-t border-gray-200 pt-4 dark:border-zinc-700">
+                    <GradeForm
+                        classId={classId}
+                        assignmentId={assignment.id}
+                        studentId={student.studentId}
+                        submittedAt={student.submittedAt}
+                        points={assignment.points}
+                        onSaved={onSaved}
+                    />
+                </div>
+            )}
+
+            {graded && editing && (
+                <div className="mt-4 border-t border-gray-200 pt-4 dark:border-zinc-700">
+                    <GradeForm
+                        classId={classId}
+                        assignmentId={assignment.id}
+                        studentId={student.studentId}
+                        submittedAt={student.submittedAt}
+                        points={assignment.points}
+                        editing={{
+                            score: student.grade!,
+                            feedback: student.feedback,
+                            lastSavedAt: student.gradeUpdatedAt ?? student.gradedAt!,
+                        }}
+                        onSaved={onSaved}
+                        onCancel={() => onEditingChange(false)}
+                    />
+                </div>
+            )}
+        </article>
     );
 }
