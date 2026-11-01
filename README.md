@@ -119,6 +119,9 @@ npm run test:watch
 Tests use [Vitest](https://vitest.dev/) and need Java 21, like the emulators. `npm test` starts a fresh Auth and Firestore emulator, runs the tests, and shuts the emulators down. Your `.emulator-data` is never touched. Stop `npm run emulators` first, because both use the same ports.
 
 API route tests live in `__tests__/api/` and call the route handler directly with a `Request`.
+
+---
+
 ## Browser tests
 
 The end-to-end tests in `e2e/` drive the real app in Chromium with [Playwright](https://playwright.dev/). They cover the professor's grading flow:
@@ -165,3 +168,7 @@ A failed test keeps a screenshot and a trace in `test-results/`. Open the trace 
 
 * `npm test` runs Vitest. It calls API route handlers and library functions directly, with no server and no browser.
 * `npm run test:e2e` runs the whole app in a browser, so it also covers pages, components and sign-in. A full run takes about half a minute.
+
+### In CI
+
+The `e2e` job in `.github/workflows/checks.yml` runs these tests on every pull request to `dev` or `main`, beside the lint, build and Vitest job. When it fails, the Playwright report and traces are attached to the run as the `playwright-report` artifact.
