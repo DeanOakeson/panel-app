@@ -3,6 +3,17 @@ import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 
 /**
+ * Converts FIREBASE_PRIVATE_KEY to PEM. Accepts escaped `\n` newlines, and a key body
+ * stored without its BEGIN and END lines.
+ */
+export function toPrivateKeyPem(privateKey: string): string {
+  const key = privateKey.replace(/\\n/g, "\n");
+  if (key.includes("-----BEGIN")) return key;
+
+  return `-----BEGIN PRIVATE KEY-----\n${key.trim()}\n-----END PRIVATE KEY-----\n`;
+}
+
+/**
  * Builds the service account credential from FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL
  * and FIREBASE_PRIVATE_KEY. Throws when one is missing.
  */
@@ -17,7 +28,7 @@ export function getServiceAccountCredential(): Credential {
   return cert({
     projectId: FIREBASE_PROJECT_ID,
     clientEmail: FIREBASE_CLIENT_EMAIL,
-    privateKey: FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    privateKey: toPrivateKeyPem(FIREBASE_PRIVATE_KEY),
   });
 }
 
