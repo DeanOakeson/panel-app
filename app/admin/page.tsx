@@ -136,6 +136,10 @@ export default function AdminHome() {
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
+          <Link href="/admin/students"
+            className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-500">
+            Student Directory
+          </Link>
           <Link href="/admin/classes"
             className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-500">
             All courses
