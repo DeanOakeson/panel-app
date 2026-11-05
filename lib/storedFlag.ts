@@ -2,13 +2,16 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-/** Values set during this page load, which stand in when storage cannot be written. */
+/** Choices that storage refused during this page load, which stand in until it reloads. */
 const memory = new Map<string, boolean>();
 
 const CHANGE_EVENT = "panel-stored-flag";
 
-/** Returns a flag from memory or localStorage, or `fallback()` when neither holds it. */
-function readFlag(key: string, fallback: () => boolean): boolean {
+/**
+ * Returns a flag from localStorage, or from memory when storage refused it,
+ * or `fallback()` when neither holds it.
+ */
+export function readFlag(key: string, fallback: () => boolean): boolean {
   const remembered = memory.get(key);
   if (remembered !== undefined) return remembered;
 
@@ -26,14 +29,17 @@ function readFlag(key: string, fallback: () => boolean): boolean {
 /** The default for a flag nobody has set. */
 const alwaysFalse = () => false;
 
-/** Stores a flag in memory and, when the browser allows it, in localStorage. */
-function writeFlag(key: string, value: boolean) {
-  memory.set(key, value);
-
+/**
+ * Stores a flag in localStorage, where other tabs see it change. Only when
+ * storage refuses it does the flag live in memory instead.
+ */
+export function writeFlag(key: string, value: boolean) {
   try {
     window.localStorage.setItem(key, String(value));
+    memory.delete(key);
   } catch {
     // The choice then lasts only until the page reloads
+    memory.set(key, value);
   }
 
   window.dispatchEvent(new Event(CHANGE_EVENT));
