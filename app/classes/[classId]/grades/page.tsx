@@ -7,7 +7,6 @@ import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { DEADLINE_TIME_ZONE } from "@/lib/assignmentDeadline";
 import { onGradeSaved } from "@/lib/gradeEvents";
-import { useStoredFlag } from "@/lib/storedFlag";
 import {
     filterLabel,
     filterStudents,
@@ -16,7 +15,7 @@ import {
     type GradebookFilter,
 } from "@/lib/gradebook";
 import ColumnPager from "../../../components/grades/ColumnPager";
-import GradebookLegend from "../../../components/grades/GradebookLegend";
+import GradebookKey from "../../../components/grades/GradebookKey";
 import GradebookTable, {
     cellDataKey,
     GRID_SCROLLER_ID,
@@ -37,15 +36,10 @@ type PageState =
     | { kind: "student" }
     | { kind: "ready"; gradebook: Gradebook };
 
-/** Where the browser remembers whether the professor hid the key. */
-const KEY_HIDDEN_STORAGE = "panel-gradebook-key-hidden";
-
-const LEGEND_ID = "gradebook-key";
-
 /** Where the tab remembers a class's column filter, so it outlasts a trip to grade work. */
 const FILTER_STORAGE_PREFIX = "panel-gradebook-filter:";
 
-const HINT = "Select a grade for details · Select a column's status to filter · Arrow keys move";
+const HINTS = ["Select a grade for details", "Select a column's status to filter", "Arrow keys move"];
 
 /** How long after a load the page waits before refreshing on focus. */
 const FOCUS_REFRESH_INTERVAL = 30_000;
@@ -414,6 +408,23 @@ function Summary({ gradebook }: { gradebook: Gradebook }) {
     );
 }
 
+/**
+ * Shows how to use the grid on one quiet line, which wraps when narrow. Screen
+ * readers hear the same from the grid's caption and buttons instead.
+ */
+function HintStrip() {
+    return (
+        <ul
+            aria-hidden="true"
+            className="flex shrink-0 flex-wrap gap-x-4 gap-y-0.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-[13px] text-gray-600 dark:border-zinc-700 dark:bg-gray-900 dark:text-zinc-300"
+        >
+            {HINTS.map((hint) => (
+                <li key={hint}>{hint}</li>
+            ))}
+        </ul>
+    );
+}
+
 /** Shows an empty state's message, with an optional link. */
 function EmptyState({
     title,
@@ -478,10 +489,11 @@ function FilterStatus({
 }
 
 /**
- * Shows the gradebook's summary, key and grid, or the empty state that fits.
- * While the grid scrolls sideways, the toolbar shows which assignments are in
- * view with buttons that move between them. A column filter, which this tab
- * remembers per class, limits the rows and is announced as it changes.
+ * Shows the gradebook's summary, key and grid with a hint under it, or the
+ * empty state that fits. While the grid scrolls sideways, the toolbar shows
+ * which assignments are in view with buttons that move between them. A column
+ * filter, which this tab remembers per class, limits the rows and is announced
+ * as it changes.
  */
 function GradebookView({
     gradebook,
@@ -498,7 +510,6 @@ function GradebookView({
     const hasDropped = gradebook.students.some((student) =>
         student.cells.some((cell) => cell === null)
     );
-    const [keyHidden, setKeyHidden] = useStoredFlag(KEY_HIDDEN_STORAGE);
     const [columnView, setColumnView] = useState<ColumnView | null>(null);
     const [storedFilter, setStoredFilter] = useState(() => readStoredFilter(gradebook));
     const [announcement, setAnnouncement] = useState("");
@@ -583,21 +594,7 @@ function GradebookView({
                             onStep={(step) => tableRef.current?.scrollColumns(step)}
                         />
 
-                        {keyHidden && (
-                            <p aria-hidden="true" className="text-sm text-gray-600 dark:text-zinc-300">
-                                {HINT}
-                            </p>
-                        )}
-
-                        <button
-                            type="button"
-                            onClick={() => setKeyHidden(!keyHidden)}
-                            aria-expanded={!keyHidden}
-                            aria-controls={keyHidden ? undefined : LEGEND_ID}
-                            className="-my-1 rounded-md px-2 py-1 text-sm font-medium text-blue-700 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-blue-300 dark:hover:bg-blue-950"
-                        >
-                            {keyHidden ? "Show key" : "Hide key"}
-                        </button>
+                        <GradebookKey showDropped={hasDropped} buttonClassName={secondaryButtonClass} />
                     </div>
                 )}
             </div>
@@ -609,9 +606,7 @@ function GradebookView({
                 </p>
             )}
 
-            {hasAssignments ? (
-                !keyHidden && <GradebookLegend id={LEGEND_ID} showDropped={hasDropped} hint={HINT} />
-            ) : (
+            {!hasAssignments && (
                 <EmptyState
                     title="No assignments yet."
                     body="Grades appear here once the course has an assignment."
@@ -633,6 +628,8 @@ function GradebookView({
                 onFilterChange={changeFilter}
                 onColumnViewChange={setColumnView}
             />
+
+            {hasAssignments && <HintStrip />}
         </>
     );
 }
