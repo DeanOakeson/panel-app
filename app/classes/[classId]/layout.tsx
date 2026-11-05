@@ -19,6 +19,14 @@ const NAV_COLLAPSED_STORAGE = "panel-course-nav-collapsed";
 
 const NAV_ID = "course-navigation";
 
+/** Below this window width, the course navigation starts collapsed until someone chooses. */
+const COLLAPSE_BELOW = 1100;
+
+/** Returns whether the course navigation starts collapsed, which it does in narrow windows. */
+function collapsedByDefault(): boolean {
+  return window.innerWidth < COLLAPSE_BELOW;
+}
+
 /** Shows a chevron pointing left to collapse the navigation, or right to expand it. */
 function ChevronIcon({ pointsLeft }: { pointsLeft: boolean }) {
   return (
@@ -47,7 +55,10 @@ export default function ClassLayout({
   const pathname = usePathname();
   const router = useRouter();
   const basePath = `/classes/${classId}`;
-  const [collapsed, setCollapsed] = useStoredFlag(NAV_COLLAPSED_STORAGE);
+  const [collapsed, setCollapsed] = useStoredFlag(
+    NAV_COLLAPSED_STORAGE,
+    collapsedByDefault
+  );
   const toggleLabel = collapsed ? "Show course navigation" : "Hide course navigation";
 
   // Every class page needs a signed-in user, so send signed-out visitors to
