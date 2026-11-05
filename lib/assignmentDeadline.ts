@@ -80,6 +80,18 @@ export function getClosesAt(dueDate: unknown): string | null {
   return getDeadline(dueDate)?.toISOString() ?? null;
 }
 
+/**
+ * Returns when submissions close for a due date as an ISO instant, or null
+ * when there is no due date or it is malformed.
+ */
+export function closesAtOrNull(dueDate: unknown): string | null {
+  try {
+    return getClosesAt(dueDate);
+  } catch {
+    return null;
+  }
+}
+
 /** Formats a closing instant in Mountain Time, like "Oct 30, 11:59 PM MT". */
 export function formatClosesAt(closesAt: string): string {
   return formatTimestamp(closesAt);
