@@ -6,13 +6,16 @@ import type { Page } from "@playwright/test";
 // Classic scrollbars take room from the grid, as they do in a desktop browser
 test.use({ launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"] } });
 
-/** Gives the seeded course six assignments: the seeded two, Quiz 1 and three more. */
+/**
+ * Gives the seeded course six assignments: the seeded two, Quiz 1 and three
+ * more with long names like a real course's.
+ */
 async function addSixAssignments(scenario: Scenario) {
   await addQuiz(scenario);
 
   for (const [name, points, days] of [
-    ["Project 2: Architecture", 100, 20],
-    ["Homework 3: Testing", 10, 25],
+    ["Project 2: Architecture and Design Review", 100, 20],
+    ["Homework 3: Process Models", 10, 25],
     ["Reading Reflection", 5, 30],
   ] as const) {
     await createAssignment(scenario.professor, scenario.course.id, name, points, dateFromToday(days));
@@ -37,16 +40,98 @@ function measureColumns(page: Page) {
   });
 }
 
+/** Returns the column headers whose names are cut short, and whether the page itself scrolls sideways. */
+function measureFit(page: Page) {
+  return page.evaluate(() => {
+    const main = document.querySelector("main")!;
+    const root = document.documentElement;
+
+    return {
+      truncated: Array.from(document.querySelectorAll<HTMLElement>("thead a"))
+        .filter((link) => link.scrollHeight > link.clientHeight + 1)
+        .map((link) => link.textContent),
+      pageSideways: root.scrollWidth > root.clientWidth || main.scrollWidth > main.clientWidth,
+    };
+  });
+}
+
+/** Returns the scrolling grid's shaded edges that show. */
+function shades(page: Page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>("[data-shade]")).map((shade) => shade.dataset.shade)
+  );
+}
+
 test.describe("Gradebook layout", () => {
-  test("fits six assignments without sideways scrolling at 1280 pixels", async ({ page, scenario }) => {
+  test("fits six whole assignment names at 1280 pixels with the navigation collapsed", async ({ page, scenario }) => {
     await addSixAssignments(scenario);
     await signIn(page, scenario.professor);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(gradesPath(scenario));
     await expect(gradeCell(page, "Ava Martin", "Reading Reflection")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Hide course navigation" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Show course navigation" })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
 
-    expect(await measureColumns(page)).toEqual({ sideways: false, whole: 6, underFrozen: 0 });
+    await expect.poll(() => measureColumns(page)).toEqual({ sideways: false, whole: 6, underFrozen: 0 });
+    expect(await measureFit(page)).toEqual({ truncated: [], pageSideways: false });
+    expect(await shades(page)).toEqual([]);
+    await expect(page.getByRole("button", { name: "Show later assignments" })).toHaveCount(0);
+
+    // The columns share the spare room rather than leaving it empty
+    const width = await page.getByRole("columnheader", { name: /Reading Reflection/ }).evaluate(
+      (header) => header.getBoundingClientRect().width
+    );
+    expect(width).toBeGreaterThan(130);
+    expect(width).toBeLessThanOrEqual(177);
+  });
+
+  test("shows which assignments are in view and moves between them at 1024 pixels", async ({ page, scenario }) => {
+    await addSixAssignments(scenario);
+    await signIn(page, scenario.professor);
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto(gradesPath(scenario));
+    await expect(gradeCell(page, "Ava Martin", "Project 1: Requirements")).toBeVisible();
+    await expect.poll(() => measureColumns(page)).toMatchObject({ sideways: true, underFrozen: 0 });
+    expect((await measureFit(page)).pageSideways).toBe(false);
+
+    const earlier = page.getByRole("button", { name: "Show earlier assignments" });
+    const later = page.getByRole("button", { name: "Show later assignments" });
+    const range = page.getByText(/^Assignments 1–\d of 6$/);
+    const { whole } = await measureColumns(page);
+
+    await expect(range).toHaveText(`Assignments 1–${whole} of 6`);
+    await expect(earlier).toBeDisabled();
+    await expect(later).toBeEnabled();
+    expect(await shades(page)).toEqual(["end"]);
+    for (const button of [earlier, later]) {
+      const box = await button.boundingBox();
+      expect(box!.width).toBeGreaterThanOrEqual(32);
+      expect(box!.height).toBeGreaterThanOrEqual(32);
+    }
+
+    for (let step = 0; step < 6 && (await later.isEnabled()); step++) {
+      await later.click();
+      await expect.poll(() => measureColumns(page)).toMatchObject({ underFrozen: 0 });
+    }
+
+    await expect(page.getByText(`Assignments ${7 - whole}–6 of 6`, { exact: true })).toBeVisible();
+    await expect(later).toBeDisabled();
+    await expect(earlier).toBeEnabled();
+    expect(await shades(page)).toEqual(["start"]);
+    const lastHeader = await page.getByRole("columnheader", { name: /Reading Reflection/ }).boundingBox();
+    const scroller = await page.locator(`#gradebook-grid`).evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return { right: rect.left + element.clientLeft + element.clientWidth };
+    });
+    expect(lastHeader!.x + lastHeader!.width).toBeLessThanOrEqual(scroller.right + 1);
+
+    // The range follows any scroll, not just the buttons
+    await page.locator("#gradebook-grid").evaluate((element) => element.scrollTo({ left: 0 }));
+    await expect(page.getByText(`Assignments 1–${whole} of 6`, { exact: true })).toBeVisible();
+    await expect(earlier).toBeDisabled();
+    expect((await measureFit(page)).pageSideways).toBe(false);
   });
 
   test("shows the last columns whole at the right end", async ({ page, scenario }) => {
@@ -108,28 +193,5 @@ test.describe("Gradebook layout", () => {
       )
     );
     expect(borders.slice(1).every((width) => width === "1px")).toBe(true);
-  });
-
-  test("collapses the course navigation by default in a narrow window until someone chooses", async ({ page, scenario }) => {
-    await signIn(page, scenario.professor);
-    await page.setViewportSize({ width: 1024, height: 768 });
-    await page.goto(gradesPath(scenario));
-
-    const show = page.getByRole("button", { name: "Show course navigation" });
-    await expect(show).toHaveAttribute("aria-expanded", "false");
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await expect(page.getByRole("button", { name: "Hide course navigation" })).toBeVisible();
-
-    // An explicit choice outlasts the window's width and a reload
-    await page.setViewportSize({ width: 1024, height: 768 });
-    await page.getByRole("button", { name: "Show course navigation" }).click();
-    await page.reload();
-    await expect(page.getByRole("button", { name: "Hide course navigation" })).toHaveAttribute(
-      "aria-expanded",
-      "true"
-    );
-    await page.goto(scenario.course.assignmentsPath);
-    await expect(page.getByRole("link", { name: "Grades", exact: true })).toBeVisible();
   });
 });
