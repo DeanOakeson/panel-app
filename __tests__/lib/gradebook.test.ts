@@ -3,12 +3,16 @@ import {
   buildGradebook,
   columnsInView,
   describeCell,
+  filterCounts,
+  filterStudents,
   gradingHref,
   gridLayout,
+  matchesFilter,
   moveInGrid,
   rosterIds,
   standingFeedback,
   standingScore,
+  type Gradebook,
   type GradebookCell,
   type GradebookSource,
   type GridPosition,
@@ -683,5 +687,69 @@ describe("columnsInView", () => {
 
   it("falls back to the column under the edge when none is whole", () => {
     expect(columnsInView(60, 120, 120, 3)).toEqual({ first: 1, last: 1, total: 3 });
+  });
+});
+
+describe("student filters", () => {
+  const statuses = [
+    "needs-grading",
+    "resubmitted",
+    "submitted-after-missing",
+    "graded",
+    "missing",
+    "missing-graded",
+  ] as const;
+
+  it.each([
+    ["to-grade", ["needs-grading", "resubmitted", "submitted-after-missing"]],
+    ["not-turned-in", ["missing", "missing-graded"]],
+    ["graded", ["graded"]],
+  ] as const)("matches %s to its statuses", (filter, expected) => {
+    const matched = statuses.filter((status) => matchesFilter(cell({ status }), filter));
+
+    expect(matched).toEqual(expected);
+  });
+
+  it("never matches a student who left before the assignment", () => {
+    expect(matchesFilter(null, "not-turned-in")).toBe(false);
+    expect(matchesFilter(null, "to-grade")).toBe(false);
+  });
+
+  const student = (id: string, cells: (GradebookCell | null)[]) => ({
+    id,
+    name: id,
+    email: null,
+    enrolled: cells.every((each) => each !== null),
+    cells,
+  });
+  const gradebook = {
+    class: { id: "class", name: "Class", courseCode: null, term: null, year: null, section: null },
+    canGradeSubmissions: true,
+    assignments: [
+      { id: "first", name: "First", points: 10, dueDate: null, closesAt: null, closed: false, grading: { toGrade: 0, submitted: 0 } },
+      { id: "second", name: "Second", points: 10, dueDate: null, closesAt: null, closed: false, grading: { toGrade: 0, submitted: 0 } },
+    ],
+    students: [
+      student("ava", [cell({ status: "graded" }), cell({ status: "missing" })]),
+      student("ben", [cell({ status: "resubmitted" }), cell({ status: "missing-graded" })]),
+      student("cara", [cell({ status: "needs-grading" }), cell({ status: "graded" })]),
+      student("dev", [cell({ status: "missing" }), null]),
+    ],
+  } as unknown as Gradebook;
+
+  it("counts each filter's students on one assignment", () => {
+    expect(filterCounts(gradebook.students, 0)).toEqual({ "to-grade": 2, "not-turned-in": 1, graded: 1 });
+    expect(filterCounts(gradebook.students, 1)).toEqual({ "to-grade": 0, "not-turned-in": 2, graded: 1 });
+  });
+
+  it("shows only the matching students, leaving out one who left", () => {
+    const shown = filterStudents(gradebook, { assignmentId: "second", filter: "not-turned-in" });
+
+    expect(shown.map((each) => each.id)).toEqual(["ava", "ben"]);
+  });
+
+  it("shows everyone without a filter or for an assignment that is gone", () => {
+    expect(filterStudents(gradebook, null)).toHaveLength(4);
+    expect(filterStudents(gradebook, { assignmentId: "deleted", filter: "graded" })).toHaveLength(4);
   });
 });

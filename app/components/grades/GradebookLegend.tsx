@@ -60,10 +60,19 @@ const DROPPED_ENTRY: Entry = {
 
 /**
  * Explains each kind of gradebook cell in a small grid, with each sample
- * framed as it looks in a cell. `showDropped` adds the entry for students who
- * left the class, shown only when the grid has one.
+ * framed as it looks in a cell, and the grid's `hint` on its last line.
+ * `showDropped` adds the entry for students who left the class, shown only
+ * when the grid has one.
  */
-export default function GradebookLegend({ id, showDropped }: { id: string; showDropped: boolean }) {
+export default function GradebookLegend({
+    id,
+    showDropped,
+    hint,
+}: {
+    id: string;
+    showDropped: boolean;
+    hint: string;
+}) {
     const entries = showDropped ? [...ENTRIES, DROPPED_ENTRY] : ENTRIES;
 
     return (
@@ -93,6 +102,13 @@ export default function GradebookLegend({ id, showDropped }: { id: string; showD
                     </li>
                 ))}
             </ul>
+
+            <p
+                aria-hidden="true"
+                className="mt-2 border-t border-gray-200 pt-1.5 text-sm text-gray-600 dark:border-zinc-700 dark:text-zinc-300"
+            >
+                {hint}
+            </p>
         </section>
     );
 }

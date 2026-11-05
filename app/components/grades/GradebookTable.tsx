@@ -13,6 +13,8 @@ import Link from "next/link";
 import {
     columnsInView,
     describeCell,
+    filterCounts,
+    filterStudents,
     gridLayout,
     moveInGrid,
     STUDENT_COLUMN_WIDTH,
@@ -20,10 +22,13 @@ import {
     type ColumnRange,
     type Gradebook,
     type GradebookAssignment,
+    type GradebookFilter,
     type GradebookStudent,
     type GridKey,
     type GridPosition,
+    type StudentFilter,
 } from "@/lib/gradebook";
+import ColumnFilterMenu from "./ColumnFilterMenu";
 import GradeCellContent from "./GradeCellContent";
 
 /** Identifies one cell of the gradebook. */
@@ -43,6 +48,10 @@ type Props = {
     /** The cell whose details are open, outlined in the grid. */
     selected: CellKey | null;
     onSelect: (key: CellKey) => void;
+    /** The column filter that limits the rows, or null to show every student. */
+    filter: GradebookFilter | null;
+    /** Sets one column's filter, or clears it with null. */
+    onFilterChange: (filter: GradebookFilter | null) => void;
     /** Receives the columns in view as they change, or null while every column fits. */
     onColumnViewChange?: (view: ColumnView | null) => void;
     ref?: Ref<GradebookTableHandle>;
@@ -89,25 +98,6 @@ function shortDue(assignment: GradebookAssignment): string {
     }
 
     return assignment.dueDate ? `Due ${assignment.dueDate}` : "No due date";
-}
-
-/** Shows how much of an assignment is left to grade, under its column header. */
-function GradingSummary({ assignment }: { assignment: GradebookAssignment }) {
-    const { toGrade, submitted } = assignment.grading;
-
-    if (toGrade > 0) {
-        return (
-            <span className="font-semibold text-amber-700 dark:text-amber-400">
-                {toGrade} to grade
-            </span>
-        );
-    }
-
-    if (submitted === 0) {
-        return <span className="text-gray-600 dark:text-zinc-300">None turned in</span>;
-    }
-
-    return <span className="font-semibold text-green-700 dark:text-green-400">All graded</span>;
 }
 
 /**
@@ -165,6 +155,12 @@ const bodyBackground =
     "bg-white group-hover:bg-gray-50 dark:bg-gray-900 dark:group-hover:bg-gray-800";
 const focusRing =
     "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-600 dark:focus-visible:outline-blue-400";
+const headerButton =
+    "-mx-1 mt-0.5 block w-fit max-w-full rounded-sm px-1 text-left text-sm leading-5 hover:bg-gray-200 dark:hover:bg-gray-700";
+const headerFocusRing =
+    "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-600 dark:focus-visible:outline-blue-400";
+const filteredHeader =
+    "bg-blue-50 shadow-[inset_0_3px_0_0_var(--color-blue-600)] dark:bg-blue-950 dark:shadow-[inset_0_3px_0_0_var(--color-blue-400)]";
 const cellInteraction =
     "cursor-pointer hover:bg-blue-50 hover:ring-1 hover:ring-inset hover:ring-blue-300 focus-visible:bg-blue-50 dark:hover:bg-blue-950 dark:hover:ring-blue-700 dark:focus-visible:bg-blue-950";
 
@@ -172,17 +168,21 @@ const cellInteraction =
  * Shows every student against every assignment. Each cell is a button that
  * opens its details, and the header row and student column stay in view
  * while the grid scrolls. The grid is one Tab stop: the arrow keys, Home and
- * End move between its cells and column headers. While the columns overflow,
- * a shaded edge marks each side with more columns beyond it.
+ * End move between its cells and the column headers' filter buttons. A
+ * shaded edge marks each side with more columns or rows beyond it, and a
+ * scroll comes to rest on whole columns and rows.
  */
 export default function GradebookTable({
     gradebook,
     selected,
     onSelect,
+    filter,
+    onFilterChange,
     onColumnViewChange,
     ref,
 }: Props) {
-    const { assignments, students, canGradeSubmissions } = gradebook;
+    const { assignments, canGradeSubmissions } = gradebook;
+    const students = filterStudents(gradebook, filter);
     const courseName = gradebook.class.courseCode ?? gradebook.class.name;
     const tableRef = useRef<HTMLTableElement>(null);
     const headerRef = useRef<HTMLTableSectionElement>(null);
@@ -194,6 +194,7 @@ export default function GradebookTable({
     const [active, setActive] = useState<GridPosition | null>(null);
     const [atStart, setAtStart] = useState(true);
     const [atEnd, setAtEnd] = useState(true);
+    const [atBottom, setAtBottom] = useState(true);
     const [scrollbarWidth, setScrollbarWidth] = useState(0);
     const [scrollbarHeight, setScrollbarHeight] = useState(0);
 
@@ -234,8 +235,8 @@ export default function GradebookTable({
     const columnStyle = { width: columnWidth, minWidth: columnWidth, maxWidth: columnWidth };
     const assignmentCount = assignments.length;
 
-    // Follows the sideways scroll, by any means, once per frame: the shaded
-    // edges, the scrollbars they stay clear of, and the columns in view
+    // Follows the scroll, by any means, once per frame: the shaded edges, the
+    // scrollbars they stay clear of, and the columns in view
     useEffect(() => {
         const scroller = scrollerRef.current;
         if (!scroller) return;
@@ -264,6 +265,7 @@ export default function GradebookTable({
 
             setAtStart(start);
             setAtEnd(end);
+            setAtBottom(scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1);
             setScrollbarWidth(scroller.offsetWidth - scroller.clientWidth - CONTAINER_BORDER);
             setScrollbarHeight(scroller.offsetHeight - scroller.clientHeight - CONTAINER_BORDER);
 
@@ -379,7 +381,7 @@ export default function GradebookTable({
                 style={{
                     scrollPaddingTop: headerHeight,
                     scrollPaddingLeft: studentWidth,
-                    scrollSnapType: overflows ? "x mandatory" : undefined,
+                    scrollSnapType: overflows ? "both mandatory" : "y mandatory",
                 }}
             >
                 <p id={HINT_ID} className="sr-only">
@@ -406,35 +408,52 @@ export default function GradebookTable({
                                 Student
                             </th>
 
-                            {assignments.map((assignment, col) => (
-                                <th
-                                    key={assignment.id}
-                                    scope="col"
-                                    style={{ ...columnStyle, scrollSnapAlign: "start" }}
-                                    className={`sticky top-0 z-20 border-l bg-gray-50 px-2 py-1.5 text-left align-top font-normal dark:bg-gray-800 ${stickyCellBase}`}
-                                >
-                                    <Link
-                                        href={`/classes/${gradebook.class.id}/assignments/${assignment.id}`}
-                                        title={`${assignment.name} (out of ${assignment.points})`}
-                                        tabIndex={tabIndexAt(-1, col)}
-                                        data-grid-row={-1}
-                                        data-grid-col={col}
-                                        className={`line-clamp-3 break-words rounded-sm text-sm font-semibold text-blue-700 hover:underline dark:text-blue-300 ${focusRing}`}
+                            {assignments.map((assignment, col) => {
+                                const href = `/classes/${gradebook.class.id}/assignments/${assignment.id}`;
+                                const columnFilter = filter?.assignmentId === assignment.id ? filter.filter : null;
+
+                                return (
+                                    <th
+                                        key={assignment.id}
+                                        scope="col"
+                                        style={{ ...columnStyle, scrollSnapAlign: "none start" }}
+                                        className={`sticky top-0 z-20 border-l px-2 py-1.5 text-left align-top font-normal ${stickyCellBase} ${
+                                            columnFilter ? filteredHeader : "bg-gray-50 dark:bg-gray-800"
+                                        }`}
                                     >
-                                        {assignment.name}
-                                    </Link>
+                                        {/* The menu's Open assignment page item takes this link's place for the keyboard */}
+                                        <Link
+                                            href={href}
+                                            title={`${assignment.name} (out of ${assignment.points})`}
+                                            tabIndex={-1}
+                                            className="line-clamp-3 break-words rounded-sm text-sm font-semibold text-blue-700 hover:underline dark:text-blue-300"
+                                        >
+                                            {assignment.name}
+                                        </Link>
 
-                                    <span className="sr-only">Out of {assignment.points}.</span>
+                                        <span className="sr-only">Out of {assignment.points}.</span>
 
-                                    <p className="text-sm leading-5 text-gray-700 dark:text-zinc-300">
-                                        {shortDue(assignment)}
-                                    </p>
+                                        <p className="text-sm leading-5 text-gray-700 dark:text-zinc-300">
+                                            {shortDue(assignment)}
+                                        </p>
 
-                                    <p className="text-sm leading-5">
-                                        <GradingSummary assignment={assignment} />
-                                    </p>
-                                </th>
-                            ))}
+                                        <ColumnFilterMenu
+                                            assignment={assignment}
+                                            href={href}
+                                            counts={filterCounts(gradebook.students, col)}
+                                            active={columnFilter}
+                                            onChoose={(chosen: StudentFilter | null) =>
+                                                onFilterChange(
+                                                    chosen ? { assignmentId: assignment.id, filter: chosen } : null
+                                                )
+                                            }
+                                            tabIndex={tabIndexAt(-1, col)}
+                                            col={col}
+                                            className={`${headerButton} ${headerFocusRing}`}
+                                        />
+                                    </th>
+                                );
+                            })}
                         </tr>
                     </thead>
 
@@ -443,7 +462,7 @@ export default function GradebookTable({
                             const name = displayStudentName(student);
 
                             return (
-                                <tr key={student.id} className="group">
+                                <tr key={student.id} className="group" style={{ scrollSnapAlign: "start none" }}>
                                     <th
                                         scope="row"
                                         style={studentColumnStyle}
@@ -480,7 +499,7 @@ export default function GradebookTable({
                                                         data-grid-col={col}
                                                         data-cell={cellDataKey(key)}
                                                         onClick={() => onSelect(key)}
-                                                        className={`flex min-h-10 w-full items-center justify-center rounded-md px-2 py-1 ${cellInteraction} ${focusRing} ${
+                                                        className={`flex min-h-10 w-full items-center justify-center rounded-md px-1 py-1 ${cellInteraction} ${focusRing} ${
                                                             isSelected
                                                                 ? "bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950 dark:ring-blue-400"
                                                                 : ""
@@ -500,6 +519,23 @@ export default function GradebookTable({
                                 </tr>
                             );
                         })}
+
+                        {students.length === 0 && (
+                            <tr>
+                                <td colSpan={assignments.length + 1} className={stickyCellBase}>
+                                    <div className="sticky left-0 flex w-fit flex-wrap items-center gap-x-3 gap-y-1 px-3 py-4">
+                                        <p className="font-medium text-gray-900 dark:text-white">No students match</p>
+                                        <button
+                                            type="button"
+                                            onClick={() => onFilterChange(null)}
+                                            className={`rounded-md px-2 py-1 text-sm font-medium text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950 ${headerFocusRing}`}
+                                        >
+                                            Show all students
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        )}
                     </tbody>
                 </table>
             </div>
@@ -510,6 +546,15 @@ export default function GradebookTable({
                     data-shade="start"
                     className="pointer-events-none absolute z-40 w-4 bg-linear-to-r from-gray-900/15 to-transparent dark:from-black/60"
                     style={{ ...shadeInset, left: 1 + studentWidth }}
+                />
+            )}
+
+            {!atBottom && (
+                <div
+                    aria-hidden="true"
+                    data-shade="bottom"
+                    className="pointer-events-none absolute z-40 h-6 bg-linear-to-t from-gray-900/15 to-transparent dark:from-black/60"
+                    style={{ left: 1, right: 1 + scrollbarWidth, bottom: 1 + scrollbarHeight }}
                 />
             )}
 

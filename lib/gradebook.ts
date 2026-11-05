@@ -441,6 +441,70 @@ export function gradingHref(classId: string, assignmentId: string, studentId: st
 
 // #endregion
 
+// #region Filtering
+
+/** A group of students a column can be filtered to. */
+export type StudentFilter = "to-grade" | "not-turned-in" | "graded";
+
+/** The filters a column offers, in menu order, with their labels. */
+export const STUDENT_FILTERS: readonly { value: StudentFilter; label: string }[] = [
+  { value: "to-grade", label: "To grade" },
+  { value: "not-turned-in", label: "Not turned in" },
+  { value: "graded", label: "Graded" },
+];
+
+/** The statuses each filter matches. */
+const FILTER_STATUSES: Record<StudentFilter, readonly GradingStatus[]> = {
+  "to-grade": ["needs-grading", "resubmitted", "submitted-after-missing"],
+  "not-turned-in": ["missing", "missing-graded"],
+  graded: ["graded"],
+};
+
+/** One column's filter: the assignment and the group of students shown. */
+export type GradebookFilter = { assignmentId: string; filter: StudentFilter };
+
+/** Returns the label for a filter, like "Not turned in". */
+export function filterLabel(filter: StudentFilter): string {
+  return STUDENT_FILTERS.find((option) => option.value === filter)?.label ?? filter;
+}
+
+/**
+ * Returns whether a cell belongs to a filter's group. A student who left
+ * the class has no cell for later work, which matches no filter.
+ */
+export function matchesFilter(cell: GradebookCell | null, filter: StudentFilter): boolean {
+  return cell !== null && FILTER_STATUSES[filter].includes(cell.status);
+}
+
+/** Returns how many students each filter matches on the assignment at `column`. */
+export function filterCounts(students: GradebookStudent[], column: number): Record<StudentFilter, number> {
+  const counts: Record<StudentFilter, number> = { "to-grade": 0, "not-turned-in": 0, graded: 0 };
+
+  for (const student of students) {
+    for (const option of STUDENT_FILTERS) {
+      if (matchesFilter(student.cells[column], option.value)) counts[option.value] += 1;
+    }
+  }
+
+  return counts;
+}
+
+/**
+ * Returns the students a filter shows, or every student without a filter.
+ * A filter on an assignment the gradebook no longer has shows everyone.
+ */
+export function filterStudents(gradebook: Gradebook, active: GradebookFilter | null): GradebookStudent[] {
+  const column = active
+    ? gradebook.assignments.findIndex((assignment) => assignment.id === active.assignmentId)
+    : -1;
+
+  if (!active || column < 0) return gradebook.students;
+
+  return gradebook.students.filter((student) => matchesFilter(student.cells[column], active.filter));
+}
+
+// #endregion
+
 // #region Keyboard
 
 /** A place in the grid: a row of students, or -1 for the header row, and a column of assignments. */

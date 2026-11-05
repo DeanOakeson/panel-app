@@ -8,7 +8,13 @@ import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { DEADLINE_TIME_ZONE } from "@/lib/assignmentDeadline";
 import { onGradeSaved } from "@/lib/gradeEvents";
 import { useStoredFlag } from "@/lib/storedFlag";
-import type { Gradebook } from "@/lib/gradebook";
+import {
+    filterLabel,
+    filterStudents,
+    STUDENT_FILTERS,
+    type Gradebook,
+    type GradebookFilter,
+} from "@/lib/gradebook";
 import ColumnPager from "../../../components/grades/ColumnPager";
 import GradebookLegend from "../../../components/grades/GradebookLegend";
 import GradebookTable, {
@@ -36,6 +42,11 @@ const KEY_HIDDEN_STORAGE = "panel-gradebook-key-hidden";
 
 const LEGEND_ID = "gradebook-key";
 
+/** Where the tab remembers a class's column filter, so it outlasts a trip to grade work. */
+const FILTER_STORAGE_PREFIX = "panel-gradebook-filter:";
+
+const HINT = "Select a grade for details · Select a column's status to filter · Arrow keys move";
+
 /** How long after a load the page waits before refreshing on focus. */
 const FOCUS_REFRESH_INTERVAL = 30_000;
 
@@ -56,6 +67,44 @@ function formatLoadedAt(time: number): string {
 /** Returns "1 student" or "2 students". */
 function plural(count: number, noun: string): string {
     return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * Returns the column filter this tab stored for a gradebook's class. A filter
+ * for an assignment the gradebook no longer has is dropped and forgotten.
+ */
+function readStoredFilter(gradebook: Gradebook): GradebookFilter | null {
+    const key = FILTER_STORAGE_PREFIX + gradebook.class.id;
+
+    try {
+        const stored = JSON.parse(window.sessionStorage.getItem(key) ?? "null");
+        const valid =
+            gradebook.assignments.some((assignment) => assignment.id === stored?.assignmentId) &&
+            STUDENT_FILTERS.some((option) => option.value === stored?.filter);
+
+        if (valid) return { assignmentId: stored.assignmentId, filter: stored.filter };
+
+        window.sessionStorage.removeItem(key);
+    } catch {
+        // Blocked or unreadable storage holds no filter
+    }
+
+    return null;
+}
+
+/** Remembers a class's column filter for this tab, or forgets it for null. */
+function storeFilter(classId: string, filter: GradebookFilter | null) {
+    const key = FILTER_STORAGE_PREFIX + classId;
+
+    try {
+        if (filter) {
+            window.sessionStorage.setItem(key, JSON.stringify(filter));
+        } else {
+            window.sessionStorage.removeItem(key);
+        }
+    } catch {
+        // The filter then lasts only while the page is open
+    }
 }
 
 /** Returns the open cell with its student and assignment, or null when it no longer exists. */
@@ -218,12 +267,15 @@ export default function GradesPage() {
         if (user) void load(user, state.kind === "ready");
     }
 
-    /** Clears the open cell and puts focus back on its button. */
+    /**
+     * Clears the open cell and puts focus back on its button, or on the grid
+     * when a filter no longer shows the cell's row.
+     */
     function handlePanelClosed() {
         if (selected) {
-            const cell = document.querySelector<HTMLButtonElement>(
-                `[data-cell="${CSS.escape(cellDataKey(selected))}"]`
-            );
+            const cell =
+                document.querySelector<HTMLElement>(`[data-cell="${CSS.escape(cellDataKey(selected))}"]`) ??
+                document.querySelector<HTMLElement>(`#${GRID_SCROLLER_ID} [data-grid-row][tabindex="0"]`);
 
             cell?.focus({ preventScroll: true });
             if (cell) revealInGrid(cell);
@@ -390,9 +442,46 @@ function EmptyState({
 }
 
 /**
+ * Shows which students a column filter leaves in the grid, with a button
+ * that shows them all again.
+ */
+function FilterStatus({
+    gradebook,
+    filter,
+    shown,
+    onClear,
+}: {
+    gradebook: Gradebook;
+    filter: GradebookFilter;
+    shown: number;
+    onClear: () => void;
+}) {
+    const assignment = gradebook.assignments.find((each) => each.id === filter.assignmentId);
+
+    return (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-blue-50 py-1 pl-3 pr-1 text-sm text-blue-950 dark:bg-blue-950 dark:text-blue-100">
+            <p>
+                {`Showing ${shown} of ${plural(gradebook.students.length, "student")} · `}
+                <span className="font-semibold">{filterLabel(filter.filter)}</span>
+                {` · ${assignment?.name ?? ""}`}
+            </p>
+
+            <button
+                type="button"
+                onClick={onClear}
+                className="rounded-md px-2 py-0.5 font-medium text-blue-700 hover:bg-blue-100 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-blue-300 dark:hover:bg-blue-900"
+            >
+                Show all students
+            </button>
+        </div>
+    );
+}
+
+/**
  * Shows the gradebook's summary, key and grid, or the empty state that fits.
  * While the grid scrolls sideways, the toolbar shows which assignments are in
- * view with buttons that move between them.
+ * view with buttons that move between them. A column filter, which this tab
+ * remembers per class, limits the rows and is announced as it changes.
  */
 function GradebookView({
     gradebook,
@@ -411,7 +500,44 @@ function GradebookView({
     );
     const [keyHidden, setKeyHidden] = useStoredFlag(KEY_HIDDEN_STORAGE);
     const [columnView, setColumnView] = useState<ColumnView | null>(null);
+    const [storedFilter, setStoredFilter] = useState(() => readStoredFilter(gradebook));
+    const [announcement, setAnnouncement] = useState("");
     const tableRef = useRef<GradebookTableHandle>(null);
+    const filter =
+        storedFilter && gradebook.assignments.some((assignment) => assignment.id === storedFilter.assignmentId)
+            ? storedFilter
+            : null;
+    const shown = filterStudents(gradebook, filter).length;
+
+    /**
+     * Applies a column filter, or clears it with null, and announces the rows
+     * it leaves. Clearing puts focus on the column's filter button.
+     */
+    function changeFilter(next: GradebookFilter | null) {
+        const total = plural(gradebook.students.length, "student");
+        const cleared = filter;
+
+        setStoredFilter(next);
+        storeFilter(gradebook.class.id, next);
+
+        if (next) {
+            const assignment = gradebook.assignments.find((each) => each.id === next.assignmentId);
+            const count = filterStudents(gradebook, next).length;
+
+            setAnnouncement(`Showing ${count} of ${total}: ${filterLabel(next.filter)} on ${assignment?.name}.`);
+            return;
+        }
+
+        setAnnouncement(`Showing all ${total}.`);
+
+        if (cleared) {
+            requestAnimationFrame(() =>
+                document
+                    .querySelector<HTMLElement>(`[data-filter-for="${CSS.escape(cleared.assignmentId)}"]`)
+                    ?.focus()
+            );
+        }
+    }
 
     if (!hasStudents && !hasAssignments) {
         return (
@@ -434,8 +560,21 @@ function GradebookView({
 
     return (
         <>
-            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+            <p role="status" className="sr-only">
+                {announcement}
+            </p>
+
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                 <Summary gradebook={gradebook} />
+
+                {filter && (
+                    <FilterStatus
+                        gradebook={gradebook}
+                        filter={filter}
+                        shown={shown}
+                        onClear={() => changeFilter(null)}
+                    />
+                )}
 
                 {hasAssignments && (
                     <div className="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
@@ -445,9 +584,11 @@ function GradebookView({
                             onStep={(step) => tableRef.current?.scrollColumns(step)}
                         />
 
-                        <p aria-hidden="true" className="text-sm text-gray-600 dark:text-zinc-300">
-                            Select a grade for details · Arrow keys move
-                        </p>
+                        {keyHidden && (
+                            <p aria-hidden="true" className="text-sm text-gray-600 dark:text-zinc-300">
+                                {HINT}
+                            </p>
+                        )}
 
                         <button
                             type="button"
@@ -470,7 +611,7 @@ function GradebookView({
             )}
 
             {hasAssignments ? (
-                !keyHidden && <GradebookLegend id={LEGEND_ID} showDropped={hasDropped} />
+                !keyHidden && <GradebookLegend id={LEGEND_ID} showDropped={hasDropped} hint={HINT} />
             ) : (
                 <EmptyState
                     title="No assignments yet."
@@ -489,6 +630,8 @@ function GradebookView({
                 gradebook={gradebook}
                 selected={selected}
                 onSelect={onSelect}
+                filter={filter}
+                onFilterChange={changeFilter}
                 onColumnViewChange={setColumnView}
             />
         </>
