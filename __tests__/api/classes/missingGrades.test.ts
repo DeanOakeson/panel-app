@@ -392,6 +392,68 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
   });
 });
 
+describe("POST missing-grade eligibility is checked inside the transaction", () => {
+  /**
+   * Runs `change` after the route's early reads and just before its
+   * transaction starts, which is where a concurrent change could otherwise land.
+   */
+  function changeBeforeTransaction(change: () => Promise<unknown>) {
+    const db = getAdminDb();
+    const runTransaction = db.runTransaction.bind(db);
+
+    vi.spyOn(db, "runTransaction").mockImplementationOnce((async (
+      updateFunction: Parameters<typeof runTransaction>[0],
+      options?: Parameters<typeof runTransaction>[1]
+    ) => {
+      await change();
+      return runTransaction(updateFunction, options);
+    }) as typeof db.runTransaction);
+  }
+
+  it("returns 409 when the due date moves forward before the write", async () => {
+    changeBeforeTransaction(() => setDueDate(futureDueDate));
+
+    const res = await postMissing({}, ownerToken);
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: "Submissions are still open. You can grade missing work once the due date passes.",
+    });
+    expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+  });
+
+  it("returns 409 when the due date is removed before the write", async () => {
+    changeBeforeTransaction(() => setDueDate(null));
+
+    const res = await postMissing({}, ownerToken);
+
+    expect(res.status).toBe(409);
+    expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+  });
+
+  it("returns 404 when the student is unenrolled before the write", async () => {
+    changeBeforeTransaction(() =>
+      getAdminDb().collection("users").doc(studentUid).collection("classes").doc(classId).delete()
+    );
+
+    const res = await postMissing({}, ownerToken);
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "This student is not enrolled in this class." });
+    expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+  });
+
+  it("returns 404 when the assignment is deleted before the write", async () => {
+    changeBeforeTransaction(() => assignmentDoc().delete());
+
+    const res = await postMissing({}, ownerToken);
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Assignment not found." });
+    expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+  });
+});
+
 describe("PATCH /api/classes/[classId]/assignments/[assignmentId]/missing-grades/[studentId]", () => {
   const lastSavedAt = gradedAt;
 

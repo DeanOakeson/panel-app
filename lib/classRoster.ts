@@ -1,4 +1,4 @@
-import type { DocumentReference } from "firebase-admin/firestore";
+import type { DocumentReference, Query } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import {
   countGradingStatuses,
@@ -30,20 +30,17 @@ export async function loadEnrolledStudentIds(classId: string): Promise<string[]>
   return [...uids];
 }
 
-/** Returns whether a student is enrolled in a class. */
-export async function isStudentEnrolled(
-  classId: string,
-  studentId: string
-): Promise<boolean> {
-  const enrollment = await getAdminDb()
+/**
+ * Returns the query for a student's enrollment in a class, which matches
+ * nothing when they are not enrolled.
+ */
+export function enrollmentQuery(classId: string, studentId: string): Query {
+  return getAdminDb()
     .collection("users")
     .doc(studentId)
     .collection("classes")
     .where("class_id", "==", classId)
-    .limit(1)
-    .get();
-
-  return !enrollment.empty;
+    .limit(1);
 }
 
 /**

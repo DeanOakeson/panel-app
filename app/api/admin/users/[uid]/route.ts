@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { requireAdmin } from "@/lib/adminGuard";
+import { gradeHistory } from "@/lib/gradeHistory";
 import type { DocumentReference } from "firebase-admin/firestore";
 
 type RouteContext = { params: Promise<{ uid: string }> };
@@ -335,14 +336,17 @@ export async function DELETE(
       enrollments.map((e) => e.classId)
     );
 
-    // Grades carry a history subcollection, which a plain delete leaves behind
+    // History goes before its grade, so a failure part way leaves the grade
+    // for a retry to find again
     for (const gradeRef of [...gradeRefs, ...missingGradeRefs]) {
-      await db.recursiveDelete(gradeRef);
+      await db.recursiveDelete(gradeHistory(gradeRef));
     }
 
     const docsToDelete: DocumentReference[] = [
       ...enrollments.map((e) => e.ref),
       ...submissionRefs,
+      ...gradeRefs,
+      ...missingGradeRefs,
       userRef,
     ];
 

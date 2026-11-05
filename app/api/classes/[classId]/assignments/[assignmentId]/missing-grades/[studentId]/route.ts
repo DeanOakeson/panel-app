@@ -3,7 +3,7 @@ import type { DocumentReference, Firestore } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { getClosesAt, hasClosed } from "@/lib/assignmentDeadline";
 import { getClassAccess } from "@/lib/classAccess";
-import { isStudentEnrolled } from "@/lib/classRoster";
+import { enrollmentQuery } from "@/lib/classRoster";
 import { readFeedback, readJsonBody } from "@/lib/gradeInput";
 import { appendHistory, entryFromStoredGrade, hasHistory } from "@/lib/gradeHistory";
 
@@ -18,8 +18,6 @@ type MissingGradeRequest = {
   uid: string;
   db: Firestore;
   assignmentRef: DocumentReference;
-  /** The assignment's stored due date, which decides when submissions close. */
-  dueDate: unknown;
   body: Record<string, unknown>;
   feedback: string;
 };
@@ -101,47 +99,39 @@ async function readMissingGradeRequest(
     uid: access.uid,
     db,
     assignmentRef,
-    dueDate: assignmentDoc.data()?.dueDate,
     body,
     ...feedback,
   };
 }
 
 /**
- * Returns an error response unless submissions have closed: 409 while they
- * are open or when the assignment has no due date, and 500 for a malformed
- * due date. Returns null once they have closed.
+ * Returns why missing work cannot be graded yet: 409 while submissions are
+ * open or when the assignment has no due date, and 500 for a malformed due
+ * date. Returns null once submissions have closed.
  */
-function refuseWhileOpen(dueDate: unknown): NextResponse | null {
+function stillOpenError(dueDate: unknown): { error: string; status: number } | null {
   let closesAt: string | null;
 
   try {
     closesAt = getClosesAt(dueDate);
   } catch {
-    return NextResponse.json(
-      { error: "This assignment has an invalid due date." },
-      { status: 500 }
-    );
+    return { error: "This assignment has an invalid due date.", status: 500 };
   }
 
   if (!closesAt) {
-    return NextResponse.json(
-      {
-        error:
-          "This assignment has no due date, so submissions never close. Set a due date to grade missing work.",
-      },
-      { status: 409 }
-    );
+    return {
+      error:
+        "This assignment has no due date, so submissions never close. Set a due date to grade missing work.",
+      status: 409,
+    };
   }
 
   if (!hasClosed(closesAt)) {
-    return NextResponse.json(
-      {
-        error:
-          "Submissions are still open. You can grade missing work once the due date passes.",
-      },
-      { status: 409 }
-    );
+    return {
+      error:
+        "Submissions are still open. You can grade missing work once the due date passes.",
+      status: 409,
+    };
   }
 
   return null;
@@ -149,9 +139,8 @@ function refuseWhileOpen(dueDate: unknown): NextResponse | null {
 
 /**
  * Grades an enrolled student who has not submitted with a score of 0 and
- * optional feedback. Only allowed once submissions
- * have closed. Saves to the assignment's missingGrades collection and never
- * creates a submission. A 409 for a student who has submitted points to
+ * optional feedback. Only allowed once submissions have closed. Saves to the
+ * assignment's missingGrades collection and never creates a submission. A 409 for a student who has submitted points to
  * normal grading, and a 409 for missing work already graded includes the
  * stored grade. Each save adds an entry to the grade's history subcollection.
  */
@@ -167,30 +156,32 @@ export async function POST(request: NextRequest, context: RouteContext) {
       uid,
       db,
       assignmentRef,
-      dueDate,
       feedback,
     } = gradeRequest;
-
-    const stillOpen = refuseWhileOpen(dueDate);
-    if (stillOpen) return stillOpen;
-
-    if (!(await isStudentEnrolled(classId, studentId))) {
-      return NextResponse.json(
-        { error: "This student is not enrolled in this class." },
-        { status: 404 }
-      );
-    }
 
     const submissionRef = assignmentRef.collection("submissions").doc(studentId);
     const missingGradeRef = assignmentRef.collection("missingGrades").doc(studentId);
 
-    // Reading the submission in the transaction keeps a submission from
-    // landing between the check and the missing-work grade
+    // Every eligibility check reads inside the transaction, so a due-date
+    // change, an unenrollment or a submission cannot land before the write
     const result = await db.runTransaction(async (transaction) => {
-      const [submissionDoc, missingGradeDoc] = await transaction.getAll(
+      const [assignmentDoc, submissionDoc, missingGradeDoc] = await transaction.getAll(
+        assignmentRef,
         submissionRef,
         missingGradeRef
       );
+      const enrollment = await transaction.get(enrollmentQuery(classId, studentId));
+
+      if (!assignmentDoc.exists) {
+        return { error: "Assignment not found.", status: 404 };
+      }
+
+      const stillOpen = stillOpenError(assignmentDoc.data()?.dueDate);
+      if (stillOpen) return stillOpen;
+
+      if (enrollment.empty) {
+        return { error: "This student is not enrolled in this class.", status: 404 };
+      }
 
       if (submissionDoc.exists) {
         return {
