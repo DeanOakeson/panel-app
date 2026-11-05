@@ -58,18 +58,19 @@ function subscribe(onChange: () => void): () => void {
 /**
  * Returns a true-or-false preference remembered in localStorage under `key`,
  * and a function that changes it. Until someone sets it, the preference is
- * `fallback()`, which a module-level function keeps stable. The server render
- * and hydration see false, and the real value follows straight after. Blocked
+ * `fallback()`, read again on every render and resize. The server render and
+ * hydration see `initial`, and the real value follows straight after. Blocked
  * storage leaves the preference working until the page reloads.
  */
 export function useStoredFlag(
   key: string,
-  fallback: () => boolean = alwaysFalse
+  fallback: () => boolean = alwaysFalse,
+  initial = false
 ): [boolean, (value: boolean) => void] {
   const value = useSyncExternalStore(
     subscribe,
     () => readFlag(key, fallback),
-    () => false
+    () => initial
   );
   const setValue = useCallback((next: boolean) => writeFlag(key, next), [key]);
 

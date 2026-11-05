@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
@@ -21,11 +21,6 @@ const NAV_ID = "course-navigation";
 
 /** Below this window width, the course navigation starts collapsed until someone chooses. */
 const COLLAPSE_BELOW = 1100;
-
-/** Returns whether the course navigation starts collapsed, which it does in narrow windows. */
-function collapsedByDefault(): boolean {
-  return window.innerWidth < COLLAPSE_BELOW;
-}
 
 /** Shows a chevron pointing left to collapse the navigation, or right to expand it. */
 function ChevronIcon({ pointsLeft }: { pointsLeft: boolean }) {
@@ -55,9 +50,17 @@ export default function ClassLayout({
   const pathname = usePathname();
   const router = useRouter();
   const basePath = `/classes/${classId}`;
+  const onGrades = pathname === `${basePath}/grades`;
+
+  // The navigation starts collapsed on Grades, which needs the width, and in narrow windows
+  const collapsedByDefault = useCallback(
+    () => onGrades || window.innerWidth < COLLAPSE_BELOW,
+    [onGrades]
+  );
   const [collapsed, setCollapsed] = useStoredFlag(
     NAV_COLLAPSED_STORAGE,
-    collapsedByDefault
+    collapsedByDefault,
+    onGrades
   );
   const toggleLabel = collapsed ? "Show course navigation" : "Hide course navigation";
 
