@@ -1,0 +1,78 @@
+import type { CellDisplay } from "@/lib/gradebook";
+import { BADGE_CLASSES } from "../assignments/StatusBadge";
+
+/** Marks a score whose grade has written feedback. */
+export function FeedbackIcon() {
+    return (
+        <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-zinc-400"
+            fill="currentColor"
+        >
+            <path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6a1.5 1.5 0 0 1-1.5 1.5H7.2l-3 2.6A.75.75 0 0 1 3 13v-2h.5A1.5 1.5 0 0 1 2 9.5v-6Zm3 2a.75.75 0 0 0 0 1.5h6a.75.75 0 0 0 0-1.5H5Zm0 2.5a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5H5Z" />
+        </svg>
+    );
+}
+
+/** Labels a score in a cell as a missing-work grade, a smaller twin of MissingTag. */
+export function SmallMissingTag() {
+    return (
+        <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-gray-700 dark:bg-zinc-800 dark:text-zinc-300">
+            Missing
+        </span>
+    );
+}
+
+/**
+ * Shows what a gradebook cell holds: a status badge, a score out of `points`
+ * with its Missing tag and feedback mark, or muted placeholder text. The
+ * visible text is hidden from screen readers, which read the cell's label.
+ */
+export default function GradeCellContent({
+    display,
+    points,
+}: {
+    display: CellDisplay;
+    points: number;
+}) {
+    return (
+        <span aria-hidden="true" className="flex flex-col items-center gap-1">
+            {display.badge && (
+                <span
+                    className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${BADGE_CLASSES[display.badge.tone]}`}
+                >
+                    {display.badge.label}
+                </span>
+            )}
+
+            {display.primary !== null && (
+                <span className="flex items-center gap-1.5">
+                    {display.primaryMuted ? (
+                        <span className="text-xs tabular-nums text-gray-600 dark:text-zinc-400">
+                            {display.primary}/{points}
+                        </span>
+                    ) : (
+                        <span className="tabular-nums">
+                            <span className="text-base font-semibold text-gray-900 dark:text-white">
+                                {display.primary}
+                            </span>
+                            <span className="text-xs text-gray-500 dark:text-zinc-400">
+                                /{points}
+                            </span>
+                        </span>
+                    )}
+
+                    {display.missingTag && <SmallMissingTag />}
+                    {display.hasFeedback && <FeedbackIcon />}
+                </span>
+            )}
+
+            {display.placeholder && (
+                <span className="whitespace-nowrap text-xs text-gray-500 dark:text-zinc-400">
+                    {display.placeholder}
+                </span>
+            )}
+        </span>
+    );
+}
