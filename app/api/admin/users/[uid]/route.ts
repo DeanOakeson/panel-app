@@ -281,7 +281,7 @@ async function readUserOwnedClassDocs(uid: string, classIds: string[]) {
  *
  * Removes the Firebase Auth account, the `users/{uid}` profile, the user's
  * `users/{uid}/classes/*` enrollment mirrors, and their submission, grade and
- * missing-work grade docs. Self-deletion is refused.
+ * missing-work grade docs, with each grade's history. Self-deletion is refused.
  *
  * Submissions/grades are found by uid rather than by current enrollment, so a
  * submission left behind by an earlier unenroll is still removed — see
@@ -335,11 +335,14 @@ export async function DELETE(
       enrollments.map((e) => e.classId)
     );
 
+    // Grades carry a history subcollection, which a plain delete leaves behind
+    for (const gradeRef of [...gradeRefs, ...missingGradeRefs]) {
+      await db.recursiveDelete(gradeRef);
+    }
+
     const docsToDelete: DocumentReference[] = [
       ...enrollments.map((e) => e.ref),
       ...submissionRefs,
-      ...gradeRefs,
-      ...missingGradeRefs,
       userRef,
     ];
 

@@ -5,6 +5,7 @@ import { getClosesAt, hasClosed } from "@/lib/assignmentDeadline";
 import { getClassAccess } from "@/lib/classAccess";
 import { isStudentEnrolled } from "@/lib/classRoster";
 import { readJsonBody, readScoreAndFeedback } from "@/lib/gradeInput";
+import { appendHistory, entryFromStoredGrade, hasHistory } from "@/lib/gradeHistory";
 
 type RouteContext = {
   params: Promise<{ classId: string; assignmentId: string; studentId: string }>;
@@ -147,7 +148,7 @@ function refuseWhileOpen(dueDate: unknown): NextResponse | null {
  * have closed. Saves to the assignment's missingGrades collection and never
  * creates a submission. A 409 for a student who has submitted points to
  * normal grading, and a 409 for missing work already graded includes the
- * stored grade.
+ * stored grade. Each save adds an entry to the grade's history subcollection.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
@@ -212,6 +213,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
         gradedAt: new Date().toISOString(),
       };
       transaction.create(missingGradeRef, grade);
+      appendHistory(transaction, missingGradeRef, {
+        score,
+        feedback,
+        savedBy: uid,
+        savedAt: grade.gradedAt,
+        action: "created",
+      });
 
       return { grade };
     });
@@ -282,6 +290,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         };
       }
 
+      const recorded = await hasHistory(transaction, missingGradeRef);
       const changes = {
         score,
         feedback,
@@ -289,6 +298,19 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         updatedBy: uid,
       };
       transaction.update(missingGradeRef, changes);
+
+      // A grade saved before history was kept gets its stored version first
+      if (!recorded) {
+        appendHistory(transaction, missingGradeRef, entryFromStoredGrade(stored));
+      }
+
+      appendHistory(transaction, missingGradeRef, {
+        score,
+        feedback,
+        savedBy: uid,
+        savedAt: changes.updatedAt,
+        action: "edited",
+      });
 
       return { grade: { ...stored, ...changes } };
     });

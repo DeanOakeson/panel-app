@@ -217,4 +217,28 @@ describe("DELETE /api/admin/users/[uid] cascade — orphan paths", () => {
 
     expect(stragglers.empty).toBe(true);
   });
+
+  it("removes the history under the user's grades and missing-work grades", async () => {
+    const target = await createSignedInUser("student@example.com", "student");
+    await seedClassWithAssignment("class-1");
+    await seedEnrollMirror(target.uid, "class-1");
+    await seedSubmission(target.uid, "class-1", "done");
+    await seedGrade(target.uid, "class-1");
+    await seedMissingGrade(target.uid, "class-1");
+
+    const assignment = db().collection("classes").doc("class-1").collection("assignments").doc("a1");
+    const entry = { score: 0, feedback: "", savedBy: adminUid, savedAt: "2026-01-02T00:00:00.000Z", action: "created" };
+    await assignment.collection("grades").doc(target.uid).collection("history").add(entry);
+    await assignment.collection("missingGrades").doc(target.uid).collection("history").add(entry);
+
+    const res = await deleteUser(target.uid, adminToken);
+
+    expect(res.status).toBe(200);
+    const [gradeHistory, missingGradeHistory] = await Promise.all([
+      assignment.collection("grades").doc(target.uid).collection("history").get(),
+      assignment.collection("missingGrades").doc(target.uid).collection("history").get(),
+    ]);
+    expect(gradeHistory.empty).toBe(true);
+    expect(missingGradeHistory.empty).toBe(true);
+  });
 });

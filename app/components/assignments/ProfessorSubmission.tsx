@@ -14,6 +14,7 @@ import {
     type GradingStatus,
 } from "@/lib/gradingStatus";
 import GradeForm from "./GradeForm";
+import GradeHistory from "./GradeHistory";
 import type {
     Assignment,
     Grade,
@@ -573,6 +574,19 @@ function SubmissionCard({
                 </div>
             )}
 
+            {(graded || student.missingGrade) && (
+                <GradeHistory
+                    classId={classId}
+                    assignmentId={assignment.id}
+                    studentId={student.studentId}
+                    points={assignment.points}
+                    version={[
+                        student.gradeUpdatedAt ?? student.gradedAt,
+                        student.missingGrade?.updatedAt ?? student.missingGrade?.gradedAt,
+                    ].join("|")}
+                />
+            )}
+
             {(student.fileUrl || (canGrade && graded && !editing)) && (
                 <div className="mt-4 flex flex-wrap gap-2">
                     {student.fileUrl && (
@@ -716,6 +730,14 @@ function MissingWorkCard({
                             </p>
                         </div>
                     )}
+
+                    <GradeHistory
+                        classId={classId}
+                        assignmentId={assignment.id}
+                        studentId={student.studentId}
+                        points={assignment.points}
+                        version={missingGrade.updatedAt ?? missingGrade.gradedAt}
+                    />
                 </>
             )}
 
