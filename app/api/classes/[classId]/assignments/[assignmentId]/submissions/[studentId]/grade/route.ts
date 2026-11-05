@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { DocumentReference, Firestore } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { getClassAccess } from "@/lib/classAccess";
+import { readJsonBody, readScoreAndFeedback } from "@/lib/gradeInput";
 
 type RouteContext = {
   params: Promise<{ classId: string; assignmentId: string; studentId: string }>;
@@ -62,11 +63,9 @@ async function readGradeRequest(
     };
   }
 
-  let body: Record<string, unknown>;
+  const body = await readJsonBody(request);
 
-  try {
-    body = (await request.json()) ?? {};
-  } catch {
+  if (body === null) {
     return {
       error: NextResponse.json(
         { error: "Invalid JSON request body." },
@@ -76,33 +75,19 @@ async function readGradeRequest(
   }
 
   const points = assignmentDoc.data()?.points as number;
-  const score = body.score;
-  const feedback =
-    typeof body.feedback === "string" ? body.feedback.trim() : "";
+  const scoreAndFeedback = readScoreAndFeedback(body, points);
+
+  if ("error" in scoreAndFeedback) {
+    return {
+      error: NextResponse.json(
+        { error: scoreAndFeedback.error },
+        { status: 400 }
+      ),
+    };
+  }
+
+  const { score, feedback } = scoreAndFeedback;
   const submittedAt = body.submittedAt;
-
-  if (
-    typeof score !== "number" ||
-    !Number.isFinite(score) ||
-    score < 0 ||
-    score > points
-  ) {
-    return {
-      error: NextResponse.json(
-        { error: `Score must be a number from 0 to ${points}.` },
-        { status: 400 }
-      ),
-    };
-  }
-
-  if (feedback.length > 5000) {
-    return {
-      error: NextResponse.json(
-        { error: "Feedback must be 5000 characters or fewer." },
-        { status: 400 }
-      ),
-    };
-  }
 
   if (typeof submittedAt !== "string" || submittedAt === "") {
     return {

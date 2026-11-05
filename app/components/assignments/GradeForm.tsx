@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
-import type { Grade } from "../Types";
+import type { Grade, MissingGrade } from "../Types";
 
 /** The stored grade a form edits. */
 export type EditedGrade = {
@@ -17,34 +17,42 @@ type GradeFormProps = {
   assignmentId: string;
   /** The student's uid, which is also their submission's id. */
   studentId: string;
-  /** The submittedAt of the submission the professor is looking at. */
-  submittedAt: string;
   points: number;
   /** The grade being edited. Without it the form creates a grade. */
   editing?: EditedGrade;
-  /**
-   * Receives the student's uid, the stored grade, and whether another session
-   * had saved a grade first.
-   */
-  onSaved: (studentId: string, grade: Grade, alreadyGraded: boolean) => void;
   /** Shows a Cancel button that calls this. */
   onCancel?: () => void;
-};
+} & (
+  | {
+      /** The submittedAt of the submission the professor is looking at. */
+      submittedAt: string;
+      /**
+       * Receives the student's uid, the stored grade, and whether another
+       * session had saved a grade first.
+       */
+      onSaved: (studentId: string, grade: Grade, alreadyGraded: boolean) => void;
+    }
+  | {
+      /** Null grades a student without a submission through the missing-work path. */
+      submittedAt: null;
+      /**
+       * Receives the student's uid, the stored missing-work grade, and whether
+       * another session had saved one first.
+       */
+      onSaved: (studentId: string, grade: MissingGrade, alreadyGraded: boolean) => void;
+    }
+);
 
 const inputClass =
   "rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white";
 
-/** Score and feedback form that grades a submission or edits its grade. */
-export default function GradeForm({
-  classId,
-  assignmentId,
-  studentId,
-  submittedAt,
-  points,
-  editing,
-  onSaved,
-  onCancel,
-}: GradeFormProps) {
+/**
+ * Score and feedback form that grades a submission or a student's missing
+ * work, or edits that grade.
+ */
+export default function GradeForm(props: GradeFormProps) {
+  const { classId, assignmentId, studentId, submittedAt, points, editing, onCancel } =
+    props;
   const [score, setScore] = useState(editing ? String(editing.score) : "");
   const [feedback, setFeedback] = useState(editing?.feedback ?? "");
   const [error, setError] = useState("");
@@ -77,8 +85,11 @@ export default function GradeForm({
 
     try {
       const token = await user.getIdToken();
+      const assignmentPath = `/api/classes/${classId}/assignments/${assignmentId}`;
       const response = await fetch(
-        `/api/classes/${classId}/assignments/${assignmentId}/submissions/${studentId}/grade`,
+        submittedAt === null
+          ? `${assignmentPath}/missing-grades/${studentId}`
+          : `${assignmentPath}/submissions/${studentId}/grade`,
         {
           method: editing ? "PATCH" : "POST",
           headers: {
@@ -88,7 +99,7 @@ export default function GradeForm({
           body: JSON.stringify({
             score: scoreValue,
             feedback: feedback.trim(),
-            submittedAt,
+            ...(submittedAt !== null && { submittedAt }),
             ...(editing && { lastSavedAt: editing.lastSavedAt }),
           }),
         }
@@ -97,7 +108,7 @@ export default function GradeForm({
       const data = await response.json();
 
       if (response.status === 409 && data.grade) {
-        onSaved(studentId, data.grade, true);
+        props.onSaved(studentId, data.grade, true);
         return;
       }
 
@@ -105,7 +116,7 @@ export default function GradeForm({
         throw new Error(data.error || "Failed to save grade.");
       }
 
-      onSaved(studentId, data.grade, false);
+      props.onSaved(studentId, data.grade, false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {

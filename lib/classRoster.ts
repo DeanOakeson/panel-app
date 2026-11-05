@@ -30,28 +30,54 @@ export async function loadEnrolledStudentIds(classId: string): Promise<string[]>
   return [...uids];
 }
 
+/** Returns whether a student is enrolled in a class. */
+export async function isStudentEnrolled(
+  classId: string,
+  studentId: string
+): Promise<boolean> {
+  const enrollment = await getAdminDb()
+    .collection("users")
+    .doc(studentId)
+    .collection("classes")
+    .where("class_id", "==", classId)
+    .limit(1)
+    .get();
+
+  return !enrollment.empty;
+}
+
 /**
  * Counts an assignment's grading states. Every enrolled student counts, and
- * so does anyone else who submitted.
+ * so does anyone else who submitted or has a missing-work grade.
  */
 export async function loadGradingCounts(
   assignmentRef: DocumentReference,
   enrolledIds: string[]
 ): Promise<GradingCounts> {
-  const [submissions, grades] = await Promise.all([
+  const [submissions, grades, missingGrades] = await Promise.all([
     assignmentRef.collection("submissions").select("submittedAt").get(),
     assignmentRef.collection("grades").select("submittedAt").get(),
+    assignmentRef.collection("missingGrades").select().get(),
   ]);
 
   const submissionsById = new Map(
     submissions.docs.map((submission) => [submission.id, submission.data()])
   );
   const gradesById = new Map(grades.docs.map((grade) => [grade.id, grade.data()]));
-  const studentIds = new Set([...enrolledIds, ...submissionsById.keys()]);
+  const missingGradedIds = new Set(missingGrades.docs.map((missing) => missing.id));
+  const studentIds = new Set([
+    ...enrolledIds,
+    ...submissionsById.keys(),
+    ...missingGradedIds,
+  ]);
 
   return countGradingStatuses(
     [...studentIds].map((studentId) =>
-      getGradingStatus(submissionsById.get(studentId), gradesById.get(studentId))
+      getGradingStatus(
+        submissionsById.get(studentId),
+        gradesById.get(studentId),
+        missingGradedIds.has(studentId) ? {} : null
+      )
     )
   );
 }
