@@ -85,7 +85,7 @@ export function revealInGrid(element: Element) {
     element.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
-/** Returns a short due line for a column header, like "Due Nov 8" or "Closed Oct 30". */
+/** Returns a short due date for a column header, like "Due Nov 8", "Closed Oct 30" or "No due date". */
 function shortDue(assignment: GradebookAssignment): string {
     if (assignment.closesAt) {
         const day = new Intl.DateTimeFormat("en-US", {
@@ -156,7 +156,7 @@ const bodyBackground =
 const focusRing =
     "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-600 dark:focus-visible:outline-blue-400";
 const headerButton =
-    "-mx-1 mt-0.5 block w-fit max-w-full rounded-sm px-1 text-left text-sm leading-5 hover:bg-gray-200 dark:hover:bg-gray-700";
+    "absolute inset-x-1 bottom-1 block rounded-md px-1 py-1 text-left hover:bg-gray-200 dark:hover:bg-gray-700";
 const headerFocusRing =
     "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-600 dark:focus-visible:outline-blue-400";
 const filteredHeader =
@@ -165,9 +165,10 @@ const cellInteraction =
     "cursor-pointer hover:bg-blue-50 hover:ring-1 hover:ring-inset hover:ring-blue-300 focus-visible:bg-blue-50 dark:hover:bg-blue-950 dark:hover:ring-blue-700 dark:focus-visible:bg-blue-950";
 
 /**
- * Shows every student against every assignment. Each cell is a button that
- * opens its details, and the header row and student column stay in view
- * while the grid scrolls. The grid is one Tab stop: the arrow keys, Home and
+ * Shows every student against every assignment. Each column header shows
+ * the assignment's name, due date, points and grading progress, which opens
+ * its filter. Each cell is a button that opens its details, and the header
+ * row and student column stay in view while the grid scrolls. The grid is one Tab stop: the arrow keys, Home and
  * End move between its cells and the column headers' filter buttons. A
  * shaded edge marks each side with more columns or rows beyond it, and a
  * scroll comes to rest on whole columns and rows.
@@ -417,7 +418,7 @@ export default function GradebookTable({
                                         key={assignment.id}
                                         scope="col"
                                         style={{ ...columnStyle, scrollSnapAlign: "none start" }}
-                                        className={`sticky top-0 z-20 border-l px-2 py-1.5 text-left align-top font-normal ${stickyCellBase} ${
+                                        className={`sticky top-0 z-20 border-l px-2 pb-12 pt-1.5 text-left align-top font-normal ${stickyCellBase} ${
                                             columnFilter ? filteredHeader : "bg-gray-50 dark:bg-gray-800"
                                         }`}
                                     >
@@ -426,15 +427,19 @@ export default function GradebookTable({
                                             href={href}
                                             title={`${assignment.name} (out of ${assignment.points})`}
                                             tabIndex={-1}
-                                            className="line-clamp-3 break-words rounded-sm text-sm font-semibold text-blue-700 hover:underline dark:text-blue-300"
+                                            className="line-clamp-3 break-words rounded-sm text-sm font-semibold leading-5 text-gray-900 hover:text-blue-700 hover:underline dark:text-white dark:hover:text-blue-300"
                                         >
                                             {assignment.name}
                                         </Link>
 
                                         <span className="sr-only">Out of {assignment.points}.</span>
 
-                                        <p className="text-sm leading-5 text-gray-700 dark:text-zinc-300">
-                                            {shortDue(assignment)}
+                                        <p className="mt-0.5 text-xs leading-4 text-gray-600 dark:text-zinc-400">
+                                            <span className="whitespace-nowrap">{shortDue(assignment)}</span>
+                                            <span aria-hidden="true">
+                                                {" "}
+                                                <span className="whitespace-nowrap">· {assignment.points} pts</span>
+                                            </span>
                                         </p>
 
                                         <ColumnFilterMenu

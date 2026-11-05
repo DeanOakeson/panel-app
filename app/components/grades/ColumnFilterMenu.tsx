@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
     filterLabel,
+    gradingProgress,
     STUDENT_FILTERS,
     type GradebookAssignment,
     type StudentFilter,
@@ -36,20 +37,25 @@ type Props = {
 /** The gap between the button and its menu, and the menu and the window's edges, in pixels. */
 const MENU_GAP = 4;
 
-/** Returns the column's grading summary, like "4 to grade", with its color. */
-function gradingSummary({ grading }: GradebookAssignment): { text: string; className: string } {
-    if (grading.toGrade > 0) {
-        return {
-            text: `${grading.toGrade} to grade`,
-            className: "font-semibold text-amber-700 dark:text-amber-400",
-        };
-    }
+/** The progress bar's fill and the count line's color for each grading state. */
+const PROGRESS_STYLE = {
+    "to-grade": { fill: "bg-amber-500 dark:bg-amber-400", text: "font-semibold text-amber-700 dark:text-amber-400" },
+    "all-graded": { fill: "bg-green-600 dark:bg-green-500", text: "font-semibold text-green-700 dark:text-green-400" },
+    "none-turned-in": { fill: "", text: "text-gray-600 dark:text-zinc-300" },
+} as const;
 
-    if (grading.submitted === 0) {
-        return { text: "None turned in", className: "text-gray-600 dark:text-zinc-300" };
-    }
+/** Returns how a screen reader hears the column's grading, like "5 of 6 graded, 1 to grade". */
+function spokenProgress({ grading }: GradebookAssignment): string {
+    const progress = gradingProgress(grading);
 
-    return { text: "All graded", className: "font-semibold text-green-700 dark:text-green-400" };
+    switch (progress.state) {
+        case "to-grade":
+            return `${progress.label}, ${progress.toGrade} to grade`;
+        case "all-graded":
+            return `${progress.label}, all graded`;
+        case "none-turned-in":
+            return "none turned in";
+    }
 }
 
 /** Places a menu under its button, or above it when the window has no room below, inside the window. */
@@ -95,8 +101,9 @@ const itemClass =
     "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-800 outline-none hover:bg-gray-100 focus:bg-blue-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-600 aria-disabled:cursor-not-allowed aria-disabled:text-gray-400 aria-disabled:hover:bg-transparent dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus:bg-blue-950 dark:focus-visible:outline-blue-400 dark:aria-disabled:text-zinc-500";
 
 /**
- * Shows a column's grading summary as a menu button that filters the grid's
- * students by their work on the assignment. Enter, Space or Alt+Down opens
+ * Shows a column's grading progress, a bar with a count like "5 of 6 graded",
+ * as a menu button that filters the grid's students by their work on the
+ * assignment. Enter, Space or Alt+Down opens
  * the menu, whose items the arrow keys move between. Escape, Tab or a click
  * outside closes it, and choosing an item puts focus back on the button.
  */
@@ -114,7 +121,9 @@ export default function ColumnFilterMenu({
     const buttonRef = useRef<HTMLButtonElement>(null);
     const menuRef = useRef<HTMLDivElement>(null);
     const menuId = useId();
-    const summary = gradingSummary(assignment);
+    const progress = gradingProgress(assignment.grading);
+    const style = PROGRESS_STYLE[progress.state];
+    const percent = progress.turnedIn === 0 ? 0 : (progress.graded / progress.turnedIn) * 100;
     const filtering = active !== null;
 
     /** Returns the menu's items in order. */
@@ -230,7 +239,7 @@ export default function ColumnFilterMenu({
                 aria-haspopup="menu"
                 aria-expanded={open}
                 aria-controls={open ? menuId : undefined}
-                aria-label={`Filter students by ${assignment.name}, ${summary.text}${filteredText}`}
+                aria-label={`Filter students by ${assignment.name}, ${spokenProgress(assignment)}${filteredText}`}
                 title="Filter students by this assignment"
                 tabIndex={tabIndex}
                 data-grid-row={-1}
@@ -240,13 +249,19 @@ export default function ColumnFilterMenu({
                 onKeyDown={handleButtonKeyDown}
                 className={className}
             >
-                <span className={summary.className}>{summary.text}</span>
-                <span
-                    className={`ml-0.5 inline-block align-[-3px] ${
-                        filtering ? "text-blue-700 dark:text-blue-300" : "text-gray-500 dark:text-zinc-400"
-                    }`}
-                >
-                    {filtering ? <FunnelIcon /> : <ChevronDownIcon />}
+                <span className="block h-1.5 overflow-hidden rounded-full bg-gray-200 dark:bg-zinc-700">
+                    <span className={`block h-full rounded-full ${style.fill}`} style={{ width: `${percent}%` }} />
+                </span>
+
+                <span className="mt-1.5 flex items-center gap-0.5">
+                    <span className={`min-w-0 flex-1 truncate text-xs leading-4 ${style.text}`}>{progress.label}</span>
+                    <span
+                        className={`flex shrink-0 ${
+                            filtering ? "text-blue-700 dark:text-blue-300" : "text-gray-500 dark:text-zinc-400"
+                        }`}
+                    >
+                        {filtering ? <FunnelIcon /> : <ChevronDownIcon />}
+                    </span>
                 </span>
             </button>
 

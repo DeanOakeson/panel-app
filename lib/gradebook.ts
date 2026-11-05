@@ -432,6 +432,43 @@ export function describeCell(
   }
 }
 
+/** How far grading has come on one assignment, as its column header shows it. */
+export type GradingProgress = {
+  /** Submissions graded in their current version. */
+  graded: number;
+  /** Submissions turned in, graded or not. */
+  turnedIn: number;
+  /** Submissions still waiting for a grade, which is `turnedIn - graded`. */
+  toGrade: number;
+  state: "to-grade" | "all-graded" | "none-turned-in";
+  /** Like "5 of 6 graded", or "None turned in". */
+  label: string;
+};
+
+/**
+ * Returns an assignment's graded submissions out of those turned in. A
+ * missing-work grade is not a submission, so it counts in neither number,
+ * and work turned in after one counts as turned in and not yet graded. A
+ * student who left counts for whatever they turned in.
+ */
+export function gradingProgress(grading: Pick<GradingCounts, "submitted" | "graded">): GradingProgress {
+  const turnedIn = grading.submitted;
+  const graded = grading.graded;
+  const toGrade = turnedIn - graded;
+
+  if (turnedIn === 0) {
+    return { graded, turnedIn, toGrade, state: "none-turned-in", label: "None turned in" };
+  }
+
+  return {
+    graded,
+    turnedIn,
+    toGrade,
+    state: toGrade > 0 ? "to-grade" : "all-graded",
+    label: `${graded} of ${turnedIn} graded`,
+  };
+}
+
 /** Returns the link from a cell into the assignment page, focused on the student's card. */
 export function gradingHref(classId: string, assignmentId: string, studentId: string): string {
   const query = new URLSearchParams({ student: studentId, from: "grades" });

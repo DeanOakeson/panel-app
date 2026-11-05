@@ -6,6 +6,7 @@ import {
   filterCounts,
   filterStudents,
   gradingHref,
+  gradingProgress,
   gridLayout,
   matchesFilter,
   moveInGrid,
@@ -751,5 +752,71 @@ describe("student filters", () => {
   it("shows everyone without a filter or for an assignment that is gone", () => {
     expect(filterStudents(gradebook, null)).toHaveLength(4);
     expect(filterStudents(gradebook, { assignmentId: "deleted", filter: "graded" })).toHaveLength(4);
+  });
+});
+
+describe("gradingProgress", () => {
+  it("counts graded submissions out of those turned in, leaving out missing work", () => {
+    const gradebook = buildGradebook(
+      source({
+        assignments: [{ id: "a", name: "A", points: 10, dueDate: "2026-11-01" }],
+        work: [
+          work({
+            submissions: {
+              ava: { submittedAt: firstVersion },
+              ben: { submittedAt: secondVersion },
+              cara: { submittedAt: firstVersion },
+              dev: { submittedAt: firstVersion },
+              gone: { submittedAt: firstVersion },
+            },
+            grades: {
+              ava: { score: 9, submittedAt: firstVersion, gradedAt },
+              ben: { score: 8, submittedAt: firstVersion, gradedAt },
+              gone: { score: 7, submittedAt: firstVersion, gradedAt },
+            },
+            missingGrades: {
+              dev: { score: 0, gradedAt },
+              eve: { score: 0, gradedAt },
+            },
+          }),
+        ],
+        enrolledIds: ["ava", "ben", "cara", "dev", "eve", "fay"],
+      })
+    );
+    const progress = gradingProgress(gradebook.assignments[0].grading);
+    const counts = filterCounts(gradebook.students, 0);
+
+    // Ava and the student who left are graded. Ben resubmitted, Cara is new
+    // and Dev turned in after a missing-work grade. Eve's zero and Fay's
+    // missing work are not turned in.
+    expect(progress).toEqual({
+      graded: 2,
+      turnedIn: 5,
+      toGrade: 3,
+      state: "to-grade",
+      label: "2 of 5 graded",
+    });
+    expect(progress.graded).toBe(counts.graded);
+    expect(progress.toGrade).toBe(counts["to-grade"]);
+  });
+
+  it("reports all graded once nothing waits", () => {
+    expect(gradingProgress({ submitted: 3, graded: 3 })).toMatchObject({
+      state: "all-graded",
+      label: "3 of 3 graded",
+      toGrade: 0,
+    });
+  });
+
+  it("reports none turned in, even with missing-work grades", () => {
+    const grading = countGradingStatuses(["missing", "missing-graded"]);
+
+    expect(gradingProgress(grading)).toEqual({
+      graded: 0,
+      turnedIn: 0,
+      toGrade: 0,
+      state: "none-turned-in",
+      label: "None turned in",
+    });
   });
 });
