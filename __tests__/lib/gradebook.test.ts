@@ -3,11 +3,13 @@ import {
   buildGradebook,
   describeCell,
   gradingHref,
+  moveInGrid,
   rosterIds,
   standingFeedback,
   standingScore,
   type GradebookCell,
   type GradebookSource,
+  type GridPosition,
   type StoredDoc,
   type StoredWork,
 } from "@/lib/gradebook";
@@ -146,6 +148,7 @@ describe("describeCell", () => {
       expected: {
         primary: "82",
         primaryMuted: true,
+        primaryLabel: "earlier:",
         badge: { label: "Resubmitted", tone: "resubmitted" },
         hasFeedback: true,
         srText: "Resubmitted, earlier score 82 out of 100 still stands, has feedback",
@@ -164,6 +167,7 @@ describe("describeCell", () => {
       expected: {
         primary: "0",
         primaryMuted: true,
+        primaryLabel: null,
         badge: { label: "Needs grading", tone: "submitted-after-missing" },
         missingTag: true,
         srText: "Needs grading, submitted after a missing-work grade of 0 out of 100",
@@ -565,5 +569,53 @@ describe("buildGradebook", () => {
     const gradebook = buildGradebook(source({}));
 
     expect(gradebook).toMatchObject({ assignments: [], students: [], canGradeSubmissions: true });
+  });
+});
+
+describe("moveInGrid", () => {
+  // Three students and three assignments. The middle student has no cell in the middle column.
+  const size = { rows: 3, cols: 3 };
+  const holes = new Set(["1:1"]);
+  const isFocusable = ({ row, col }: GridPosition) =>
+    col >= 0 && col < 3 && row >= -1 && row < 3 && !holes.has(`${row}:${col}`);
+  const move = (from: GridPosition, key: Parameters<typeof moveInGrid>[1], toGridEnds = false) =>
+    moveInGrid(from, key, { ...size, toGridEnds }, isFocusable);
+
+  it("moves one cell with each arrow key", () => {
+    expect(move({ row: 0, col: 0 }, "ArrowRight")).toEqual({ row: 0, col: 1 });
+    expect(move({ row: 0, col: 1 }, "ArrowLeft")).toEqual({ row: 0, col: 0 });
+    expect(move({ row: 0, col: 0 }, "ArrowDown")).toEqual({ row: 1, col: 0 });
+    expect(move({ row: 2, col: 2 }, "ArrowUp")).toEqual({ row: 1, col: 2 });
+  });
+
+  it("skips a cell with nothing to focus", () => {
+    expect(move({ row: 1, col: 0 }, "ArrowRight")).toEqual({ row: 1, col: 2 });
+    expect(move({ row: 0, col: 1 }, "ArrowDown")).toEqual({ row: 2, col: 1 });
+  });
+
+  it("goes up from the first student into the column headers and back down", () => {
+    expect(move({ row: 0, col: 2 }, "ArrowUp")).toEqual({ row: -1, col: 2 });
+    expect(move({ row: -1, col: 2 }, "ArrowDown")).toEqual({ row: 0, col: 2 });
+  });
+
+  it("stays put at the grid's edges", () => {
+    expect(move({ row: 0, col: 2 }, "ArrowRight")).toBeNull();
+    expect(move({ row: 0, col: 0 }, "ArrowLeft")).toBeNull();
+    expect(move({ row: 2, col: 0 }, "ArrowDown")).toBeNull();
+    expect(move({ row: -1, col: 0 }, "ArrowUp")).toBeNull();
+  });
+
+  it("goes to the ends of the row with Home and End", () => {
+    expect(move({ row: 1, col: 2 }, "Home")).toEqual({ row: 1, col: 0 });
+    expect(move({ row: 0, col: 0 }, "End")).toEqual({ row: 0, col: 2 });
+  });
+
+  it("goes to the first and last student cells with Ctrl+Home and Ctrl+End", () => {
+    expect(move({ row: 1, col: 2 }, "Home", true)).toEqual({ row: 0, col: 0 });
+    expect(move({ row: -1, col: 0 }, "End", true)).toEqual({ row: 2, col: 2 });
+  });
+
+  it("finds nothing in a grid without students", () => {
+    expect(moveInGrid({ row: 0, col: 0 }, "Home", { rows: 0, cols: 3, toGridEnds: true }, isFocusable)).toBeNull();
   });
 });

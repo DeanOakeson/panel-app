@@ -9,6 +9,7 @@ function sample(fields: Partial<CellDisplay>): CellDisplay {
     return {
         primary: null,
         primaryMuted: false,
+        primaryLabel: null,
         badge: null,
         missingTag: false,
         hasFeedback: false,
@@ -29,12 +30,6 @@ type Entry = {
 
 const ENTRIES: Entry[] = [
     {
-        key: "score",
-        example: <GradeCellContent display={sample({ primary: "92" })} points={SAMPLE_POINTS} />,
-        spoken: "A score such as 92 out of 100:",
-        meaning: "Score saved",
-    },
-    {
         key: "feedback",
         example: <FeedbackIcon />,
         spoken: "Speech bubble:",
@@ -49,7 +44,7 @@ const ENTRIES: Entry[] = [
             />
         ),
         spoken: "Needs grading:",
-        meaning: "Submitted, not graded yet",
+        meaning: "Ready to grade",
     },
     {
         key: "resubmitted",
@@ -60,7 +55,7 @@ const ENTRIES: Entry[] = [
             />
         ),
         spoken: "Resubmitted:",
-        meaning: "New version to grade. The earlier score stands",
+        meaning: "New version to grade",
     },
     {
         key: "submitted-after-missing",
@@ -68,15 +63,12 @@ const ENTRIES: Entry[] = [
             <GradeCellContent
                 display={sample({
                     badge: { label: "Needs grading", tone: "submitted-after-missing" },
-                    primary: "0",
-                    primaryMuted: true,
-                    missingTag: true,
                 })}
                 points={SAMPLE_POINTS}
             />
         ),
-        spoken: "Needs grading above 0 Missing:",
-        meaning: "Turned in after a missing-work grade",
+        spoken: "Needs grading in amber:",
+        meaning: "Turned in after Missing",
     },
     {
         key: "missing",
@@ -87,7 +79,7 @@ const ENTRIES: Entry[] = [
             />
         ),
         spoken: "Missing:",
-        meaning: "Past due, nothing turned in, no grade",
+        meaning: "Past due, no grade",
     },
     {
         key: "missing-graded",
@@ -98,7 +90,7 @@ const ENTRIES: Entry[] = [
             />
         ),
         spoken: "0 with a Missing tag:",
-        meaning: "Missing-work grade of 0",
+        meaning: "Missing-work grade",
     },
     {
         key: "not-submitted",
@@ -106,41 +98,45 @@ const ENTRIES: Entry[] = [
             <GradeCellContent display={sample({ placeholder: "Not submitted" })} points={SAMPLE_POINTS} />
         ),
         spoken: "Not submitted:",
-        meaning: "Not turned in yet, still open",
+        meaning: "Still open",
     },
 ];
 
 const DROPPED_ENTRY: Entry = {
     key: "dropped",
-    example: <span aria-hidden="true" className="px-1 text-gray-400 dark:text-zinc-500">–</span>,
+    example: <span aria-hidden="true" className="px-1 text-base text-gray-500 dark:text-zinc-400">–</span>,
     spoken: "Dash:",
-    meaning: "Not in the class for that assignment",
+    meaning: "Not enrolled then",
 };
 
 /**
- * Explains what each kind of gradebook cell means. `showDropped` adds the
- * entry for students who left the class, shown only when the grid has one.
+ * Explains each kind of gradebook cell in a compact, wrapping line.
+ * `showDropped` adds the entry for students who left the class, shown only
+ * when the grid has one.
  */
-export default function GradebookLegend({ showDropped }: { showDropped: boolean }) {
+export default function GradebookLegend({ id, showDropped }: { id: string; showDropped: boolean }) {
     const entries = showDropped ? [...ENTRIES, DROPPED_ENTRY] : ENTRIES;
 
     return (
         <section
-            aria-labelledby="gradebook-key-heading"
-            className="rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-zinc-700 dark:bg-gray-900"
+            id={id}
+            aria-labelledby={`${id}-heading`}
+            className="relative rounded-lg border border-gray-200 bg-white px-3 py-1.5 dark:border-zinc-700 dark:bg-gray-900"
         >
-            <h2
-                id="gradebook-key-heading"
-                className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-zinc-400"
-            >
-                Key
-            </h2>
+            <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-gray-800 dark:text-zinc-200">
+                <li>
+                    <h2
+                        id={`${id}-heading`}
+                        className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-zinc-300"
+                    >
+                        Key
+                    </h2>
+                </li>
 
-            <ul className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-x-6 gap-y-2 text-xs text-gray-700 dark:text-zinc-300">
                 {entries.map((entry) => (
-                    <li key={entry.key} className="flex items-center gap-3">
-                        <span className="flex w-28 shrink-0 justify-center">{entry.example}</span>
-                        <span>
+                    <li key={entry.key} className="flex items-center gap-1.5">
+                        <span className="flex shrink-0 items-center">{entry.example}</span>
+                        <span className="whitespace-nowrap">
                             <span className="sr-only">{entry.spoken} </span>
                             {entry.meaning}
                         </span>

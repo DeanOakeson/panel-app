@@ -312,6 +312,8 @@ export type CellDisplay = {
   primary: string | null;
   /** Whether the score is shown muted, beneath a badge, because new work waits to be graded. */
   primaryMuted: boolean;
+  /** Text shown before a muted score, like "earlier:". */
+  primaryLabel: string | null;
   badge: CellBadge | null;
   /** Whether a Missing tag marks the score as a missing-work grade. */
   missingTag: boolean;
@@ -341,6 +343,7 @@ export function describeCell(
   const empty: CellDisplay = {
     primary: null,
     primaryMuted: false,
+    primaryLabel: null,
     badge: null,
     missingTag: false,
     hasFeedback: false,
@@ -386,6 +389,7 @@ export function describeCell(
         ...empty,
         primary: score,
         primaryMuted: true,
+        primaryLabel: "earlier:",
         badge: { label: "Resubmitted", tone: "resubmitted" },
         hasFeedback,
         srText: `Resubmitted, earlier score ${outOf} still stands${feedbackText}`,
@@ -436,6 +440,61 @@ export function gradingHref(classId: string, assignmentId: string, studentId: st
   const query = new URLSearchParams({ student: studentId, from: "grades" });
 
   return `/classes/${classId}/assignments/${assignmentId}?${query}`;
+}
+
+// #endregion
+
+// #region Keyboard
+
+/** A place in the grid: a row of students, or -1 for the header row, and a column of assignments. */
+export type GridPosition = { row: number; col: number };
+
+/** The keys that move focus around the grid. */
+export type GridKey = "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Home" | "End";
+
+/**
+ * Returns where a key moves focus from `from`, or null when it stays put.
+ * Arrow keys skip cells that `isFocusable` rejects, Home and End go to the
+ * row's ends, and with `toGridEnds` they go to the first or last student cell.
+ * Rows run from -1, the header row, to `rows - 1`.
+ */
+export function moveInGrid(
+  from: GridPosition,
+  key: GridKey,
+  { rows, cols, toGridEnds = false }: { rows: number; cols: number; toGridEnds?: boolean },
+  isFocusable: (position: GridPosition) => boolean
+): GridPosition | null {
+  /** Returns the first focusable position among candidates, or null. */
+  const firstOf = (candidates: GridPosition[]) =>
+    candidates.find((candidate) => isFocusable(candidate)) ?? null;
+  /** Returns the numbers from `start` up to `end`, or none when `end` is lower. */
+  const upTo = (start: number, end: number) =>
+    Array.from({ length: Math.max(0, end - start + 1) }, (_, offset) => start + offset);
+  /** Returns the numbers from `start` down to `end`, or none when `end` is higher. */
+  const downTo = (start: number, end: number) => upTo(end, start).reverse();
+
+  if ((key === "Home" || key === "End") && toGridEnds) {
+    const cells = upTo(0, rows - 1).flatMap((row) =>
+      upTo(0, cols - 1).map((col) => ({ row, col }))
+    );
+
+    return firstOf(key === "Home" ? cells : cells.reverse());
+  }
+
+  switch (key) {
+    case "ArrowRight":
+      return firstOf(upTo(from.col + 1, cols - 1).map((col) => ({ row: from.row, col })));
+    case "ArrowLeft":
+      return firstOf(downTo(from.col - 1, 0).map((col) => ({ row: from.row, col })));
+    case "ArrowDown":
+      return firstOf(upTo(from.row + 1, rows - 1).map((row) => ({ row, col: from.col })));
+    case "ArrowUp":
+      return firstOf(downTo(from.row - 1, -1).map((row) => ({ row, col: from.col })));
+    case "Home":
+      return firstOf(upTo(0, cols - 1).map((col) => ({ row: from.row, col })));
+    case "End":
+      return firstOf(downTo(cols - 1, 0).map((col) => ({ row: from.row, col })));
+  }
 }
 
 // #endregion

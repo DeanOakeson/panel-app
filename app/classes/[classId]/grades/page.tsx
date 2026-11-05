@@ -11,6 +11,7 @@ import type { Gradebook } from "@/lib/gradebook";
 import GradebookLegend from "../../../components/grades/GradebookLegend";
 import GradebookTable, {
     cellDataKey,
+    revealInGrid,
     type CellKey,
 } from "../../../components/grades/GradebookTable";
 import GradeDetailsPanel, {
@@ -24,6 +25,29 @@ type PageState =
     | { kind: "forbidden"; message: string }
     | { kind: "student" }
     | { kind: "ready"; gradebook: Gradebook };
+
+/** Where the browser remembers whether the professor hid the key. */
+const KEY_HIDDEN_STORAGE = "panel-gradebook-key-hidden";
+
+const LEGEND_ID = "gradebook-key";
+
+/** Returns whether the professor hid the key, false when storage cannot be read. */
+function readKeyHidden(): boolean {
+    try {
+        return window.localStorage.getItem(KEY_HIDDEN_STORAGE) === "true";
+    } catch {
+        return false;
+    }
+}
+
+/** Remembers whether the key is hidden, ignoring storage that cannot be written. */
+function writeKeyHidden(hidden: boolean) {
+    try {
+        window.localStorage.setItem(KEY_HIDDEN_STORAGE, String(hidden));
+    } catch {
+        // The choice then lasts only until the page reloads
+    }
+}
 
 /** How long after a load the page waits before refreshing on focus. */
 const FOCUS_REFRESH_INTERVAL = 30_000;
@@ -210,9 +234,12 @@ export default function GradesPage() {
     /** Clears the open cell and puts focus back on its button. */
     function handlePanelClosed() {
         if (selected) {
-            document
-                .querySelector<HTMLButtonElement>(`[data-cell="${CSS.escape(cellDataKey(selected))}"]`)
-                ?.focus();
+            const cell = document.querySelector<HTMLButtonElement>(
+                `[data-cell="${CSS.escape(cellDataKey(selected))}"]`
+            );
+
+            cell?.focus({ preventScroll: true });
+            if (cell) revealInGrid(cell);
         }
 
         setSelected(null);
@@ -221,7 +248,7 @@ export default function GradesPage() {
     const gradebook = state.kind === "ready" ? state.gradebook : null;
 
     return (
-        <div className="mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col gap-4">
+        <div className="mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col gap-3">
             <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
                 <div className="min-w-0">
                     <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Grades</h1>
@@ -231,7 +258,7 @@ export default function GradesPage() {
 
                 {gradebook && (
                     <div className="flex items-center gap-3">
-                        <p className="text-sm text-gray-500 dark:text-zinc-400">
+                        <p className="text-sm text-gray-600 dark:text-zinc-300">
                             {refreshing
                                 ? "Refreshing..."
                                 : loadedAt !== null && `Updated ${formatLoadedAt(loadedAt)}`}
@@ -391,6 +418,14 @@ function GradebookView({
     const hasDropped = gradebook.students.some((student) =>
         student.cells.some((cell) => cell === null)
     );
+    // The view mounts only after the grades load, well after hydration, so it can read storage here
+    const [keyHidden, setKeyHidden] = useState(readKeyHidden);
+
+    /** Shows or hides the key and remembers the choice. */
+    function toggleKey() {
+        writeKeyHidden(!keyHidden);
+        setKeyHidden(!keyHidden);
+    }
 
     if (!hasStudents && !hasAssignments) {
         return (
@@ -413,7 +448,27 @@ function GradebookView({
 
     return (
         <>
-            <Summary gradebook={gradebook} />
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                <Summary gradebook={gradebook} />
+
+                {hasAssignments && (
+                    <div className="flex items-center gap-3">
+                        <p aria-hidden="true" className="hidden text-[13px] text-gray-600 xl:block dark:text-zinc-300">
+                            Tip: arrow keys move between grades
+                        </p>
+
+                        <button
+                            type="button"
+                            onClick={toggleKey}
+                            aria-expanded={!keyHidden}
+                            aria-controls={keyHidden ? undefined : LEGEND_ID}
+                            className="-my-1 rounded-md px-2 py-1 text-sm font-medium text-blue-700 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-blue-300 dark:hover:bg-blue-950"
+                        >
+                            {keyHidden ? "Show key" : "Hide key"}
+                        </button>
+                    </div>
+                )}
+            </div>
 
             {!gradebook.canGradeSubmissions && (
                 <p className="text-sm text-gray-600 dark:text-zinc-300">
@@ -423,7 +478,7 @@ function GradebookView({
             )}
 
             {hasAssignments ? (
-                <GradebookLegend showDropped={hasDropped} />
+                !keyHidden && <GradebookLegend id={LEGEND_ID} showDropped={hasDropped} />
             ) : (
                 <EmptyState
                     title="No assignments yet."
