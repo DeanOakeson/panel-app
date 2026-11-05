@@ -221,7 +221,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     if ("error" in result) {
       return NextResponse.json(
-        { error: result.error, grade: result.grade },
+        { error: result.error, grade: "grade" in result ? result.grade : undefined },
         { status: result.status }
       );
     }
@@ -311,7 +311,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     if ("error" in result) {
       return NextResponse.json(
-        { error: result.error, grade: result.grade },
+        { error: result.error, grade: "grade" in result ? result.grade : undefined },
         { status: result.status }
       );
     }
