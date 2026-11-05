@@ -26,6 +26,8 @@ vi.mock("@/lib/supabaseAdmin", () => ({
 const classId = "class-1";
 const assignmentId = "assignment-1";
 const gradedAt = "2026-11-01T10:00:00.000Z";
+const pastDueDate = "2020-01-15";
+const futureDueDate = "2099-11-01";
 
 type Ids = { classId: string; assignmentId: string; studentId: string };
 
@@ -111,6 +113,11 @@ function patchMissing(body: unknown, idToken?: string, to = ids) {
   return sendMissingGrade("PATCH", body, idToken, to);
 }
 
+/** Moves the assignment's due date, which opens or closes submissions. */
+function setDueDate(dueDate: string | null) {
+  return assignmentDoc().update({ dueDate });
+}
+
 /** Stores a missing-work grade for the enrolled student, as graded by another professor. */
 async function storeMissingGrade(overrides: Record<string, unknown> = {}) {
   const grade = {
@@ -154,7 +161,8 @@ beforeEach(async () => {
     .collection("classes")
     .doc(classId)
     .set({ name: "CS 6300", professor_id: ownerUid });
-  await assignmentDoc().set({ name: "Project 1", points: 100, dueDate: "2099-11-01" });
+  // Closed, since missing work can only be graded once submissions close
+  await assignmentDoc().set({ name: "Project 1", points: 100, dueDate: pastDueDate });
   await getAdminDb()
     .collection("users")
     .doc(studentUid)
@@ -292,6 +300,45 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
       expect(storage.upload).not.toHaveBeenCalled();
     });
 
+    it("returns 409 and saves nothing while submissions are still open", async () => {
+      await setDueDate(futureDueDate);
+
+      const res = await postMissing({ score: 0 }, ownerToken);
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({
+        error: "Submissions are still open. You can grade missing work once the due date passes.",
+      });
+      expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+    });
+
+    it("returns 409 and saves nothing for an assignment with no due date", async () => {
+      await setDueDate(null);
+
+      const res = await postMissing({ score: 0 }, ownerToken);
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: expect.stringMatching(/no due date/) });
+      expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+    });
+
+    it("returns 500 and saves nothing for an invalid due date", async () => {
+      await setDueDate("2026-02-30");
+
+      const res = await postMissing({ score: 0 }, ownerToken);
+
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({ error: "This assignment has an invalid due date." });
+      expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+    });
+
+    it("accepts a grade once the due date has passed", async () => {
+      const res = await postMissing({ score: 5 }, ownerToken);
+
+      expect(res.status).toBe(201);
+      expect((await missingGradeDoc(studentUid).get()).data()).toMatchObject({ score: 5 });
+    });
+
     it.each([0, 100])("accepts a score of %d with no feedback", async (score) => {
       const res = await postMissing({ score }, ownerToken);
 
@@ -426,6 +473,16 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]/missing-grades
       expect((await res.json()).grade).toEqual(saved);
     });
 
+    it("edits a missing-work grade after the due date moves forward again", async () => {
+      await storeMissingGrade();
+      await setDueDate(futureDueDate);
+
+      const res = await patchMissing({ lastSavedAt, score: 40 }, ownerToken);
+
+      expect(res.status).toBe(200);
+      expect((await missingGradeDoc(studentUid).get()).data()).toMatchObject({ score: 40 });
+    });
+
     it("edits an already edited grade using its updatedAt", async () => {
       await storeMissingGrade();
       const first = await patchMissing({ lastSavedAt, score: 20 }, ownerToken);
@@ -488,6 +545,7 @@ describe("missing-work grades alongside submissions and their grades", () => {
   it("keeps the missing-work grade when the student submits later, and flags the submission", async () => {
     const created = await postMissing({ score: 0, feedback: "Missing" }, ownerToken);
     const stored = (await created.json()).grade;
+    await setDueDate(futureDueDate);
 
     const submitted = await submitFile(studentToken);
 
@@ -521,6 +579,7 @@ describe("missing-work grades alongside submissions and their grades", () => {
   it("grades the later submission as a separate grade and keeps both records", async () => {
     const created = await postMissing({ score: 0, feedback: "Missing" }, ownerToken);
     const missingGrade = (await created.json()).grade;
+    await setDueDate(futureDueDate);
     await submitFile(studentToken);
     const { submittedAt } = (await submissionDoc(studentUid).get()).data()!;
 
@@ -557,7 +616,9 @@ describe("missing-work grades alongside submissions and their grades", () => {
   });
 
   it("refuses a missing-work grade once the student has submitted through the submit route", async () => {
+    await setDueDate(futureDueDate);
     await submitFile(studentToken, "on-time.pdf");
+    await setDueDate(pastDueDate);
 
     const res = await postMissing({ score: 0 }, ownerToken);
 

@@ -9,6 +9,7 @@ import {
   timestampLine,
 } from "./support/grading";
 import { makePdf } from "./support/pdf";
+import { setDueDate } from "./support/scenario";
 
 const FEEDBACK = "No submission received. Talk to me about the late policy.";
 const EDITED_FEEDBACK = "Partial credit for the outline you emailed.";
@@ -96,51 +97,74 @@ test.describe("Professor grades a student who did not submit", () => {
     await expect(own).toContainText(FEEDBACK);
   });
 
+  test("is not offered while submissions are open", async ({ page, scenario }) => {
+    await signIn(page, scenario.professor);
+    await page.goto(scenario.open.path);
+
+    for (const name of ["Ben Carter", "Cara Diaz", "Dev Patel"]) {
+      const card = studentCard(page, name);
+      await expectStatus(card, "Not submitted");
+      await expect(card.getByRole("button", { name: "Grade missing work" })).toHaveCount(0);
+    }
+
+    await page.goto(scenario.closed.path);
+    await expect(studentCard(page, "Dev Patel").getByRole("button", { name: "Grade missing work" })).toBeVisible();
+  });
+
   test("a later submission keeps the missing-work grade and is flagged for grading", async ({
     page,
     scenario,
     pageAs,
   }) => {
-    const { open } = scenario;
+    const { closed, course, professor } = scenario;
 
-    await signIn(page, scenario.professor);
-    await page.goto(open.path);
-    const ben = studentCard(page, "Ben Carter");
-    await ben.getByRole("button", { name: "Grade missing work" }).click();
-    await saveGrade(ben, "0", FEEDBACK);
-    await expectStatus(ben, "Missing work graded");
+    await signIn(page, professor);
+    await page.goto(closed.path);
+    const dev = studentCard(page, "Dev Patel");
+    await dev.getByRole("button", { name: "Grade missing work" }).click();
+    await saveGrade(dev, "0", FEEDBACK);
+    await expectStatus(dev, "Missing work graded");
 
-    const benPage = await pageAs(scenario.students.ben);
-    await benPage.goto(open.path);
-    await expect(ownSubmission(benPage)).toContainText(`0 / ${open.points}`);
-    await benPage.locator("#assignment-file").setInputFiles({
-      name: "Carter_Homework2.pdf",
+    // The professor extends the due date, which lets Dev submit late
+    await setDueDate(professor, course.id, closed.id, 7);
+    await page.reload();
+    const reopened = studentCard(page, "Dev Patel");
+    await expectStatus(reopened, "Missing work graded");
+    await expect(reopened.getByRole("button", { name: "Edit missing-work grade" })).toBeVisible();
+
+    const devPage = await pageAs(scenario.students.dev);
+    await devPage.goto(closed.path);
+    await expect(ownSubmission(devPage)).toContainText(`0 / ${closed.points}`);
+    await devPage.locator("#assignment-file").setInputFiles({
+      name: "Patel_Project1.pdf",
       mimeType: "application/pdf",
-      buffer: makePdf("Ben Carter: Homework 2"),
+      buffer: makePdf("Dev Patel: Project 1"),
     });
-    await benPage.getByRole("button", { name: "Submit assignment" }).click();
-    await expect(benPage.getByText("Assignment submitted successfully!")).toBeVisible();
+    await devPage.getByRole("button", { name: "Submit assignment" }).click();
+    await expect(devPage.getByText("Assignment submitted successfully!")).toBeVisible();
 
-    const notice = `Submitted after a missing-work grade of 0 / ${open.points}`;
-    const own = ownSubmission(benPage);
-    await expect(own).toContainText("Carter_Homework2.pdf");
+    const notice = `Submitted after a missing-work grade of 0 / ${closed.points}`;
+    const own = ownSubmission(devPage);
+    await expect(own).toContainText("Patel_Project1.pdf");
     await expect(own).toContainText("Not graded yet");
     await expect(own.getByText(notice)).toBeVisible();
 
     await page.reload();
-    const flagged = studentCard(page, "Ben Carter");
+    const flagged = studentCard(page, "Dev Patel");
     await expectStatus(flagged, "Submitted after missing grade");
-    await expect(flagged).toContainText("Carter_Homework2.pdf");
+    await expect(flagged).toContainText("Patel_Project1.pdf");
     await expect(flagged.getByText(notice)).toBeVisible();
-    await expect(page.getByText("2 of 4 submitted · 2 need grading (1 after a missing-work grade) · 2 not submitted")).toBeVisible();
+    await expect(
+      page.getByText("4 of 4 submitted · 3 need grading (1 resubmitted, 1 after a missing-work grade)")
+    ).toBeVisible();
 
-    await saveGrade(flagged, "18", "Late, but complete.");
+    await saveGrade(flagged, "72", "Late, but complete.");
     await expectStatus(flagged, "Graded");
-    await expect(flagged).toContainText(`18 / ${open.points}`);
+    await expect(flagged).toContainText(`72 / ${closed.points}`);
     await expect(flagged.getByText(notice)).toBeVisible();
 
-    await benPage.reload();
-    await expect(own).toContainText(`18 / ${open.points}`);
+    await devPage.reload();
+    await expect(own).toContainText(`72 / ${closed.points}`);
     await expect(own.getByText(notice)).toBeVisible();
   });
 });

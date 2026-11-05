@@ -655,7 +655,7 @@ type MissingWorkCardProps = {
 
 /**
  * Shows one student without a submission, their missing-work grade, and the
- * form to grade or edit it.
+ * form to grade or edit it. A grade can only be added once submissions close.
  */
 function MissingWorkCard({
     classId,
@@ -719,7 +719,8 @@ function MissingWorkCard({
                 </>
             )}
 
-            {!editing && (
+            {/* Missing work can be graded once submissions close, and edited after that */}
+            {!editing && (missingGrade || closed) && (
                 <div className="mt-4 flex flex-wrap gap-2">
                     <button
                         type="button"

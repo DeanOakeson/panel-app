@@ -170,6 +170,16 @@ function dateFromToday(days: number) {
   );
 }
 
+/**
+ * Moves an assignment's due date to `days` from today as the professor, which
+ * opens submissions again for a positive number and closes them for a negative one.
+ */
+export async function setDueDate(professor: Person, courseId: string, assignmentId: string, days: number) {
+  await api("PATCH", `/api/classes/${courseId}/assignments/${assignmentId}`, professor.token, {
+    dueDate: dateFromToday(days),
+  });
+}
+
 // #endregion
 
 /**
@@ -234,9 +244,7 @@ export async function seedScenario(): Promise<Scenario> {
   await grade(professor, course.id, closed.id, ben, BEN_SCORE, BEN_FEEDBACK);
   await submit(ben, course.id, closed.id, "Carter_Project1_v2.pdf");
 
-  await api("PATCH", `/api/classes/${course.id}/assignments/${closed.id}`, professor.token, {
-    dueDate: dateFromToday(-7),
-  });
+  await setDueDate(professor, course.id, closed.id, -7);
 
   return {
     professor,

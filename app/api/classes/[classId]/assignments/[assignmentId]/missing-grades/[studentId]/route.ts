@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { DocumentReference, Firestore } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebaseAdmin";
+import { getClosesAt, hasClosed } from "@/lib/assignmentDeadline";
 import { getClassAccess } from "@/lib/classAccess";
 import { isStudentEnrolled } from "@/lib/classRoster";
 import { readJsonBody, readScoreAndFeedback } from "@/lib/gradeInput";
@@ -16,6 +17,8 @@ type MissingGradeRequest = {
   uid: string;
   db: Firestore;
   assignmentRef: DocumentReference;
+  /** The assignment's stored due date, which decides when submissions close. */
+  dueDate: unknown;
   body: Record<string, unknown>;
   score: number;
   feedback: string;
@@ -92,17 +95,59 @@ async function readMissingGradeRequest(
     uid: access.uid,
     db,
     assignmentRef,
+    dueDate: assignmentDoc.data()?.dueDate,
     body,
     ...scoreAndFeedback,
   };
 }
 
 /**
+ * Returns an error response unless submissions have closed: 409 while they
+ * are open or when the assignment has no due date, and 500 for a malformed
+ * due date. Returns null once they have closed.
+ */
+function refuseWhileOpen(dueDate: unknown): NextResponse | null {
+  let closesAt: string | null;
+
+  try {
+    closesAt = getClosesAt(dueDate);
+  } catch {
+    return NextResponse.json(
+      { error: "This assignment has an invalid due date." },
+      { status: 500 }
+    );
+  }
+
+  if (!closesAt) {
+    return NextResponse.json(
+      {
+        error:
+          "This assignment has no due date, so submissions never close. Set a due date to grade missing work.",
+      },
+      { status: 409 }
+    );
+  }
+
+  if (!hasClosed(closesAt)) {
+    return NextResponse.json(
+      {
+        error:
+          "Submissions are still open. You can grade missing work once the due date passes.",
+      },
+      { status: 409 }
+    );
+  }
+
+  return null;
+}
+
+/**
  * Grades an enrolled student who has not submitted, with a score from 0 to the
- * assignment's points and optional feedback. Saves to the assignment's
- * missingGrades collection and never creates a submission. A 409 for a
- * student who has submitted points to normal grading, and a 409 for missing
- * work already graded includes the stored grade.
+ * assignment's points and optional feedback. Only allowed once submissions
+ * have closed. Saves to the assignment's missingGrades collection and never
+ * creates a submission. A 409 for a student who has submitted points to
+ * normal grading, and a 409 for missing work already graded includes the
+ * stored grade.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
@@ -116,9 +161,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
       uid,
       db,
       assignmentRef,
+      dueDate,
       score,
       feedback,
     } = gradeRequest;
+
+    const stillOpen = refuseWhileOpen(dueDate);
+    if (stillOpen) return stillOpen;
 
     if (!(await isStudentEnrolled(classId, studentId))) {
       return NextResponse.json(
@@ -192,7 +241,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
  * POST plus `lastSavedAt`, the grade's `updatedAt` (or `gradedAt` when never
  * edited) as the professor saw it. A 409 for a grade saved since then
  * includes the stored grade. `gradedAt` and `gradedBy` keep the original
- * grading.
+ * grading. Allowed while submissions are open, since the due date may have
+ * moved after grading.
  */
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
