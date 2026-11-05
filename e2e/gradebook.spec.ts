@@ -265,6 +265,48 @@ test.describe("Professor gradebook", () => {
     expect(overflow).toEqual({ wide: false, tall: false });
   });
 
+  test("rests sideways scrolling on whole columns", async ({ page, scenario }) => {
+    await addQuiz(scenario);
+    await signIn(page, scenario.professor);
+    await page.setViewportSize({ width: 900, height: 800 });
+    await page.goto(gradesPath(scenario));
+    await expect(gradeCell(page, "Ava Martin", PROJECT)).toBeVisible();
+
+    const scroller = page.getByRole("table").locator("xpath=..");
+    for (const offset of [60, 120]) {
+      await scroller.evaluate((element, left) => element.scrollTo({ left }), offset);
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const frozen = document.querySelector("thead th")!.getBoundingClientRect();
+            return Array.from(document.querySelectorAll("thead th"))
+              .slice(1)
+              .map((header) => header.getBoundingClientRect())
+              .filter((rect) => rect.left < frozen.right - 1 && rect.right > frozen.right + 1).length;
+          })
+        )
+        .toBe(0);
+    }
+  });
+
+  test("shows names only in a narrow grid and the email where there is room", async ({ page, scenario }) => {
+    await signIn(page, scenario.professor);
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto(gradesPath(scenario));
+
+    const ava = page.getByRole("rowheader").filter({ hasText: "Ava Martin" });
+    await expect(ava).not.toContainText(scenario.students.ava.email);
+    await expect(ava.getByText("Ava Martin")).toHaveAttribute(
+      "title",
+      `Ava Martin (${scenario.students.ava.email})`
+    );
+    await expect(page.getByText("Select a grade for details · Arrow keys move")).toBeVisible();
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(ava).toContainText(scenario.students.ava.email);
+    await expect(page.getByText("Select a grade for details · Arrow keys move")).toBeVisible();
+  });
+
   test("points a student to the assignments instead of a gradebook", async ({ pageAs, scenario }) => {
     const page = await pageAs(scenario.students.ava);
     await page.goto(gradesPath(scenario));

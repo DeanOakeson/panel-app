@@ -7,6 +7,7 @@ import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { DEADLINE_TIME_ZONE } from "@/lib/assignmentDeadline";
 import { onGradeSaved } from "@/lib/gradeEvents";
+import { useStoredFlag } from "@/lib/storedFlag";
 import type { Gradebook } from "@/lib/gradebook";
 import GradebookLegend from "../../../components/grades/GradebookLegend";
 import GradebookTable, {
@@ -30,24 +31,6 @@ type PageState =
 const KEY_HIDDEN_STORAGE = "panel-gradebook-key-hidden";
 
 const LEGEND_ID = "gradebook-key";
-
-/** Returns whether the professor hid the key, false when storage cannot be read. */
-function readKeyHidden(): boolean {
-    try {
-        return window.localStorage.getItem(KEY_HIDDEN_STORAGE) === "true";
-    } catch {
-        return false;
-    }
-}
-
-/** Remembers whether the key is hidden, ignoring storage that cannot be written. */
-function writeKeyHidden(hidden: boolean) {
-    try {
-        window.localStorage.setItem(KEY_HIDDEN_STORAGE, String(hidden));
-    } catch {
-        // The choice then lasts only until the page reloads
-    }
-}
 
 /** How long after a load the page waits before refreshing on focus. */
 const FOCUS_REFRESH_INTERVAL = 30_000;
@@ -418,14 +401,7 @@ function GradebookView({
     const hasDropped = gradebook.students.some((student) =>
         student.cells.some((cell) => cell === null)
     );
-    // The view mounts only after the grades load, well after hydration, so it can read storage here
-    const [keyHidden, setKeyHidden] = useState(readKeyHidden);
-
-    /** Shows or hides the key and remembers the choice. */
-    function toggleKey() {
-        writeKeyHidden(!keyHidden);
-        setKeyHidden(!keyHidden);
-    }
+    const [keyHidden, setKeyHidden] = useStoredFlag(KEY_HIDDEN_STORAGE);
 
     if (!hasStudents && !hasAssignments) {
         return (
@@ -452,14 +428,14 @@ function GradebookView({
                 <Summary gradebook={gradebook} />
 
                 {hasAssignments && (
-                    <div className="flex items-center gap-3">
-                        <p aria-hidden="true" className="hidden text-[13px] text-gray-600 xl:block dark:text-zinc-300">
-                            Tip: arrow keys move between grades
+                    <div className="ml-auto flex items-center gap-3">
+                        <p aria-hidden="true" className="text-sm text-gray-600 dark:text-zinc-300">
+                            Select a grade for details · Arrow keys move
                         </p>
 
                         <button
                             type="button"
-                            onClick={toggleKey}
+                            onClick={() => setKeyHidden(!keyHidden)}
                             aria-expanded={!keyHidden}
                             aria-controls={keyHidden ? undefined : LEGEND_ID}
                             className="-my-1 rounded-md px-2 py-1 text-sm font-medium text-blue-700 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-blue-300 dark:hover:bg-blue-950"
