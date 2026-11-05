@@ -60,7 +60,7 @@ test.describe("Professor gradebook", () => {
 
     // The closed project: to grade, resubmitted with its standing score, graded and missing
     await expect(gradeCell(page, "Ava Martin", PROJECT)).toHaveText("Needs grading");
-    await expect(gradeCell(page, "Ben Carter", PROJECT)).toHaveText(`Resubmittedearlier: ${BEN_SCORE}/100`);
+    await expect(gradeCell(page, "Ben Carter", PROJECT)).toHaveText(`Needs gradingResubmittedearlier ${BEN_SCORE}/100`);
     await expect(gradeCell(page, "Cara Diaz", PROJECT)).toHaveText(`${CARA_SCORE}/100`);
     await expect(gradeCell(page, "Dev Patel", PROJECT)).toHaveText("Missing");
 
@@ -289,22 +289,20 @@ test.describe("Professor gradebook", () => {
     }
   });
 
-  test("shows names only in a narrow grid and the email where there is room", async ({ page, scenario }) => {
+  test("shows names only, with the email in the hover text, and the hint at every width", async ({ page, scenario }) => {
     await signIn(page, scenario.professor);
-    await page.setViewportSize({ width: 1024, height: 768 });
     await page.goto(gradesPath(scenario));
 
     const ava = page.getByRole("rowheader").filter({ hasText: "Ava Martin" });
-    await expect(ava).not.toContainText(scenario.students.ava.email);
-    await expect(ava.getByText("Ava Martin")).toHaveAttribute(
-      "title",
-      `Ava Martin (${scenario.students.ava.email})`
-    );
-    await expect(page.getByText("Select a grade for details · Arrow keys move")).toBeVisible();
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await expect(ava).toContainText(scenario.students.ava.email);
-    await expect(page.getByText("Select a grade for details · Arrow keys move")).toBeVisible();
+    for (const viewport of [{ width: 1024, height: 768 }, { width: 1280, height: 800 }]) {
+      await page.setViewportSize(viewport);
+      await expect(ava).not.toContainText(scenario.students.ava.email);
+      await expect(ava.getByText("Ava Martin")).toHaveAttribute(
+        "title",
+        `Ava Martin (${scenario.students.ava.email})`
+      );
+      await expect(page.getByText("Select a grade for details · Arrow keys move")).toBeVisible();
+    }
   });
 
   test("points a student to the assignments instead of a gradebook", async ({ pageAs, scenario }) => {
