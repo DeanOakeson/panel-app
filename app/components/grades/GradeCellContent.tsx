@@ -18,8 +18,19 @@ export function FeedbackIcon() {
 /** Labels a score in a cell as a missing-work grade, a smaller twin of MissingTag. */
 export function SmallMissingTag() {
     return (
-        <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-xs font-semibold leading-none text-gray-800 dark:bg-zinc-700 dark:text-zinc-100">
+        <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[13px] font-semibold leading-none text-gray-800 dark:bg-zinc-700 dark:text-zinc-100">
             Missing
+        </span>
+    );
+}
+
+/** Shows a status badge, such as Needs grading, as a gradebook cell does. */
+export function CellBadge({ label, className }: { label: string; className: string }) {
+    return (
+        <span
+            className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[13px] leading-[18px] font-semibold ${className}`}
+        >
+            {label}
         </span>
     );
 }
@@ -41,15 +52,11 @@ export default function GradeCellContent({
         <>
             <span aria-hidden="true" className="flex flex-col items-center gap-0.5">
                 {display.badge && (
-                    <span
-                        className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${BADGE_CLASSES[display.badge.tone]}`}
-                    >
-                        {display.badge.label}
-                    </span>
+                    <CellBadge label={display.badge.label} className={BADGE_CLASSES[display.badge.tone]} />
                 )}
 
                 {display.reason && (
-                    <span className="flex flex-col items-center text-xs leading-4 text-gray-700 dark:text-zinc-300">
+                    <span className="flex flex-col items-center text-[13px] leading-[18px] text-gray-700 dark:text-zinc-300">
                         <span className="whitespace-nowrap">{display.reason.label}</span>
                         <span className="whitespace-nowrap tabular-nums">{display.reason.earlier}</span>
                     </span>

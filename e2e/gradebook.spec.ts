@@ -68,7 +68,7 @@ test.describe("Professor gradebook", () => {
     await expect(gradeCell(page, "Ava Martin", HOMEWORK)).toHaveText("Needs grading");
     await expect(gradeCell(page, "Ben Carter", HOMEWORK)).toHaveText("Not submitted");
 
-    await expect(page.getByRole("region", { name: "Key" })).toContainText("Missing-work grade");
+    await expect(page.getByRole("region", { name: "Key" })).toContainText("Zero given for missing work");
   });
 
   test("opens a cell's details with the full feedback and closes with Escape", async ({ page, scenario }) => {
