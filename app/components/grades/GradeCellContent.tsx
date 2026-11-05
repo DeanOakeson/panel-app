@@ -7,7 +7,7 @@ export function FeedbackIcon() {
         <svg
             aria-hidden="true"
             viewBox="0 0 16 16"
-            className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-zinc-400"
+            className="h-4 w-4 shrink-0 text-gray-600 dark:text-zinc-300"
             fill="currentColor"
         >
             <path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6a1.5 1.5 0 0 1-1.5 1.5H7.2l-3 2.6A.75.75 0 0 1 3 13v-2h.5A1.5 1.5 0 0 1 2 9.5v-6Zm3 2a.75.75 0 0 0 0 1.5h6a.75.75 0 0 0 0-1.5H5Zm0 2.5a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5H5Z" />
@@ -18,7 +18,7 @@ export function FeedbackIcon() {
 /** Labels a score in a cell as a missing-work grade, a smaller twin of MissingTag. */
 export function SmallMissingTag() {
     return (
-        <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-gray-700 dark:bg-zinc-800 dark:text-zinc-300">
+        <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-xs font-semibold leading-none text-gray-800 dark:bg-zinc-700 dark:text-zinc-100">
             Missing
         </span>
     );
@@ -49,7 +49,8 @@ export default function GradeCellContent({
             {display.primary !== null && (
                 <span className="flex items-center gap-1.5">
                     {display.primaryMuted ? (
-                        <span className="text-xs tabular-nums text-gray-600 dark:text-zinc-400">
+                        <span className="whitespace-nowrap text-[13px] tabular-nums text-gray-700 dark:text-zinc-300">
+                            {display.primaryLabel && `${display.primaryLabel} `}
                             {display.primary}/{points}
                         </span>
                     ) : (
@@ -57,7 +58,7 @@ export default function GradeCellContent({
                             <span className="text-base font-semibold text-gray-900 dark:text-white">
                                 {display.primary}
                             </span>
-                            <span className="text-xs text-gray-500 dark:text-zinc-400">
+                            <span className="text-sm text-gray-600 dark:text-zinc-300">
                                 /{points}
                             </span>
                         </span>
@@ -69,7 +70,7 @@ export default function GradeCellContent({
             )}
 
             {display.placeholder && (
-                <span className="whitespace-nowrap text-xs text-gray-500 dark:text-zinc-400">
+                <span className="whitespace-nowrap text-[13px] text-gray-600 dark:text-zinc-300">
                     {display.placeholder}
                 </span>
             )}

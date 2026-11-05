@@ -93,7 +93,7 @@ function DateRow({ label, value }: { label: string; value: string | null | undef
 
     return (
         <>
-            <dt className="text-gray-500 dark:text-zinc-400">{label}</dt>
+            <dt className="text-gray-600 dark:text-zinc-300">{label}</dt>
             <dd className="text-gray-900 dark:text-white">{value}</dd>
         </>
     );
@@ -174,7 +174,7 @@ function PanelBody({
                     </h2>
 
                     {student.name && student.email && (
-                        <p className="break-all text-sm text-gray-500 dark:text-zinc-400">
+                        <p className="break-all text-sm text-gray-600 dark:text-zinc-300">
                             {student.email}
                         </p>
                     )}
@@ -184,7 +184,7 @@ function PanelBody({
                     </p>
 
                     {!student.enrolled && (
-                        <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">
+                        <p className="mt-1 text-sm text-gray-600 dark:text-zinc-300">
                             No longer enrolled in this course.
                         </p>
                     )}
@@ -210,15 +210,15 @@ function PanelBody({
                 <section aria-labelledby="grade-details-score">
                     <h3
                         id="grade-details-score"
-                        className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-zinc-400"
+                        className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-zinc-300"
                     >
-                        Score
+                        {cell.status === "resubmitted" ? "Earlier score" : "Score"}
                     </h3>
 
                     {score.score !== null ? (
                         <p className="mt-1 flex items-center gap-2">
                             <span className="text-3xl font-semibold tabular-nums">{score.score}</span>
-                            <span className="text-base text-gray-500 dark:text-zinc-400">
+                            <span className="text-base text-gray-600 dark:text-zinc-300">
                                 / {assignment.points}
                             </span>
                             {score.missing && <MissingTag />}
@@ -226,7 +226,7 @@ function PanelBody({
                     ) : (
                         <p className="mt-1 text-base font-medium text-gray-700 dark:text-zinc-300">
                             No score yet
-                            <span className="font-normal text-gray-500 dark:text-zinc-400">
+                            <span className="font-normal text-gray-600 dark:text-zinc-300">
                                 {` (out of ${assignment.points})`}
                             </span>
                         </p>
@@ -241,7 +241,7 @@ function PanelBody({
                     <section aria-labelledby="grade-details-feedback">
                         <h3
                             id="grade-details-feedback"
-                            className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-zinc-400"
+                            className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-zinc-300"
                         >
                             {feedbackHeading}
                         </h3>
@@ -251,7 +251,7 @@ function PanelBody({
                                 {feedback}
                             </p>
                         ) : (
-                            <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">No feedback</p>
+                            <p className="mt-1 text-sm text-gray-600 dark:text-zinc-300">No feedback</p>
                         )}
                     </section>
                 )}
@@ -259,7 +259,7 @@ function PanelBody({
                 <section aria-labelledby="grade-details-dates">
                     <h3
                         id="grade-details-dates"
-                        className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-zinc-400"
+                        className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-zinc-300"
                     >
                         Dates
                     </h3>
@@ -296,7 +296,7 @@ function PanelBody({
                     </Link>
 
                     {!canGradeSubmissions && gradesSubmission && (
-                        <p className="mt-2 text-xs text-gray-500 dark:text-zinc-400">
+                        <p className="mt-2 text-xs text-gray-600 dark:text-zinc-300">
                             Only the course&apos;s professor can grade submissions.
                         </p>
                     )}
