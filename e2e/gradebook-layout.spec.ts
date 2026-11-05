@@ -134,6 +134,58 @@ test.describe("Gradebook layout", () => {
     expect((await measureFit(page)).pageSideways).toBe(false);
   });
 
+  test("rests vertical scrolling on whole rows and shades the bottom while more lie below", async ({ page, scenario }) => {
+    await addSixAssignments(scenario);
+    await signIn(page, scenario.professor);
+    await page.setViewportSize({ width: 1280, height: 520 });
+    await page.goto(gradesPath(scenario));
+    await expect(gradeCell(page, "Ava Martin", "Project 1: Requirements")).toBeVisible();
+
+    const scroller = page.locator("#gradebook-grid");
+    await expect.poll(() => scroller.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+    await expect.poll(() => shades(page)).toContain("bottom");
+
+    /** Returns how far the first row below the header starts from the header's bottom edge. */
+    const rowOffset = () =>
+      page.evaluate(() => {
+        const headerBottom = document.querySelector("thead")!.getBoundingClientRect().bottom;
+        const rows = Array.from(document.querySelectorAll("tbody tr")).map((row) => row.getBoundingClientRect());
+        const first = rows.find((rect) => rect.bottom > headerBottom + 1)!;
+        return Math.round(first.top - headerBottom);
+      });
+
+    // A short wheel turn springs back to the first row, and a longer one rests on a later row
+    await scroller.hover();
+    await page.mouse.wheel(0, 15);
+    await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBe(0);
+    await page.mouse.wheel(0, 100);
+    await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await expect.poll(rowOffset).toBe(0);
+
+    await scroller.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+    await expect.poll(() => shades(page)).not.toContain("bottom");
+
+    // Moving down by keyboard keeps each focused cell whole between the header and the bottom edge
+    await scroller.evaluate((element) => element.scrollTo({ top: 0 }));
+    await gradeCell(page, "Ava Martin", "Project 1: Requirements").focus();
+    for (const name of ["Ben Carter", "Cara Diaz", "Dev Patel"]) {
+      await page.keyboard.press("ArrowDown");
+      const cell = gradeCell(page, name, "Project 1: Requirements");
+      await expect(cell).toBeFocused();
+      await expect
+        .poll(() =>
+          cell.evaluate((button) => {
+            const grid = button.closest("#gradebook-grid")!;
+            const box = button.getBoundingClientRect();
+            const headerBottom = grid.querySelector("thead")!.getBoundingClientRect().bottom;
+            const visibleBottom = grid.getBoundingClientRect().top + grid.clientTop + grid.clientHeight;
+            return box.top >= headerBottom - 1 && box.bottom <= visibleBottom + 1;
+          })
+        )
+        .toBe(true);
+    }
+  });
+
   test("shows the last columns whole at the right end", async ({ page, scenario }) => {
     await addSixAssignments(scenario);
     await signIn(page, scenario.professor);

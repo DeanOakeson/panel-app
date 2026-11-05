@@ -171,8 +171,9 @@ test.describe("Professor gradebook", () => {
     await page.keyboard.press("Control+Home");
     await expect(gradeCell(page, "Ava Martin", PROJECT)).toBeFocused();
     await page.keyboard.press("ArrowUp");
-    await expect(page.getByRole("link", { name: PROJECT })).toBeFocused();
+    await expect(page.getByRole("button", { name: `Filter students by ${PROJECT}, 2 to grade` })).toBeFocused();
     await page.keyboard.press("ArrowDown");
+    await expect(gradeCell(page, "Ava Martin", PROJECT)).toBeFocused();
 
     // The last cell moved to stays the Tab stop, and Space opens it
     await page.keyboard.press("ArrowRight");
@@ -223,6 +224,8 @@ test.describe("Professor gradebook", () => {
     await expect(key).toBeVisible();
     await page.getByRole("button", { name: "Hide key" }).click();
     await expect(key).toBeHidden();
+    // The hint moves from the key to the toolbar
+    await expect(page.getByText(/^Select a grade for details · /)).toBeVisible();
 
     await page.reload();
     await expect(gradeCell(page, "Ava Martin", PROJECT)).toBeVisible();
@@ -301,7 +304,7 @@ test.describe("Professor gradebook", () => {
         "title",
         `Ava Martin (${scenario.students.ava.email})`
       );
-      await expect(page.getByText("Select a grade for details · Arrow keys move")).toBeVisible();
+      await expect(page.getByText("Select a grade for details · Select a column's status to filter · Arrow keys move")).toBeVisible();
     }
   });
 
