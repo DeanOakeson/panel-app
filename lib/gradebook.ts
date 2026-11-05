@@ -504,6 +504,9 @@ export const STUDENT_COLUMN_WIDTH = 168;
 /** The narrowest an assignment column gets, in pixels. */
 const MIN_COLUMN_WIDTH = 120;
 
+/** The widest an assignment column grows to share spare room, in pixels. */
+const MAX_COLUMN_WIDTH = 176;
+
 /** How wide the grid's assignment columns are. */
 export type GridLayout = {
   columnWidth: number;
@@ -513,18 +516,53 @@ export type GridLayout = {
 
 /**
  * Returns the assignment columns' width for `room` pixels beside the frozen
- * student column, unknown before the first measurement. When the assignments
- * overflow, the columns widen so a whole number of them fills the view, which
- * lets horizontal scrolling rest on column edges.
+ * student column, unknown before the first measurement. When every
+ * assignment fits, the columns share the room up to a cap. When they
+ * overflow, the columns widen so a whole number of them fills the view,
+ * which lets horizontal scrolling rest on column edges.
  */
 export function gridLayout(room: number | null, assignmentCount: number): GridLayout {
-  if (room === null || assignmentCount * MIN_COLUMN_WIDTH <= room) {
+  if (room === null) {
     return { columnWidth: MIN_COLUMN_WIDTH, overflows: false };
+  }
+
+  if (assignmentCount * MIN_COLUMN_WIDTH <= room) {
+    const shared = Math.floor(room / Math.max(1, assignmentCount));
+
+    return { columnWidth: Math.min(MAX_COLUMN_WIDTH, shared), overflows: false };
   }
 
   const visibleColumns = Math.max(1, Math.floor(room / MIN_COLUMN_WIDTH));
 
   return { columnWidth: Math.max(MIN_COLUMN_WIDTH, room / visibleColumns), overflows: true };
+}
+
+/** The assignment columns in view, numbered from 1, as in "Assignments 1–5 of 6". */
+export type ColumnRange = { first: number; last: number; total: number };
+
+/**
+ * Returns the assignment columns wholly in view when the grid is scrolled
+ * `scrollLeft` pixels with `room` pixels beside the frozen column. While no
+ * column is whole, such as mid-scroll in a narrow grid, it returns the
+ * column under the frozen column's edge.
+ */
+export function columnsInView(
+  scrollLeft: number,
+  room: number,
+  columnWidth: number,
+  total: number
+): ColumnRange {
+  const slack = 1;
+  const firstWhole = Math.max(0, Math.ceil((scrollLeft - slack) / columnWidth));
+  const lastWhole = Math.min(total - 1, Math.floor((scrollLeft + room + slack) / columnWidth) - 1);
+
+  if (lastWhole < firstWhole) {
+    const under = Math.min(total - 1, Math.floor(scrollLeft / columnWidth));
+
+    return { first: under + 1, last: under + 1, total };
+  }
+
+  return { first: firstWhole + 1, last: lastWhole + 1, total };
 }
 
 // #endregion

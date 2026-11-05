@@ -9,11 +9,15 @@ import { DEADLINE_TIME_ZONE } from "@/lib/assignmentDeadline";
 import { onGradeSaved } from "@/lib/gradeEvents";
 import { useStoredFlag } from "@/lib/storedFlag";
 import type { Gradebook } from "@/lib/gradebook";
+import ColumnPager from "../../../components/grades/ColumnPager";
 import GradebookLegend from "../../../components/grades/GradebookLegend";
 import GradebookTable, {
     cellDataKey,
+    GRID_SCROLLER_ID,
     revealInGrid,
     type CellKey,
+    type ColumnView,
+    type GradebookTableHandle,
 } from "../../../components/grades/GradebookTable";
 import GradeDetailsPanel, {
     type CellDetails,
@@ -385,7 +389,11 @@ function EmptyState({
     );
 }
 
-/** Shows the gradebook's summary, key and grid, or the empty state that fits. */
+/**
+ * Shows the gradebook's summary, key and grid, or the empty state that fits.
+ * While the grid scrolls sideways, the toolbar shows which assignments are in
+ * view with buttons that move between them.
+ */
 function GradebookView({
     gradebook,
     selected,
@@ -402,6 +410,8 @@ function GradebookView({
         student.cells.some((cell) => cell === null)
     );
     const [keyHidden, setKeyHidden] = useStoredFlag(KEY_HIDDEN_STORAGE);
+    const [columnView, setColumnView] = useState<ColumnView | null>(null);
+    const tableRef = useRef<GradebookTableHandle>(null);
 
     if (!hasStudents && !hasAssignments) {
         return (
@@ -428,7 +438,13 @@ function GradebookView({
                 <Summary gradebook={gradebook} />
 
                 {hasAssignments && (
-                    <div className="ml-auto flex items-center gap-3">
+                    <div className="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+                        <ColumnPager
+                            view={columnView}
+                            controls={GRID_SCROLLER_ID}
+                            onStep={(step) => tableRef.current?.scrollColumns(step)}
+                        />
+
                         <p aria-hidden="true" className="text-sm text-gray-600 dark:text-zinc-300">
                             Select a grade for details · Arrow keys move
                         </p>
@@ -468,7 +484,13 @@ function GradebookView({
                 />
             )}
 
-            <GradebookTable gradebook={gradebook} selected={selected} onSelect={onSelect} />
+            <GradebookTable
+                ref={tableRef}
+                gradebook={gradebook}
+                selected={selected}
+                onSelect={onSelect}
+                onColumnViewChange={setColumnView}
+            />
         </>
     );
 }

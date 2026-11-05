@@ -1,13 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
+import {
+    useEffect,
+    useImperativeHandle,
+    useRef,
+    useState,
+    type FocusEvent,
+    type KeyboardEvent,
+    type Ref,
+} from "react";
 import Link from "next/link";
 import {
+    columnsInView,
     describeCell,
     gridLayout,
     moveInGrid,
     STUDENT_COLUMN_WIDTH,
     studentLabel,
+    type ColumnRange,
     type Gradebook,
     type GradebookAssignment,
     type GradebookStudent,
@@ -19,14 +29,29 @@ import GradeCellContent from "./GradeCellContent";
 /** Identifies one cell of the gradebook. */
 export type CellKey = { studentId: string; assignmentId: string };
 
+/** The assignment columns in view while the grid scrolls sideways, and whether it rests at either end. */
+export type ColumnView = ColumnRange & { atStart: boolean; atEnd: boolean };
+
+/** Lets the page scroll the grid from outside it. */
+export type GradebookTableHandle = {
+    /** Scrolls the grid one assignment column earlier (-1) or later (1). */
+    scrollColumns: (step: -1 | 1) => void;
+};
+
 type Props = {
     gradebook: Gradebook;
     /** The cell whose details are open, outlined in the grid. */
     selected: CellKey | null;
     onSelect: (key: CellKey) => void;
+    /** Receives the columns in view as they change, or null while every column fits. */
+    onColumnViewChange?: (view: ColumnView | null) => void;
+    ref?: Ref<GradebookTableHandle>;
 };
 
 const HINT_ID = "gradebook-keys-hint";
+
+/** The scrolling grid's id, which the column buttons control. */
+export const GRID_SCROLLER_ID = "gradebook-grid";
 
 /** The scroll container's left and right borders together, in pixels. */
 const CONTAINER_BORDER = 2;
@@ -114,6 +139,19 @@ function StudentHeader({ student }: { student: GradebookStudent }) {
     );
 }
 
+/** Returns whether two column views show the same thing. */
+function sameView(first: ColumnView | null, second: ColumnView | null): boolean {
+    if (first === null || second === null) return first === second;
+
+    return (
+        first.first === second.first &&
+        first.last === second.last &&
+        first.total === second.total &&
+        first.atStart === second.atStart &&
+        first.atEnd === second.atEnd
+    );
+}
+
 /** Returns the grid position an element was rendered at, or null for anything else. */
 function positionOf(element: HTMLElement): GridPosition | null {
     const row = element.dataset.gridRow;
@@ -134,17 +172,30 @@ const cellInteraction =
  * Shows every student against every assignment. Each cell is a button that
  * opens its details, and the header row and student column stay in view
  * while the grid scrolls. The grid is one Tab stop: the arrow keys, Home and
- * End move between its cells and column headers.
+ * End move between its cells and column headers. While the columns overflow,
+ * a shaded edge marks each side with more columns beyond it.
  */
-export default function GradebookTable({ gradebook, selected, onSelect }: Props) {
+export default function GradebookTable({
+    gradebook,
+    selected,
+    onSelect,
+    onColumnViewChange,
+    ref,
+}: Props) {
     const { assignments, students, canGradeSubmissions } = gradebook;
     const courseName = gradebook.class.courseCode ?? gradebook.class.name;
     const tableRef = useRef<HTMLTableElement>(null);
     const headerRef = useRef<HTMLTableSectionElement>(null);
+    const frameRef = useRef<HTMLDivElement>(null);
     const scrollerRef = useRef<HTMLDivElement>(null);
+    const reportedView = useRef<ColumnView | null>(null);
     const [headerHeight, setHeaderHeight] = useState(0);
     const [room, setRoom] = useState<number | null>(null);
     const [active, setActive] = useState<GridPosition | null>(null);
+    const [atStart, setAtStart] = useState(true);
+    const [atEnd, setAtEnd] = useState(true);
+    const [scrollbarWidth, setScrollbarWidth] = useState(0);
+    const [scrollbarHeight, setScrollbarHeight] = useState(0);
 
     // Keeps the scroll padding equal to the header row, whose height follows the names' wrapping
     useEffect(() => {
@@ -163,7 +214,7 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
     // column, the container's border and any vertical scrollbar
     useEffect(() => {
         const scroller = scrollerRef.current;
-        const container = scroller?.parentElement;
+        const container = frameRef.current?.parentElement;
         if (!scroller || !container) return;
 
         const observer = new ResizeObserver(() => {
@@ -181,6 +232,79 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
     const studentWidth = STUDENT_COLUMN_WIDTH;
     const studentColumnStyle = { width: studentWidth, minWidth: studentWidth, maxWidth: studentWidth };
     const columnStyle = { width: columnWidth, minWidth: columnWidth, maxWidth: columnWidth };
+    const assignmentCount = assignments.length;
+
+    // Follows the sideways scroll, by any means, once per frame: the shaded
+    // edges, the scrollbars they stay clear of, and the columns in view
+    useEffect(() => {
+        const scroller = scrollerRef.current;
+        if (!scroller) return;
+
+        let frame = 0;
+
+        function measure() {
+            frame = 0;
+            if (!scroller) return;
+
+            const maxScroll = scroller.scrollWidth - scroller.clientWidth;
+            const start = scroller.scrollLeft <= 1;
+            const end = scroller.scrollLeft >= maxScroll - 1;
+            const view: ColumnView | null = overflows
+                ? {
+                      ...columnsInView(
+                          scroller.scrollLeft,
+                          scroller.clientWidth - STUDENT_COLUMN_WIDTH,
+                          columnWidth,
+                          assignmentCount
+                      ),
+                      atStart: start,
+                      atEnd: end,
+                  }
+                : null;
+
+            setAtStart(start);
+            setAtEnd(end);
+            setScrollbarWidth(scroller.offsetWidth - scroller.clientWidth - CONTAINER_BORDER);
+            setScrollbarHeight(scroller.offsetHeight - scroller.clientHeight - CONTAINER_BORDER);
+
+            if (!sameView(view, reportedView.current)) {
+                reportedView.current = view;
+                onColumnViewChange?.(view);
+            }
+        }
+
+        function schedule() {
+            if (!frame) frame = requestAnimationFrame(measure);
+        }
+
+        const observer = new ResizeObserver(schedule);
+        observer.observe(scroller);
+        if (tableRef.current) observer.observe(tableRef.current);
+        scroller.addEventListener("scroll", schedule, { passive: true });
+        schedule();
+
+        return () => {
+            cancelAnimationFrame(frame);
+            observer.disconnect();
+            scroller.removeEventListener("scroll", schedule);
+        };
+    }, [overflows, columnWidth, assignmentCount, onColumnViewChange]);
+
+    useImperativeHandle(
+        ref,
+        () => ({
+            scrollColumns(step) {
+                const scroller = scrollerRef.current;
+                if (!scroller) return;
+
+                const current = Math.round(scroller.scrollLeft / columnWidth);
+                const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+                scroller.scrollTo({ left: (current + step) * columnWidth, behavior: still ? "auto" : "smooth" });
+            },
+        }),
+        [columnWidth]
+    );
 
     /** Returns whether a grid position holds something to focus. */
     function isFocusable({ row, col }: GridPosition): boolean {
@@ -241,136 +365,162 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
         revealInGrid(event.target);
     }
 
+    const shadeInset = { top: 1, bottom: 1 + scrollbarHeight };
+
     return (
         <div
-            ref={scrollerRef}
-            className="relative min-h-0 max-w-full shrink self-start overflow-auto rounded-lg border border-gray-200 bg-white dark:border-zinc-700 dark:bg-gray-900"
-            style={{
-                scrollPaddingTop: headerHeight,
-                scrollPaddingLeft: studentWidth,
-                scrollSnapType: overflows ? "x mandatory" : undefined,
-            }}
+            ref={frameRef}
+            className="relative isolate flex min-h-0 max-w-full shrink flex-col self-start overflow-hidden rounded-lg"
         >
-            <p id={HINT_ID} className="sr-only">
-                Use the arrow keys to move between grades, and Enter to open one.
-            </p>
-
-            <table
-                ref={tableRef}
-                onKeyDown={handleKeyDown}
-                onFocus={handleFocus}
-                className="border-separate border-spacing-0 text-sm"
+            <div
+                ref={scrollerRef}
+                id={GRID_SCROLLER_ID}
+                className="relative min-h-0 overflow-auto rounded-lg border border-gray-200 bg-white dark:border-zinc-700 dark:bg-gray-900"
+                style={{
+                    scrollPaddingTop: headerHeight,
+                    scrollPaddingLeft: studentWidth,
+                    scrollSnapType: overflows ? "x mandatory" : undefined,
+                }}
             >
-                <caption className="sr-only">
-                    {`Grades for ${courseName}. Each row is a student and each column an assignment. Use the arrow keys to move between grades, and Enter to open one.`}
-                </caption>
+                <p id={HINT_ID} className="sr-only">
+                    Use the arrow keys to move between grades, and Enter to open one.
+                </p>
 
-                <thead ref={headerRef}>
-                    <tr>
-                        <th
-                            scope="col"
-                            style={studentColumnStyle}
-                            className={`sticky left-0 top-0 z-30 border-r bg-gray-50 px-3 py-2 text-left align-bottom text-xs font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-800 dark:text-zinc-200 ${stickyCellBase}`}
-                        >
-                            Student
-                        </th>
+                <table
+                    ref={tableRef}
+                    onKeyDown={handleKeyDown}
+                    onFocus={handleFocus}
+                    className="border-separate border-spacing-0 text-sm"
+                >
+                    <caption className="sr-only">
+                        {`Grades for ${courseName}. Each row is a student and each column an assignment. Use the arrow keys to move between grades, and Enter to open one.`}
+                    </caption>
 
-                        {assignments.map((assignment, col) => (
+                    <thead ref={headerRef}>
+                        <tr>
                             <th
-                                key={assignment.id}
                                 scope="col"
-                                style={{ ...columnStyle, scrollSnapAlign: "start" }}
-                                className={`sticky top-0 z-20 border-l bg-gray-50 px-2 py-1.5 text-left align-top font-normal dark:bg-gray-800 ${stickyCellBase}`}
+                                style={studentColumnStyle}
+                                className={`sticky left-0 top-0 z-30 border-r bg-gray-50 px-3 py-2 text-left align-bottom text-xs font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-800 dark:text-zinc-200 ${stickyCellBase}`}
                             >
-                                <Link
-                                    href={`/classes/${gradebook.class.id}/assignments/${assignment.id}`}
-                                    title={`${assignment.name} (out of ${assignment.points})`}
-                                    tabIndex={tabIndexAt(-1, col)}
-                                    data-grid-row={-1}
-                                    data-grid-col={col}
-                                    className={`line-clamp-2 break-words rounded-sm text-sm font-semibold text-blue-700 hover:underline dark:text-blue-300 ${focusRing}`}
-                                >
-                                    {assignment.name}
-                                </Link>
-
-                                <span className="sr-only">Out of {assignment.points}.</span>
-
-                                <p className="text-sm leading-5 text-gray-700 dark:text-zinc-300">
-                                    {shortDue(assignment)}
-                                </p>
-
-                                <p className="text-sm leading-5">
-                                    <GradingSummary assignment={assignment} />
-                                </p>
+                                Student
                             </th>
-                        ))}
-                    </tr>
-                </thead>
 
-                <tbody>
-                    {students.map((student, row) => {
-                        const name = displayStudentName(student);
-
-                        return (
-                            <tr key={student.id} className="group">
+                            {assignments.map((assignment, col) => (
                                 <th
-                                    scope="row"
-                                    style={studentColumnStyle}
-                                    className={`sticky left-0 z-10 border-r px-3 py-1 text-left align-middle font-normal ${stickyCellBase} ${bodyBackground}`}
+                                    key={assignment.id}
+                                    scope="col"
+                                    style={{ ...columnStyle, scrollSnapAlign: "start" }}
+                                    className={`sticky top-0 z-20 border-l bg-gray-50 px-2 py-1.5 text-left align-top font-normal dark:bg-gray-800 ${stickyCellBase}`}
                                 >
-                                    <StudentHeader student={student} />
+                                    <Link
+                                        href={`/classes/${gradebook.class.id}/assignments/${assignment.id}`}
+                                        title={`${assignment.name} (out of ${assignment.points})`}
+                                        tabIndex={tabIndexAt(-1, col)}
+                                        data-grid-row={-1}
+                                        data-grid-col={col}
+                                        className={`line-clamp-3 break-words rounded-sm text-sm font-semibold text-blue-700 hover:underline dark:text-blue-300 ${focusRing}`}
+                                    >
+                                        {assignment.name}
+                                    </Link>
+
+                                    <span className="sr-only">Out of {assignment.points}.</span>
+
+                                    <p className="text-sm leading-5 text-gray-700 dark:text-zinc-300">
+                                        {shortDue(assignment)}
+                                    </p>
+
+                                    <p className="text-sm leading-5">
+                                        <GradingSummary assignment={assignment} />
+                                    </p>
                                 </th>
+                            ))}
+                        </tr>
+                    </thead>
 
-                                {assignments.map((assignment, col) => {
-                                    const cell = student.cells[col];
-                                    const display = describeCell(
-                                        cell,
-                                        assignment,
-                                        canGradeSubmissions
-                                    );
-                                    const key = { studentId: student.id, assignmentId: assignment.id };
-                                    const isSelected =
-                                        selected?.studentId === student.id &&
-                                        selected.assignmentId === assignment.id;
+                    <tbody>
+                        {students.map((student, row) => {
+                            const name = displayStudentName(student);
 
-                                    return (
-                                        <td
-                                            key={assignment.id}
-                                            className={`border-l p-px align-middle ${stickyCellBase} ${bodyBackground}`}
-                                        >
-                                            {cell ? (
-                                                <button
-                                                    type="button"
-                                                    aria-haspopup="dialog"
-                                                    aria-label={`${display.srText}. ${name}, ${assignment.name}`}
-                                                    aria-describedby={HINT_ID}
-                                                    tabIndex={tabIndexAt(row, col)}
-                                                    data-grid-row={row}
-                                                    data-grid-col={col}
-                                                    data-cell={cellDataKey(key)}
-                                                    onClick={() => onSelect(key)}
-                                                    className={`flex min-h-10 w-full items-center justify-center rounded-md px-2 py-1 ${cellInteraction} ${focusRing} ${
-                                                        isSelected
-                                                            ? "bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950 dark:ring-blue-400"
-                                                            : ""
-                                                    }`}
-                                                >
-                                                    <GradeCellContent display={display} points={assignment.points} />
-                                                </button>
-                                            ) : (
-                                                <span className="flex min-h-10 items-center justify-center text-base text-gray-500 dark:text-zinc-400">
-                                                    <span aria-hidden="true">–</span>
-                                                    <span className="sr-only">{display.srText}</span>
-                                                </span>
-                                            )}
-                                        </td>
-                                    );
-                                })}
-                            </tr>
-                        );
-                    })}
-                </tbody>
-            </table>
+                            return (
+                                <tr key={student.id} className="group">
+                                    <th
+                                        scope="row"
+                                        style={studentColumnStyle}
+                                        className={`sticky left-0 z-10 border-r px-3 py-1 text-left align-middle font-normal ${stickyCellBase} ${bodyBackground}`}
+                                    >
+                                        <StudentHeader student={student} />
+                                    </th>
+
+                                    {assignments.map((assignment, col) => {
+                                        const cell = student.cells[col];
+                                        const display = describeCell(
+                                            cell,
+                                            assignment,
+                                            canGradeSubmissions
+                                        );
+                                        const key = { studentId: student.id, assignmentId: assignment.id };
+                                        const isSelected =
+                                            selected?.studentId === student.id &&
+                                            selected.assignmentId === assignment.id;
+
+                                        return (
+                                            <td
+                                                key={assignment.id}
+                                                className={`border-l p-px align-middle ${stickyCellBase} ${bodyBackground}`}
+                                            >
+                                                {cell ? (
+                                                    <button
+                                                        type="button"
+                                                        aria-haspopup="dialog"
+                                                        aria-label={`${display.srText}. ${name}, ${assignment.name}`}
+                                                        aria-describedby={HINT_ID}
+                                                        tabIndex={tabIndexAt(row, col)}
+                                                        data-grid-row={row}
+                                                        data-grid-col={col}
+                                                        data-cell={cellDataKey(key)}
+                                                        onClick={() => onSelect(key)}
+                                                        className={`flex min-h-10 w-full items-center justify-center rounded-md px-2 py-1 ${cellInteraction} ${focusRing} ${
+                                                            isSelected
+                                                                ? "bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950 dark:ring-blue-400"
+                                                                : ""
+                                                        }`}
+                                                    >
+                                                        <GradeCellContent display={display} points={assignment.points} />
+                                                    </button>
+                                                ) : (
+                                                    <span className="flex min-h-10 items-center justify-center text-base text-gray-500 dark:text-zinc-400">
+                                                        <span aria-hidden="true">–</span>
+                                                        <span className="sr-only">{display.srText}</span>
+                                                    </span>
+                                                )}
+                                            </td>
+                                        );
+                                    })}
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+
+            {overflows && !atStart && (
+                <div
+                    aria-hidden="true"
+                    data-shade="start"
+                    className="pointer-events-none absolute z-40 w-4 bg-linear-to-r from-gray-900/15 to-transparent dark:from-black/60"
+                    style={{ ...shadeInset, left: 1 + studentWidth }}
+                />
+            )}
+
+            {overflows && !atEnd && (
+                <div
+                    aria-hidden="true"
+                    data-shade="end"
+                    className="pointer-events-none absolute z-40 w-6 bg-linear-to-l from-gray-900/15 to-transparent dark:from-black/60"
+                    style={{ ...shadeInset, right: 1 + scrollbarWidth }}
+                />
+            )}
         </div>
     );
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildGradebook,
+  columnsInView,
   describeCell,
   gradingHref,
   gridLayout,
@@ -620,8 +621,26 @@ describe("moveInGrid", () => {
 });
 
 describe("gridLayout", () => {
-  it("keeps 120-pixel columns while every assignment fits", () => {
-    expect(gridLayout(727, 6)).toEqual({ columnWidth: 120, overflows: false });
+  it("shares the room between the columns while every assignment fits", () => {
+    expect(gridLayout(727, 6)).toEqual({ columnWidth: 121, overflows: false });
+    expect(gridLayout(900, 6)).toEqual({ columnWidth: 150, overflows: false });
+  });
+
+  it("keeps the columns at the minimum when they fit exactly", () => {
+    expect(gridLayout(720, 6)).toEqual({ columnWidth: 120, overflows: false });
+  });
+
+  it("caps the shared width at 176 pixels", () => {
+    expect(gridLayout(1100, 6)).toEqual({ columnWidth: 176, overflows: false });
+    expect(gridLayout(900, 1)).toEqual({ columnWidth: 176, overflows: false });
+  });
+
+  it("never makes the fitting columns wider than the room", () => {
+    for (const room of [721, 733, 800, 905, 1055]) {
+      const { columnWidth } = gridLayout(room, 6);
+
+      expect(columnWidth * 6).toBeLessThanOrEqual(room);
+    }
   });
 
   it("widens overflowing columns so a whole number of them fills the room", () => {
@@ -638,5 +657,31 @@ describe("gridLayout", () => {
 
   it("uses the narrow columns before the room is measured", () => {
     expect(gridLayout(null, 6)).toEqual({ columnWidth: 120, overflows: false });
+  });
+
+  it("keeps a grid without assignments from dividing by zero", () => {
+    expect(gridLayout(700, 0)).toEqual({ columnWidth: 176, overflows: false });
+  });
+});
+
+describe("columnsInView", () => {
+  it("counts the whole columns at the start", () => {
+    expect(columnsInView(0, 650, 130, 6)).toEqual({ first: 1, last: 5, total: 6 });
+  });
+
+  it("counts the whole columns after a scroll to the end", () => {
+    expect(columnsInView(130, 650, 130, 6)).toEqual({ first: 2, last: 6, total: 6 });
+  });
+
+  it("allows a pixel of rounding at either edge", () => {
+    expect(columnsInView(129.5, 650.5, 130, 6)).toEqual({ first: 2, last: 6, total: 6 });
+  });
+
+  it("leaves out a column cut off mid-scroll", () => {
+    expect(columnsInView(65, 650, 130, 6)).toEqual({ first: 2, last: 5, total: 6 });
+  });
+
+  it("falls back to the column under the edge when none is whole", () => {
+    expect(columnsInView(60, 120, 120, 3)).toEqual({ first: 1, last: 1, total: 3 });
   });
 });
