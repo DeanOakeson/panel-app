@@ -27,9 +27,8 @@ export function SmallMissingTag() {
 /**
  * Shows what a gradebook cell holds: a status badge with the reason work
  * waits, a score out of `points` with a Missing tag under it, or muted placeholder
- * text. A feedback mark sits in the cell's top-right corner, so the cell needs
- * a positioned parent. The visible text is hidden from screen readers, which
- * read the cell's label.
+ * text. A feedback mark follows the score on its line. The visible text is
+ * hidden from screen readers, which read the cell's label.
  */
 export default function GradeCellContent({
     display,
@@ -57,11 +56,15 @@ export default function GradeCellContent({
                 )}
 
                 {display.primary !== null && (
-                    <span className="whitespace-nowrap tabular-nums">
-                        <span className="text-base font-semibold text-gray-900 dark:text-white">
-                            {display.primary}
+                    <span className="flex items-center gap-1 whitespace-nowrap">
+                        <span className="tabular-nums">
+                            <span className="text-base font-semibold text-gray-900 dark:text-white">
+                                {display.primary}
+                            </span>
+                            <span className="text-sm text-gray-600 dark:text-zinc-300">/{points}</span>
                         </span>
-                        <span className="text-sm text-gray-600 dark:text-zinc-300">/{points}</span>
+
+                        {display.hasFeedback && <FeedbackIcon />}
                     </span>
                 )}
 
@@ -73,12 +76,6 @@ export default function GradeCellContent({
                     </span>
                 )}
             </span>
-
-            {display.hasFeedback && (
-                <span aria-hidden="true" className="absolute right-1 top-1">
-                    <FeedbackIcon />
-                </span>
-            )}
         </>
     );
 }

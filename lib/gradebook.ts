@@ -318,7 +318,7 @@ export type CellDisplay = {
   reason: { label: string; earlier: string } | null;
   /** Whether a Missing tag marks the score as a missing-work grade. */
   missingTag: boolean;
-  /** Whether the cell's score has feedback, marked in the cell's corner. */
+  /** Whether the cell's score has feedback, marked beside the score. */
   hasFeedback: boolean;
   /** Muted text shown when the cell has no score and no badge, like "Not submitted". */
   placeholder: string | null;

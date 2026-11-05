@@ -280,7 +280,7 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
                                 key={assignment.id}
                                 scope="col"
                                 style={{ ...columnStyle, scrollSnapAlign: "start" }}
-                                className={`sticky top-0 z-20 bg-gray-50 px-2 py-1.5 text-left align-top font-normal dark:bg-gray-800 ${stickyCellBase}`}
+                                className={`sticky top-0 z-20 border-l bg-gray-50 px-2 py-1.5 text-left align-top font-normal dark:bg-gray-800 ${stickyCellBase}`}
                             >
                                 <Link
                                     href={`/classes/${gradebook.class.id}/assignments/${assignment.id}`}
@@ -336,7 +336,7 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
                                     return (
                                         <td
                                             key={assignment.id}
-                                            className={`p-px align-middle ${stickyCellBase} ${bodyBackground}`}
+                                            className={`border-l p-px align-middle ${stickyCellBase} ${bodyBackground}`}
                                         >
                                             {cell ? (
                                                 <button
@@ -349,7 +349,7 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
                                                     data-grid-col={col}
                                                     data-cell={cellDataKey(key)}
                                                     onClick={() => onSelect(key)}
-                                                    className={`relative flex min-h-10 w-full items-center justify-center rounded-md px-2 py-1 ${cellInteraction} ${focusRing} ${
+                                                    className={`flex min-h-10 w-full items-center justify-center rounded-md px-2 py-1 ${cellInteraction} ${focusRing} ${
                                                         isSelected
                                                             ? "bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950 dark:ring-blue-400"
                                                             : ""

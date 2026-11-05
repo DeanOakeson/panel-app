@@ -74,6 +74,42 @@ test.describe("Gradebook layout", () => {
     ).toBeGreaterThan(2);
   });
 
+  test("puts the feedback mark beside its score and divides the columns", async ({ page, scenario }) => {
+    await addQuiz(scenario);
+    await signIn(page, scenario.professor);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(gradesPath(scenario));
+
+    const cell = gradeCell(page, "Cara Diaz", "Quiz 1");
+    await expect(cell).toBeVisible();
+
+    const { score, icon, cellBox } = await cell.evaluate((button) => {
+      const svg = button.querySelector("svg")!.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(button.querySelector("span span span")!);
+      const text = range.getBoundingClientRect();
+
+      return {
+        score: { right: text.right, middle: text.top + text.height / 2 },
+        icon: { left: svg.left, middle: svg.top + svg.height / 2, size: svg.width },
+        cellBox: button.getBoundingClientRect(),
+      };
+    });
+
+    expect(icon.size).toBe(16);
+    expect(icon.left).toBeGreaterThan(score.right);
+    expect(icon.left - score.right).toBeLessThan(8);
+    expect(Math.abs(icon.middle - score.middle)).toBeLessThan(3);
+    expect(icon.middle).toBeGreaterThan(cellBox.top + 8);
+
+    const borders = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("thead th, tbody tr:first-child td")).map(
+        (element) => getComputedStyle(element).borderLeftWidth
+      )
+    );
+    expect(borders.slice(1).every((width) => width === "1px")).toBe(true);
+  });
+
   test("collapses the course navigation by default in a narrow window until someone chooses", async ({ page, scenario }) => {
     await signIn(page, scenario.professor);
     await page.setViewportSize({ width: 1024, height: 768 });
