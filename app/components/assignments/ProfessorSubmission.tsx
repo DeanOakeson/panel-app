@@ -145,7 +145,7 @@ function describeCounts(counts: GradingCounts, closed: boolean) {
 
 /** Returns a student card's classes, with a ring on the card a link pointed to. */
 function cardClass(highlighted: boolean) {
-    return `scroll-mt-6 rounded-lg border p-4 focus:outline-none ${
+    return `scroll-mt-16 rounded-lg border p-4 focus:outline-none ${
         highlighted
             ? "border-blue-500 ring-2 ring-blue-500/60 dark:border-blue-400 dark:ring-blue-400/60"
             : "border-gray-200 dark:border-zinc-700"

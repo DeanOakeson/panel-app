@@ -281,12 +281,24 @@ export default function AssignmentDetailPage() {
 
     return (
         <div className="mx-auto w-full max-w-3xl">
-            <Link
-                href={`/classes/${classId}/${fromGrades ? "grades" : "assignments"}`}
-                className="text-sm text-blue-600 hover:text-blue-500 dark:text-blue-400"
-            >
-                {fromGrades ? "← Back to grades" : "← Back to assignments"}
-            </Link>
+            {fromGrades ? (
+                // Stays in view while the professor scrolls to the card they came to grade
+                <div className="sticky -top-6 z-20 -mx-6 -mt-6 border-b border-gray-200 bg-gray-50/95 px-6 py-3 backdrop-blur dark:border-zinc-800 dark:bg-gray-900/95">
+                    <Link
+                        href={`/classes/${classId}/grades`}
+                        className="text-sm font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400"
+                    >
+                        ← Back to grades
+                    </Link>
+                </div>
+            ) : (
+                <Link
+                    href={`/classes/${classId}/assignments`}
+                    className="text-sm text-blue-600 hover:text-blue-500 dark:text-blue-400"
+                >
+                    ← Back to assignments
+                </Link>
+            )}
 
             {loading ? (
                 <p className="mt-6 text-gray-600 dark:text-gray-300">
