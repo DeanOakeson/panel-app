@@ -1,12 +1,12 @@
 import type { CellDisplay } from "@/lib/gradebook";
 import { BADGE_CLASSES } from "../assignments/StatusBadge";
 
-/** Marks a score whose grade has written feedback. */
+/** Marks a score whose grade has written feedback. The view box crops to the glyph, so it fills 16 pixels. */
 export function FeedbackIcon() {
     return (
         <svg
             aria-hidden="true"
-            viewBox="0 0 16 16"
+            viewBox="2 2 12 12"
             className="h-4 w-4 shrink-0 text-gray-600 dark:text-zinc-300"
             fill="currentColor"
         >
@@ -56,7 +56,7 @@ export default function GradeCellContent({
                 )}
 
                 {display.reason && (
-                    <span className="flex flex-col items-center text-[13px] leading-[18px] text-gray-700 dark:text-zinc-300">
+                    <span className="flex flex-col items-center text-sm leading-[18px] text-gray-700 dark:text-zinc-300">
                         <span className="whitespace-nowrap">{display.reason.label}</span>
                         <span className="whitespace-nowrap tabular-nums">{display.reason.earlier}</span>
                     </span>
