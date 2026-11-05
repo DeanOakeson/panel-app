@@ -1,10 +1,12 @@
 import { test, expect, signIn } from "./support/fixtures";
-import { detailsPanel, gradeCell, gradesPath } from "./support/gradebook";
+import { addQuiz, detailsPanel, gradeCell, gradesPath, unenroll } from "./support/gradebook";
 import { saveGrade, studentCard } from "./support/grading";
+import { createAssignment, dateFromToday } from "./support/scenario";
 import type { Page } from "@playwright/test";
 
 const PROJECT = "Project 1: Requirements";
 const HOMEWORK = "Homework 2: Use Cases";
+const QUIZ = "Quiz 1";
 
 /** Returns a column's filter button, whose name starts "Filter students by". */
 function filterButton(page: Page, assignment: string) {
@@ -21,7 +23,55 @@ function filterStatus(page: Page) {
   return page.getByText(/^Showing \d+ students? · /);
 }
 
+/** Returns how full a column's progress bar is, from 0 to 1. */
+function barFill(page: Page, assignment: string) {
+  return filterButton(page, assignment).evaluate((button) => {
+    const track = button.querySelector("span")!;
+    const fill = track.querySelector("span")!;
+
+    return Math.round((fill.getBoundingClientRect().width / track.getBoundingClientRect().width) * 100) / 100;
+  });
+}
+
 test.describe("Gradebook filter", () => {
+  test("shows each column's graded work out of the work turned in", async ({ page, scenario }) => {
+    await addQuiz(scenario);
+    const reading = await createAssignment(scenario.professor, scenario.course.id, "Reading Reflection", 5, dateFromToday(30));
+    await signIn(page, scenario.professor);
+    await page.goto(gradesPath(scenario));
+
+    // Ben's resubmission and Ava's new work wait, and Dev's missing work is not turned in
+    await expect(filterButton(page, PROJECT)).toHaveText("1 of 3 graded");
+    await expect(filterButton(page, PROJECT)).toHaveAccessibleName(
+      `Filter students by ${PROJECT}, 1 of 3 graded, 2 to grade`
+    );
+    expect(await barFill(page, PROJECT)).toBe(0.33);
+
+    // Dev's missing-work zero and Ben's missing work count in neither number
+    await expect(filterButton(page, QUIZ)).toHaveText("2 of 2 graded");
+    await expect(filterButton(page, QUIZ)).toHaveAccessibleName(`Filter students by ${QUIZ}, 2 of 2 graded, all graded`);
+    expect(await barFill(page, QUIZ)).toBe(1);
+
+    await expect(filterButton(page, reading.name)).toHaveText("None turned in");
+    await expect(filterButton(page, reading.name)).toHaveAccessibleName(
+      `Filter students by ${reading.name}, none turned in`
+    );
+    expect(await barFill(page, reading.name)).toBe(0);
+
+    // The header shows the due date and points under the name
+    await expect(page.getByRole("columnheader", { name: new RegExp(`^${QUIZ}`) })).toContainText(/Closed \w{3} \d{1,2} · 10 pts/);
+    await expect(page.getByRole("columnheader", { name: new RegExp(`^${reading.name}`) })).toContainText(
+      /Due \w{3} \d{1,2} · 5 pts/
+    );
+    await expect(page.getByRole("columnheader", { name: new RegExp(`^${QUIZ}`) })).toHaveAccessibleName(/Out of 10\./);
+
+    // A student who left still counts for the work they turned in
+    await unenroll(scenario, scenario.students.ben);
+    await page.reload();
+    await expect(filterButton(page, PROJECT)).toHaveText("1 of 3 graded");
+  });
+
+
   test("shows who has not turned in an open assignment, and shows everyone again", async ({ page, scenario }) => {
     await signIn(page, scenario.professor);
     await page.goto(gradesPath(scenario));
@@ -50,7 +100,7 @@ test.describe("Gradebook filter", () => {
       `Showing 3 students: Not turned in on ${HOMEWORK}.`
     );
     await expect(filterButton(page, HOMEWORK)).toHaveAccessibleName(
-      `Filter students by ${HOMEWORK}, 1 to grade, showing not turned in`
+      `Filter students by ${HOMEWORK}, 0 of 1 graded, 1 to grade, showing not turned in`
     );
     await expect(filterButton(page, HOMEWORK)).toBeFocused();
 
@@ -94,7 +144,7 @@ test.describe("Gradebook filter", () => {
     await signIn(page, scenario.professor);
     await page.goto(gradesPath(scenario));
 
-    await page.getByRole("button", { name: "Hide key" }).focus();
+    await page.getByRole("button", { name: "Key", exact: true }).focus();
     await page.keyboard.press("Tab");
     await expect(gradeCell(page, "Ava Martin", PROJECT)).toBeFocused();
     await page.keyboard.press("ArrowUp");

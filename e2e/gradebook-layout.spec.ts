@@ -1,5 +1,5 @@
 import { test, expect, signIn } from "./support/fixtures";
-import { addQuiz, gradeCell, gradesPath } from "./support/gradebook";
+import { addQuiz, gradeCell, gradesPath, unenroll } from "./support/gradebook";
 import { createAssignment, dateFromToday, type Scenario } from "./support/scenario";
 import type { Page } from "@playwright/test";
 
@@ -209,6 +209,70 @@ test.describe("Gradebook layout", () => {
     expect(
       await page.getByRole("table").locator("xpath=..").evaluate((scroller) => (scroller as HTMLElement).offsetWidth - scroller.clientWidth)
     ).toBeGreaterThan(2);
+  });
+
+  test("lines up the progress bars and keeps the page whole at every width", async ({ page, scenario }) => {
+    await addSixAssignments(scenario);
+    await unenroll(scenario, scenario.students.ben);
+    await signIn(page, scenario.professor);
+    await page.goto(gradesPath(scenario));
+    await expect(gradeCell(page, "Ava Martin", "Reading Reflection")).toBeAttached();
+
+    for (const [width, colorScheme] of [
+      [1600, "light"],
+      [1440, "dark"],
+      [1280, "light"],
+      [1024, "dark"],
+      [820, "light"],
+      [390, "dark"],
+    ] as const) {
+      await page.emulateMedia({ colorScheme });
+      await page.setViewportSize({ width, height: 800 });
+      await expect.poll(() => measureColumns(page)).toMatchObject({ underFrozen: 0 });
+
+      const layout = await page.evaluate(() => {
+        const headers = Array.from(document.querySelectorAll("thead th")).slice(1);
+        const bars = headers.map((header) => header.querySelector("button span")!.getBoundingClientRect());
+        const meta = headers.map((header) => header.querySelector("p")!.getBoundingClientRect());
+        const counts = headers.map((header) => header.querySelector("button span:nth-child(2) span")! as HTMLElement);
+        const toolbar = Array.from(document.querySelectorAll<HTMLElement>("main button, main p")).filter(
+          (element) => element.closest("table") === null && element.offsetParent !== null
+        );
+        const root = document.documentElement;
+
+        return {
+          barTops: new Set(bars.map((bar) => Math.round(bar.top))).size,
+          barsClearOfMeta: bars.every((bar, index) => bar.top >= meta[index].bottom + 4),
+          countsWhole: counts.every((count) => count.scrollWidth <= count.clientWidth),
+          pageSideways: root.scrollWidth > root.clientWidth,
+          clipped: toolbar
+            .filter((element) => {
+              const box = element.getBoundingClientRect();
+              return box.left < 0 || box.right > root.clientWidth;
+            })
+            .map((element) => element.textContent),
+        };
+      });
+
+      expect(layout, `at ${width} pixels`).toEqual({
+        barTops: 1,
+        barsClearOfMeta: true,
+        countsWhole: true,
+        pageSideways: false,
+        clipped: [],
+      });
+
+      // The key opens inside the window
+      const key = page.getByRole("region", { name: "Key" });
+      await page.getByRole("button", { name: "Key", exact: true }).click();
+      await expect(key).toBeVisible();
+      const box = (await key.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      expect(box.y + box.height).toBeLessThanOrEqual(800);
+      await page.keyboard.press("Escape");
+      await expect(key).toBeHidden();
+    }
   });
 
   test("puts the feedback mark beside its score and divides the columns", async ({ page, scenario }) => {

@@ -35,10 +35,10 @@ test.describe("Professor gradebook", () => {
       new RegExp(`^${HOMEWORK}`),
     ]);
     await expect(page.getByRole("columnheader", { name: new RegExp(`^${PROJECT}`) })).toContainText(
-      "2 to grade"
+      "1 of 3 graded"
     );
     await expect(page.getByRole("columnheader", { name: new RegExp(`^${QUIZ}`) })).toContainText(
-      "All graded"
+      "2 of 2 graded"
     );
 
     // A graded 0, a missing-work 0 and missing work without a grade
@@ -68,6 +68,7 @@ test.describe("Professor gradebook", () => {
     await expect(gradeCell(page, "Ava Martin", HOMEWORK)).toHaveText("Needs grading");
     await expect(gradeCell(page, "Ben Carter", HOMEWORK)).toHaveText("Not submitted");
 
+    await page.getByRole("button", { name: "Key", exact: true }).click();
     await expect(page.getByRole("region", { name: "Key" })).toContainText("Zero given for missing work");
   });
 
@@ -123,7 +124,7 @@ test.describe("Professor gradebook", () => {
     await expect(gradeCell(page, "Ava Martin", PROJECT)).toHaveText("88/100");
     await expect(page.getByText("2 submissions to grade")).toBeVisible();
     await expect(page.getByRole("columnheader", { name: new RegExp(`^${PROJECT}`) })).toContainText(
-      "1 to grade"
+      "2 of 3 graded"
     );
   });
 
@@ -154,7 +155,7 @@ test.describe("Professor gradebook", () => {
     await page.goto(gradesPath(scenario));
 
     await expect(page.locator('table [tabindex="0"]')).toHaveCount(1);
-    await page.getByRole("button", { name: "Hide key" }).focus();
+    await page.getByRole("button", { name: "Key", exact: true }).focus();
     await page.keyboard.press("Tab");
     await expect(gradeCell(page, "Ava Martin", PROJECT)).toBeFocused();
 
@@ -171,7 +172,9 @@ test.describe("Professor gradebook", () => {
     await page.keyboard.press("Control+Home");
     await expect(gradeCell(page, "Ava Martin", PROJECT)).toBeFocused();
     await page.keyboard.press("ArrowUp");
-    await expect(page.getByRole("button", { name: `Filter students by ${PROJECT}, 2 to grade` })).toBeFocused();
+    await expect(
+      page.getByRole("button", { name: `Filter students by ${PROJECT}, 1 of 3 graded, 2 to grade` })
+    ).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(gradeCell(page, "Ava Martin", PROJECT)).toBeFocused();
 
@@ -216,39 +219,152 @@ test.describe("Professor gradebook", () => {
     await expectClearOfFrozenParts(page, project);
   });
 
-  test("hides and shows the key, and remembers the choice", async ({ page, scenario }) => {
+  test("opens the key in a popover that closes with Escape or a click outside", async ({ page, scenario }) => {
     await signIn(page, scenario.professor);
     await page.goto(gradesPath(scenario));
 
+    const button = page.getByRole("button", { name: "Key", exact: true });
     const key = page.getByRole("region", { name: "Key" });
-    await expect(key).toBeVisible();
-    await page.getByRole("button", { name: "Hide key" }).click();
+    await expect(button).toHaveAttribute("aria-expanded", "false");
     await expect(key).toBeHidden();
-    // The hint moves from the key to the toolbar
-    await expect(page.getByText(/^Select a grade for details · /)).toBeVisible();
 
-    await page.reload();
-    await expect(gradeCell(page, "Ava Martin", PROJECT)).toBeVisible();
-    await expect(key).toBeHidden();
-    await page.getByRole("button", { name: "Show key" }).click();
+    await button.click();
     await expect(key).toBeVisible();
+    await expect(button).toHaveAttribute("aria-expanded", "true");
+    await expect(button).toHaveAttribute("aria-controls", (await key.getAttribute("id"))!);
+    await expect(key.getByRole("heading")).toHaveText(["To grade", "Not turned in", "Graded"]);
+    await expect(key.locator("li > span:not([aria-hidden])")).toHaveText([
+      "Needs grading: Turned in, waiting for you to grade",
+      "Resubmitted, with the earlier score: New version to grade. The earlier score stands until then",
+      "After Missing, with the earlier score: Turned in after a missing-work grade",
+      "Not submitted: Not due yet",
+      "Missing: Past due, no grade yet",
+      "0 out of 10 with a Missing tag: Zero given for missing work",
+      "A score like 18 out of 20: Score out of the points",
+      "A score with a speech bubble: Has written feedback",
+    ]);
+
+    // Every sample shares one width, so the meanings line up, and the groups sit in two columns
+    const layout = await key.evaluate((element) => ({
+      sampleWidths: new Set(
+        Array.from(element.querySelectorAll("li > span[aria-hidden]")).map((sample) => sample.getBoundingClientRect().width)
+      ).size,
+      columns: new Set(Array.from(element.querySelectorAll("h2")).map((heading) => heading.getBoundingClientRect().left)).size,
+    }));
+    expect(layout).toEqual({ sampleWidths: 1, columns: 2 });
+
+    await page.keyboard.press("Escape");
+    await expect(key).toBeHidden();
+    await expect(button).toBeFocused();
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+
+    // Opening by keyboard leaves focus on the button, and Tab still reaches the grid's one stop
+    await page.keyboard.press("Enter");
+    await expect(key).toBeVisible();
+    await expect(button).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(gradeCell(page, "Ava Martin", PROJECT)).toBeFocused();
+    await expect(page.locator('table [tabindex="0"]')).toHaveCount(1);
+    await expect(key).toBeVisible();
+
+    // Opening a grade's details closes the key, which stays closed after the details
+    await page.keyboard.press("Enter");
+    await expect(detailsPanel(page)).toHaveAccessibleName("Ava Martin");
+    await expect(key).toBeHidden();
+    await page.keyboard.press("Escape");
+    await expect(detailsPanel(page)).toBeHidden();
+    await expect(gradeCell(page, "Ava Martin", PROJECT)).toBeFocused();
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+
+    await button.click();
+    await page.getByRole("heading", { name: "Grades", level: 1 }).click();
+    await expect(key).toBeHidden();
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+
+    // A click on a grade closes the key and opens the grade
+    await button.click();
+    await gradeCell(page, "Cara Diaz", PROJECT).click();
+    await expect(key).toBeHidden();
+    await expect(detailsPanel(page)).toHaveAccessibleName("Cara Diaz");
   });
 
-  test("shows the key and toggles it when storage is blocked", async ({ page, scenario }) => {
-    await page.addInitScript(() => {
-      Object.defineProperty(window, "localStorage", {
-        get() {
-          throw new Error("Storage is blocked.");
-        },
-      });
-    });
+  test("leaves Escape to an open filter menu before the key", async ({ page, scenario }) => {
     await signIn(page, scenario.professor);
     await page.goto(gradesPath(scenario));
 
     const key = page.getByRole("region", { name: "Key" });
+    await page.getByRole("button", { name: "Key", exact: true }).press("Enter");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("Enter");
+    const menu = page.getByRole("menu", { name: `Filter students by ${PROJECT}` });
+    await expect(menu).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
     await expect(key).toBeVisible();
-    await page.getByRole("button", { name: "Hide key" }).click();
+    await expect(page.getByRole("button", { name: new RegExp(`^Filter students by ${PROJECT}`) })).toBeFocused();
+
+    await page.keyboard.press("Escape");
     await expect(key).toBeHidden();
+    await expect(page.getByRole("button", { name: "Key", exact: true })).toBeFocused();
+  });
+
+  test("fits the key inside a phone-sized window and scrolls it when it is taller", async ({ page, scenario }) => {
+    await addQuiz(scenario);
+    await unenroll(scenario, scenario.students.ben);
+    await signIn(page, scenario.professor);
+    await page.goto(gradesPath(scenario));
+
+    const key = page.getByRole("region", { name: "Key" });
+    for (const viewport of [{ width: 390, height: 844 }, { width: 390, height: 520 }]) {
+      await page.setViewportSize(viewport);
+      await page.getByRole("button", { name: "Key", exact: true }).click();
+      await expect(key).toBeVisible();
+
+      const fit = await key.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const lefts = new Set(
+          Array.from(element.querySelectorAll("h2")).map((heading) => Math.round(heading.getBoundingClientRect().left))
+        );
+
+        return {
+          inside:
+            box.left >= 0 &&
+            box.top >= 0 &&
+            box.right <= document.documentElement.clientWidth &&
+            box.bottom <= document.documentElement.clientHeight,
+          columns: lefts.size,
+          pageSideways: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        };
+      });
+      expect(fit).toEqual({ inside: true, columns: 1, pageSideways: false });
+
+      // The last entry scrolls into view inside the key
+      const last = key.getByText("Not in the class for this assignment");
+      await last.scrollIntoViewIfNeeded();
+      await expect(last).toBeInViewport();
+      expect((await key.boundingBox())!.y).toBeGreaterThanOrEqual(0);
+
+      await page.keyboard.press("Escape");
+      await expect(key).toBeHidden();
+    }
+  });
+
+  test("shows the key's dash entry only with a student who left", async ({ page, scenario }) => {
+    await signIn(page, scenario.professor);
+    await page.goto(gradesPath(scenario));
+
+    const key = page.getByRole("region", { name: "Key" });
+    await page.getByRole("button", { name: "Key", exact: true }).click();
+    await expect(key.getByRole("heading", { name: "Left the class" })).toHaveCount(0);
+
+    await addQuiz(scenario);
+    await unenroll(scenario, scenario.students.ben);
+    await page.reload();
+    await page.getByRole("button", { name: "Key", exact: true }).click();
+    await expect(key.getByRole("heading")).toHaveText(["To grade", "Not turned in", "Graded", "Left the class"]);
+    await expect(key).toContainText("Not in the class for this assignment");
   });
 
   test("scrolls only the grid, not the page, with a student who left", async ({ page, scenario }) => {
@@ -292,19 +408,26 @@ test.describe("Professor gradebook", () => {
     }
   });
 
-  test("shows names only, with the email in the hover text, and the hint at every width", async ({ page, scenario }) => {
+  test("shows names only, with the email in the hover text, and the hint under the grid at every width", async ({ page, scenario }) => {
     await signIn(page, scenario.professor);
     await page.goto(gradesPath(scenario));
 
     const ava = page.getByRole("rowheader").filter({ hasText: "Ava Martin" });
-    for (const viewport of [{ width: 1024, height: 768 }, { width: 1280, height: 800 }]) {
+    const hints = ["Select a grade for details", "Select a column's status to filter", "Arrow keys move"];
+    for (const viewport of [{ width: 390, height: 844 }, { width: 1024, height: 768 }, { width: 1280, height: 800 }]) {
       await page.setViewportSize(viewport);
       await expect(ava).not.toContainText(scenario.students.ava.email);
       await expect(ava.getByText("Ava Martin")).toHaveAttribute(
         "title",
         `Ava Martin (${scenario.students.ava.email})`
       );
-      await expect(page.getByText("Select a grade for details · Select a column's status to filter · Arrow keys move")).toBeVisible();
+
+      const gridBottom = (await page.locator("#gradebook-grid").boundingBox())!;
+      for (const hint of hints) {
+        const line = page.getByText(hint, { exact: true });
+        await expect(line).toBeInViewport();
+        expect((await line.boundingBox())!.y).toBeGreaterThan(gridBottom.y + gridBottom.height);
+      }
     }
   });
 
