@@ -98,6 +98,25 @@ async function seedGrade(uid: string, classId: string) {
     });
 }
 
+async function seedMissingGrade(uid: string, classId: string) {
+  await db()
+    .collection("classes")
+    .doc(classId)
+    .collection("assignments")
+    .doc("a1")
+    .collection("missingGrades")
+    .doc(uid)
+    .set({
+      studentId: uid,
+      classId,
+      assignmentId: "a1",
+      score: 0,
+      feedback: "Missing",
+      gradedBy: adminUid,
+      gradedAt: "2026-01-02T00:00:00.000Z",
+    });
+}
+
 describe("DELETE /api/admin/users/[uid] cascade — orphan paths", () => {
   it("removes a submission left behind by an earlier unenroll", async () => {
     // enroll -> submit -> unenroll -> delete user
@@ -172,6 +191,27 @@ describe("DELETE /api/admin/users/[uid] cascade — orphan paths", () => {
 
     const stragglers = await db()
       .collectionGroup("grades")
+      .where("studentId", "==", target.uid)
+      .get();
+
+    expect(stragglers.empty).toBe(true);
+  });
+
+  it("removes the user's missing-work grades, enrolled or not, and reports them", async () => {
+    const target = await createSignedInUser("student@example.com", "student");
+    await seedClassWithAssignment("class-1");
+    await seedClassWithAssignment("class-2");
+    await seedEnrollMirror(target.uid, "class-1");
+    await seedMissingGrade(target.uid, "class-1");
+    await seedMissingGrade(target.uid, "class-2"); // not enrolled in class-2
+
+    const res = await deleteUser(target.uid, adminToken);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ removedMissingGrades: 2 });
+
+    const stragglers = await db()
+      .collectionGroup("missingGrades")
       .where("studentId", "==", target.uid)
       .get();
 
