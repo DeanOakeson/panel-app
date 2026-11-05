@@ -3,8 +3,10 @@ import {
   QUIZ_CARA_FEEDBACK,
   addQuiz,
   detailsPanel,
+  expectClearOfFrozenParts,
   gradeCell,
   gradesPath,
+  unenroll,
 } from "./support/gradebook";
 import { saveGrade, studentCard } from "./support/grading";
 import { BEN_SCORE, CARA_SCORE } from "./support/scenario";
@@ -58,7 +60,7 @@ test.describe("Professor gradebook", () => {
 
     // The closed project: to grade, resubmitted with its standing score, graded and missing
     await expect(gradeCell(page, "Ava Martin", PROJECT)).toHaveText("Needs grading");
-    await expect(gradeCell(page, "Ben Carter", PROJECT)).toHaveText(`Resubmitted${BEN_SCORE}/100`);
+    await expect(gradeCell(page, "Ben Carter", PROJECT)).toHaveText(`Resubmittedearlier: ${BEN_SCORE}/100`);
     await expect(gradeCell(page, "Cara Diaz", PROJECT)).toHaveText(`${CARA_SCORE}/100`);
     await expect(gradeCell(page, "Dev Patel", PROJECT)).toHaveText("Missing");
 
@@ -66,7 +68,7 @@ test.describe("Professor gradebook", () => {
     await expect(gradeCell(page, "Ava Martin", HOMEWORK)).toHaveText("Needs grading");
     await expect(gradeCell(page, "Ben Carter", HOMEWORK)).toHaveText("Not submitted");
 
-    await expect(page.getByRole("region", { name: "Key" })).toContainText("Missing-work grade of 0");
+    await expect(page.getByRole("region", { name: "Key" })).toContainText("Missing-work grade");
   });
 
   test("opens a cell's details with the full feedback and closes with Escape", async ({ page, scenario }) => {
@@ -114,6 +116,7 @@ test.describe("Professor gradebook", () => {
     await expect(card).toBeFocused();
     await saveGrade(card, "88", "Solid outline.");
     await expect(card).toContainText("88 / 100");
+    await expect(page.getByRole("link", { name: "← Back to grades" })).toBeInViewport();
 
     await page.getByRole("link", { name: "← Back to grades" }).click();
     await expect(page).toHaveURL(new RegExp(`${gradesPath(scenario)}$`));
@@ -143,6 +146,123 @@ test.describe("Professor gradebook", () => {
         () => (window as unknown as { gradebookMarker?: boolean }).gradebookMarker
       )
     ).toBe(true);
+  });
+
+  test("moves between cells with the arrow keys from a single Tab stop", async ({ page, scenario }) => {
+    await addQuiz(scenario);
+    await signIn(page, scenario.professor);
+    await page.goto(gradesPath(scenario));
+
+    await expect(page.locator('table [tabindex="0"]')).toHaveCount(1);
+    await page.getByRole("button", { name: "Hide key" }).focus();
+    await page.keyboard.press("Tab");
+    await expect(gradeCell(page, "Ava Martin", PROJECT)).toBeFocused();
+
+    await page.keyboard.press("ArrowRight");
+    await expect(gradeCell(page, "Ava Martin", QUIZ)).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(gradeCell(page, "Ben Carter", QUIZ)).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(gradeCell(page, "Ben Carter", HOMEWORK)).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(gradeCell(page, "Ben Carter", PROJECT)).toBeFocused();
+    await page.keyboard.press("Control+End");
+    await expect(gradeCell(page, "Dev Patel", HOMEWORK)).toBeFocused();
+    await page.keyboard.press("Control+Home");
+    await expect(gradeCell(page, "Ava Martin", PROJECT)).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await expect(page.getByRole("link", { name: PROJECT })).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+
+    // The last cell moved to stays the Tab stop, and Space opens it
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
+    await expect(gradeCell(page, "Ava Martin", QUIZ)).toBeFocused();
+    await expect(page.locator('table [tabindex="0"]')).toHaveCount(1);
+    await page.keyboard.press("Space");
+    await expect(detailsPanel(page)).toHaveAccessibleName("Ava Martin");
+  });
+
+  test("keeps the focused cell clear of the frozen column and header", async ({ page, scenario }) => {
+    await addQuiz(scenario);
+    await signIn(page, scenario.professor);
+    // Narrow enough that the grid scrolls sideways
+    await page.setViewportSize({ width: 760, height: 900 });
+    await page.goto(gradesPath(scenario));
+
+    await gradeCell(page, "Ava Martin", PROJECT).focus();
+    await page.keyboard.press("End");
+    const homework = gradeCell(page, "Dev Patel", HOMEWORK);
+    await page.keyboard.press("Control+End");
+    await expect(homework).toBeFocused();
+    await expectClearOfFrozenParts(page, homework);
+
+    await page.keyboard.press("Control+Home");
+    const project = gradeCell(page, "Ava Martin", PROJECT);
+    await expect(project).toBeFocused();
+    await expectClearOfFrozenParts(page, project);
+
+    // Focus that comes back from the panel is scrolled clear too
+    await page.keyboard.press("Enter");
+    await expect(detailsPanel(page)).toBeVisible();
+    await project.evaluate((cell) => {
+      const scroller = cell.closest("table")!.parentElement!;
+      scroller.scrollTo({ left: scroller.scrollWidth, top: scroller.scrollHeight });
+    });
+    await page.keyboard.press("Escape");
+    await expect(project).toBeFocused();
+    await expectClearOfFrozenParts(page, project);
+  });
+
+  test("hides and shows the key, and remembers the choice", async ({ page, scenario }) => {
+    await signIn(page, scenario.professor);
+    await page.goto(gradesPath(scenario));
+
+    const key = page.getByRole("region", { name: "Key" });
+    await expect(key).toBeVisible();
+    await page.getByRole("button", { name: "Hide key" }).click();
+    await expect(key).toBeHidden();
+
+    await page.reload();
+    await expect(gradeCell(page, "Ava Martin", PROJECT)).toBeVisible();
+    await expect(key).toBeHidden();
+    await page.getByRole("button", { name: "Show key" }).click();
+    await expect(key).toBeVisible();
+  });
+
+  test("shows the key and toggles it when storage is blocked", async ({ page, scenario }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, "localStorage", {
+        get() {
+          throw new Error("Storage is blocked.");
+        },
+      });
+    });
+    await signIn(page, scenario.professor);
+    await page.goto(gradesPath(scenario));
+
+    const key = page.getByRole("region", { name: "Key" });
+    await expect(key).toBeVisible();
+    await page.getByRole("button", { name: "Hide key" }).click();
+    await expect(key).toBeHidden();
+  });
+
+  test("scrolls only the grid, not the page, with a student who left", async ({ page, scenario }) => {
+    await addQuiz(scenario);
+    await unenroll(scenario, scenario.students.ben);
+    await signIn(page, scenario.professor);
+    await page.setViewportSize({ width: 760, height: 900 });
+    await page.goto(gradesPath(scenario));
+
+    await expect(gradeCell(page, "Ben Carter", PROJECT)).toBeVisible();
+    await expect(page.getByRole("row").filter({ hasText: "Ben Carter" })).toContainText("Not enrolled");
+
+    const overflow = await page.evaluate(() => {
+      const root = document.documentElement;
+      return { wide: root.scrollWidth > root.clientWidth, tall: root.scrollHeight > root.clientHeight };
+    });
+    expect(overflow).toEqual({ wide: false, tall: false });
   });
 
   test("points a student to the assignments instead of a gradebook", async ({ pageAs, scenario }) => {

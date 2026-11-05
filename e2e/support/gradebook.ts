@@ -1,11 +1,14 @@
-import type { Locator, Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
+import { AUTH_HOST, PASSWORD } from "./env";
 import {
+  api,
   createAssignment,
   dateFromToday,
   grade,
   gradeMissing,
   setDueDate,
   submit,
+  type Person,
   type Scenario,
   type SeededAssignment,
 } from "./scenario";
@@ -59,4 +62,44 @@ export function gradeCell(page: Page, studentName: string, assignmentName: strin
 /** Returns the gradebook's details panel. */
 export function detailsPanel(page: Page): Locator {
   return page.getByRole("dialog");
+}
+
+/** Returns the grid's frozen student column header for a student. */
+export function studentRowHeader(page: Page, studentName: string): Locator {
+  return page.getByRole("rowheader").filter({ hasText: studentName });
+}
+
+/**
+ * Expects a cell to sit fully clear of the frozen student column and the
+ * frozen header row, so its focus outline can be seen.
+ */
+export async function expectClearOfFrozenParts(page: Page, cell: Locator) {
+  const [cellBox, columnBox, headerBox] = await Promise.all([
+    cell.boundingBox(),
+    page.getByRole("rowheader").first().boundingBox(),
+    page.getByRole("columnheader").first().boundingBox(),
+  ]);
+
+  expect(cellBox && columnBox && headerBox).toBeTruthy();
+  expect(cellBox!.x).toBeGreaterThanOrEqual(columnBox!.x + columnBox!.width - 1);
+  expect(cellBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height - 1);
+}
+
+/** Takes a student out of the seeded course as the seeded admin. */
+export async function unenroll(scenario: Scenario, student: Person) {
+  const response = await fetch(
+    `http://${AUTH_HOST}/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake-api-key`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email: "jordan.hayes@admin.example.edu",
+        password: PASSWORD,
+        returnSecureToken: true,
+      }),
+    }
+  );
+  const { idToken } = (await response.json()) as { idToken: string };
+
+  await api("DELETE", `/api/admin/classes/${scenario.course.id}/enrollments/${student.uid}`, idToken);
 }
