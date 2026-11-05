@@ -498,3 +498,56 @@ export function moveInGrid(
 }
 
 // #endregion
+
+// #region Layout
+
+/** The frozen student column's width in pixels, with the email under each name. */
+const STUDENT_COLUMN_WIDTH = 240;
+
+/** The frozen student column's width in pixels in compact rows, which show names only. */
+const COMPACT_STUDENT_COLUMN_WIDTH = 176;
+
+/** The narrowest an assignment column gets, in pixels. */
+const MIN_COLUMN_WIDTH = 144;
+
+/** Below this width in pixels, rows show names only so more of the grid fits. */
+const COMPACT_BELOW = 760;
+
+/** How wide the grid's columns are and whether rows are compact. */
+export type GridLayout = {
+  /** Whether rows show names only. */
+  compact: boolean;
+  studentWidth: number;
+  columnWidth: number;
+  /** Whether the assignment columns are wider than the room, so the grid scrolls sideways. */
+  overflows: boolean;
+};
+
+/**
+ * Returns the grid's column sizes for `available` pixels of width, unknown
+ * before the first measurement. When the assignments overflow, the columns
+ * widen so a whole number of them fills the view, which lets horizontal
+ * scrolling rest on column edges.
+ */
+export function gridLayout(available: number | null, assignmentCount: number): GridLayout {
+  const compact = available !== null && available < COMPACT_BELOW;
+  const studentWidth = compact ? COMPACT_STUDENT_COLUMN_WIDTH : STUDENT_COLUMN_WIDTH;
+
+  if (available === null) {
+    return { compact, studentWidth, columnWidth: MIN_COLUMN_WIDTH, overflows: false };
+  }
+
+  // The scroll container's border takes 2 pixels
+  const room = available - 2 - studentWidth;
+  const overflows = assignmentCount * MIN_COLUMN_WIDTH > room;
+  const visibleColumns = Math.max(1, Math.floor(room / MIN_COLUMN_WIDTH));
+
+  return {
+    compact,
+    studentWidth,
+    columnWidth: overflows ? Math.max(MIN_COLUMN_WIDTH, room / visibleColumns) : MIN_COLUMN_WIDTH,
+    overflows,
+  };
+}
+
+// #endregion

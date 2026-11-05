@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from
 import Link from "next/link";
 import {
     describeCell,
+    gridLayout,
     moveInGrid,
     studentLabel,
     type Gradebook,
@@ -23,9 +24,6 @@ type Props = {
     selected: CellKey | null;
     onSelect: (key: CellKey) => void;
 };
-
-/** The frozen student column's width in pixels, which matches its w-60 class. */
-const STUDENT_COLUMN_WIDTH = 240;
 
 const HINT_ID = "gradebook-keys-hint";
 
@@ -83,19 +81,23 @@ function GradingSummary({ assignment }: { assignment: GradebookAssignment }) {
     return <span className="font-semibold text-green-700 dark:text-green-400">All graded</span>;
 }
 
-/** Shows a student's name, their email and a Not enrolled tag for someone who left. */
-function StudentHeader({ student }: { student: GradebookStudent }) {
+/**
+ * Shows a student's name, their email and a Not enrolled tag for someone who
+ * left. `compact` leaves the email to the name's hover title.
+ */
+function StudentHeader({ student, compact }: { student: GradebookStudent; compact: boolean }) {
     const label = studentLabel(student);
+    const title = student.name && student.email ? `${student.name} (${student.email})` : label;
 
     return (
         <div className="min-w-0">
-            <p className="truncate font-medium text-gray-900 dark:text-white" title={label ?? undefined}>
+            <p className="truncate font-medium text-gray-900 dark:text-white" title={title ?? undefined}>
                 {label ?? "Unknown student"}
             </p>
 
-            {student.name && student.email && (
+            {!compact && student.name && student.email && (
                 <p
-                    className="truncate text-[13px] font-normal text-gray-600 dark:text-zinc-300"
+                    className="truncate text-sm font-normal text-gray-600 dark:text-zinc-300"
                     title={student.email}
                 >
                     {student.email}
@@ -103,7 +105,7 @@ function StudentHeader({ student }: { student: GradebookStudent }) {
             )}
 
             {!label && (
-                <p className="truncate text-[13px] font-normal text-gray-600 dark:text-zinc-300">
+                <p className="truncate text-sm font-normal text-gray-600 dark:text-zinc-300">
                     ID: {student.id}
                 </p>
             )}
@@ -130,6 +132,8 @@ const bodyBackground =
     "bg-white group-hover:bg-gray-50 dark:bg-gray-900 dark:group-hover:bg-gray-800";
 const focusRing =
     "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-600 dark:focus-visible:outline-blue-400";
+const cellInteraction =
+    "cursor-pointer hover:bg-blue-50 hover:ring-1 hover:ring-inset hover:ring-blue-300 focus-visible:bg-blue-50 dark:hover:bg-blue-950 dark:hover:ring-blue-700 dark:focus-visible:bg-blue-950";
 
 /**
  * Shows every student against every assignment. Each cell is a button that
@@ -142,7 +146,9 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
     const courseName = gradebook.class.courseCode ?? gradebook.class.name;
     const tableRef = useRef<HTMLTableElement>(null);
     const headerRef = useRef<HTMLTableSectionElement>(null);
+    const scrollerRef = useRef<HTMLDivElement>(null);
     const [headerHeight, setHeaderHeight] = useState(0);
+    const [available, setAvailable] = useState<number | null>(null);
     const [active, setActive] = useState<GridPosition | null>(null);
 
     // Keeps the scroll padding equal to the header row, whose height follows the names' wrapping
@@ -157,6 +163,26 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
         observer.observe(header);
         return () => observer.disconnect();
     }, []);
+
+    // Sizes the columns to the width the page gives the grid
+    useEffect(() => {
+        const container = scrollerRef.current?.parentElement;
+        if (!container) return;
+
+        const observer = new ResizeObserver(([entry]) => {
+            setAvailable(entry.contentRect.width);
+        });
+
+        observer.observe(container);
+        return () => observer.disconnect();
+    }, []);
+
+    const { compact, studentWidth, columnWidth, overflows } = gridLayout(
+        available,
+        assignments.length
+    );
+    const studentColumnStyle = { width: studentWidth, minWidth: studentWidth, maxWidth: studentWidth };
+    const columnStyle = { width: columnWidth, minWidth: columnWidth, maxWidth: columnWidth };
 
     /** Returns whether a grid position holds something to focus. */
     function isFocusable({ row, col }: GridPosition): boolean {
@@ -219,8 +245,13 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
 
     return (
         <div
+            ref={scrollerRef}
             className="relative min-h-0 max-w-full shrink self-start overflow-auto rounded-lg border border-gray-200 bg-white dark:border-zinc-700 dark:bg-gray-900"
-            style={{ scrollPaddingTop: headerHeight, scrollPaddingLeft: STUDENT_COLUMN_WIDTH }}
+            style={{
+                scrollPaddingTop: headerHeight,
+                scrollPaddingLeft: studentWidth,
+                scrollSnapType: overflows ? "x mandatory" : undefined,
+            }}
         >
             <p id={HINT_ID} className="sr-only">
                 Use the arrow keys to move between grades, and Enter to open one.
@@ -240,7 +271,8 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
                     <tr>
                         <th
                             scope="col"
-                            className={`sticky left-0 top-0 z-30 w-60 min-w-60 max-w-60 border-r bg-gray-50 px-3 py-2 text-left align-bottom text-xs font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-800 dark:text-zinc-200 ${stickyCellBase}`}
+                            style={studentColumnStyle}
+                            className={`sticky left-0 top-0 z-30 border-r bg-gray-50 px-3 py-2 text-left align-bottom text-xs font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-800 dark:text-zinc-200 ${stickyCellBase}`}
                         >
                             Student
                         </th>
@@ -249,7 +281,8 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
                             <th
                                 key={assignment.id}
                                 scope="col"
-                                className={`sticky top-0 z-20 w-36 min-w-36 max-w-36 bg-gray-50 px-2 py-2 text-left align-top font-normal dark:bg-gray-800 ${stickyCellBase}`}
+                                style={{ ...columnStyle, scrollSnapAlign: "start" }}
+                                className={`sticky top-0 z-20 bg-gray-50 px-2 py-2 text-left align-top font-normal dark:bg-gray-800 ${stickyCellBase}`}
                             >
                                 <Link
                                     href={`/classes/${gradebook.class.id}/assignments/${assignment.id}`}
@@ -262,16 +295,16 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
                                     {assignment.name}
                                 </Link>
 
-                                <p className="mt-0.5 text-[13px] leading-5 text-gray-700 dark:text-zinc-300">
+                                <p className="mt-0.5 text-sm leading-5 text-gray-700 dark:text-zinc-300">
                                     Out of {assignment.points}
                                 </p>
 
-                                <p className="text-[13px] leading-5 text-gray-700 dark:text-zinc-300">
+                                <p className="text-sm leading-5 text-gray-700 dark:text-zinc-300">
                                     {shortDue(assignment)}
                                     {assignment.closed && " · Closed"}
                                 </p>
 
-                                <p className="text-[13px] leading-5">
+                                <p className="text-sm leading-5">
                                     <GradingSummary assignment={assignment} />
                                 </p>
                             </th>
@@ -287,9 +320,10 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
                             <tr key={student.id} className="group">
                                 <th
                                     scope="row"
-                                    className={`sticky left-0 z-10 w-60 min-w-60 max-w-60 border-r px-3 py-1 text-left align-middle font-normal ${stickyCellBase} ${bodyBackground}`}
+                                    style={studentColumnStyle}
+                                    className={`sticky left-0 z-10 border-r px-3 py-1 text-left align-middle font-normal ${stickyCellBase} ${bodyBackground}`}
                                 >
-                                    <StudentHeader student={student} />
+                                    <StudentHeader student={student} compact={compact} />
                                 </th>
 
                                 {assignments.map((assignment, col) => {
@@ -320,7 +354,7 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
                                                     data-grid-col={col}
                                                     data-cell={cellDataKey(key)}
                                                     onClick={() => onSelect(key)}
-                                                    className={`flex min-h-12 w-full items-center justify-center rounded-md px-2 py-1 hover:bg-blue-50 dark:hover:bg-blue-950 ${focusRing} ${
+                                                    className={`flex w-full items-center justify-center rounded-md px-2 py-1 ${compact ? "min-h-11" : "min-h-12"} ${cellInteraction} ${focusRing} ${
                                                         isSelected
                                                             ? "bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950 dark:ring-blue-400"
                                                             : ""
@@ -329,7 +363,7 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
                                                     <GradeCellContent display={display} points={assignment.points} />
                                                 </button>
                                             ) : (
-                                                <span className="flex min-h-12 items-center justify-center text-base text-gray-500 dark:text-zinc-400">
+                                                <span className={`flex items-center justify-center text-base text-gray-500 dark:text-zinc-400 ${compact ? "min-h-11" : "min-h-12"}`}>
                                                     <span aria-hidden="true">–</span>
                                                     <span className="sr-only">{display.srText}</span>
                                                 </span>

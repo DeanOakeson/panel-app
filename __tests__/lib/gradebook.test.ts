@@ -3,6 +3,7 @@ import {
   buildGradebook,
   describeCell,
   gradingHref,
+  gridLayout,
   moveInGrid,
   rosterIds,
   standingFeedback,
@@ -617,5 +618,41 @@ describe("moveInGrid", () => {
 
   it("finds nothing in a grid without students", () => {
     expect(moveInGrid({ row: 0, col: 0 }, "Home", { rows: 0, cols: 3, toGridEnds: true }, isFocusable)).toBeNull();
+  });
+});
+
+describe("gridLayout", () => {
+  it("keeps the email column and narrow columns while every assignment fits", () => {
+    expect(gridLayout(1000, 3)).toEqual({
+      compact: false,
+      studentWidth: 240,
+      columnWidth: 144,
+      overflows: false,
+    });
+  });
+
+  it("widens overflowing columns so a whole number of them fills the view", () => {
+    const layout = gridLayout(1000, 8);
+    const room = 1000 - 2 - layout.studentWidth;
+
+    expect(layout.overflows).toBe(true);
+    expect(layout.columnWidth).toBeGreaterThanOrEqual(144);
+    expect(Number.isInteger(room / layout.columnWidth)).toBe(true);
+  });
+
+  it("switches to compact rows with a narrower student column below 760 pixels", () => {
+    const layout = gridLayout(656, 6);
+
+    expect(layout).toMatchObject({ compact: true, studentWidth: 176, overflows: true });
+    expect((656 - 2 - 176) / layout.columnWidth).toBe(3);
+  });
+
+  it("uses the full layout before the width is known", () => {
+    expect(gridLayout(null, 6)).toEqual({
+      compact: false,
+      studentWidth: 240,
+      columnWidth: 144,
+      overflows: false,
+    });
   });
 });
