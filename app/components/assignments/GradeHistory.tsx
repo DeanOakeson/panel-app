@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { formatTimestamp } from "@/lib/assignmentDeadline";
 import type { GradeHistoryEntry } from "@/lib/gradeHistory";
+import MissingTag from "./MissingTag";
 
 type HistoryEntry = GradeHistoryEntry & {
     /** Null when the saver has no profile. */
@@ -21,8 +22,19 @@ type Props = {
     version: string;
 };
 
-/** Lists the saved versions of one kind of grade, oldest first. */
-function HistoryList({ entries, points }: { entries: HistoryEntry[]; points: number }) {
+/**
+ * Lists the saved versions of one kind of grade, oldest first. `missing` tags
+ * each score as a missing-work grade.
+ */
+function HistoryList({
+    entries,
+    points,
+    missing,
+}: {
+    entries: HistoryEntry[];
+    points: number;
+    missing: boolean;
+}) {
     return (
         <ol className="mt-1 space-y-2">
             {entries.map((entry) => (
@@ -30,10 +42,11 @@ function HistoryList({ entries, points }: { entries: HistoryEntry[]; points: num
                     key={`${entry.savedAt}-${entry.action}`}
                     className="border-l-2 border-gray-200 pl-3 dark:border-zinc-700"
                 >
-                    <p className="text-sm text-gray-900 dark:text-white">
+                    <p className="flex flex-wrap items-center gap-x-2 text-sm text-gray-900 dark:text-white">
                         <span className="font-medium">{`${entry.score} / ${points}`}</span>
+                        {missing && <MissingTag />}
                         <span className="text-gray-500 dark:text-zinc-400">
-                            {` · ${entry.action === "created" ? "Graded" : "Edited"} by ${
+                            {`· ${entry.action === "created" ? "Graded" : "Edited"} by ${
                                 entry.savedByName ?? "Unknown user"
                             }, ${formatTimestamp(entry.savedAt)}`}
                         </span>
@@ -140,7 +153,7 @@ export default function GradeHistory({
                                         Missing-work grade
                                     </p>
                                 )}
-                                <HistoryList entries={history.missingGrade} points={points} />
+                                <HistoryList entries={history.missingGrade} points={points} missing />
                             </div>
                         )}
 
@@ -151,7 +164,7 @@ export default function GradeHistory({
                                         Submission grade
                                     </p>
                                 )}
-                                <HistoryList entries={history.grade} points={points} />
+                                <HistoryList entries={history.grade} points={points} missing={false} />
                             </div>
                         )}
                     </div>

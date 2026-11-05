@@ -507,7 +507,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
 
     it("includes a missing-work grade on the row of a student without a submission", async () => {
       await enrollStudent("ada", "Ada Lovelace");
-      const grade = await addMissingGrade("ada", 5, "Nothing turned in", {
+      const grade = await addMissingGrade("ada", 0, "Nothing turned in", {
         updatedAt: "2026-11-03T08:00:00.000Z",
         updatedBy: "owner",
       });
@@ -522,7 +522,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           studentEmail: "ada@example.com",
           gradingStatus: "missing-graded",
           missingGrade: {
-            score: 5,
+            score: 0,
             feedback: "Nothing turned in",
             gradedAt: grade.gradedAt,
             updatedAt: "2026-11-03T08:00:00.000Z",
@@ -675,7 +675,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
 
     it("returns the student's own missing-work grade when they have not submitted", async () => {
       const { uid, idToken } = await createEnrolledStudent();
-      const grade = await addMissingGrade(uid, 10, "Nothing turned in");
+      const grade = await addMissingGrade(uid, 0, "Nothing turned in");
       await addMissingGrade("zoe", 0, "Someone else's");
 
       const res = await getSubmissions(idToken);
@@ -685,7 +685,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
         role: "student",
         submission: null,
         missingGrade: {
-          score: 10,
+          score: 0,
           feedback: "Nothing turned in",
           gradedAt: grade.gradedAt,
           updatedAt: null,

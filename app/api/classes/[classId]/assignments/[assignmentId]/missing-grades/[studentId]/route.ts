@@ -4,7 +4,7 @@ import { getAdminDb } from "@/lib/firebaseAdmin";
 import { getClosesAt, hasClosed } from "@/lib/assignmentDeadline";
 import { getClassAccess } from "@/lib/classAccess";
 import { isStudentEnrolled } from "@/lib/classRoster";
-import { readJsonBody, readScoreAndFeedback } from "@/lib/gradeInput";
+import { readFeedback, readJsonBody } from "@/lib/gradeInput";
 import { appendHistory, entryFromStoredGrade, hasHistory } from "@/lib/gradeHistory";
 
 type RouteContext = {
@@ -21,14 +21,16 @@ type MissingGradeRequest = {
   /** The assignment's stored due date, which decides when submissions close. */
   dueDate: unknown;
   body: Record<string, unknown>;
-  score: number;
   feedback: string;
 };
 
+/** The score every missing-work grade stores. */
+const MISSING_SCORE = 0;
+
 /**
  * Checks that the caller is the class's professor or an admin, that the
- * assignment exists, and that the body holds a valid score and feedback.
- * Returns the parsed request, or an error response.
+ * assignment exists, and that the body holds valid feedback and no score
+ * other than 0. Returns the parsed request, or an error response.
  */
 async function readMissingGradeRequest(
   request: NextRequest,
@@ -75,17 +77,20 @@ async function readMissingGradeRequest(
     };
   }
 
-  const scoreAndFeedback = readScoreAndFeedback(
-    body,
-    assignmentDoc.data()?.points as number
-  );
-
-  if ("error" in scoreAndFeedback) {
+  if (body.score !== undefined && body.score !== MISSING_SCORE) {
     return {
       error: NextResponse.json(
-        { error: scoreAndFeedback.error },
+        { error: "A missing-work grade is always 0." },
         { status: 400 }
       ),
+    };
+  }
+
+  const feedback = readFeedback(body);
+
+  if ("error" in feedback) {
+    return {
+      error: NextResponse.json({ error: feedback.error }, { status: 400 }),
     };
   }
 
@@ -98,7 +103,7 @@ async function readMissingGradeRequest(
     assignmentRef,
     dueDate: assignmentDoc.data()?.dueDate,
     body,
-    ...scoreAndFeedback,
+    ...feedback,
   };
 }
 
@@ -143,8 +148,8 @@ function refuseWhileOpen(dueDate: unknown): NextResponse | null {
 }
 
 /**
- * Grades an enrolled student who has not submitted, with a score from 0 to the
- * assignment's points and optional feedback. Only allowed once submissions
+ * Grades an enrolled student who has not submitted with a score of 0 and
+ * optional feedback. Only allowed once submissions
  * have closed. Saves to the assignment's missingGrades collection and never
  * creates a submission. A 409 for a student who has submitted points to
  * normal grading, and a 409 for missing work already graded includes the
@@ -163,7 +168,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
       db,
       assignmentRef,
       dueDate,
-      score,
       feedback,
     } = gradeRequest;
 
@@ -207,14 +211,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
         studentId,
         classId,
         assignmentId,
-        score,
+        score: MISSING_SCORE,
         feedback,
         gradedBy: uid,
         gradedAt: new Date().toISOString(),
       };
       transaction.create(missingGradeRef, grade);
       appendHistory(transaction, missingGradeRef, {
-        score,
+        score: MISSING_SCORE,
         feedback,
         savedBy: uid,
         savedAt: grade.gradedAt,
@@ -245,8 +249,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
 }
 
 /**
- * Edits a missing-work grade's score and feedback. Takes the same body as
- * POST plus `lastSavedAt`, the grade's `updatedAt` (or `gradedAt` when never
+ * Edits a missing-work grade's feedback, keeping its score of 0. Takes the
+ * same body as POST plus `lastSavedAt`, the grade's `updatedAt` (or `gradedAt` when never
  * edited) as the professor saw it. A 409 for a grade saved since then
  * includes the stored grade. `gradedAt` and `gradedBy` keep the original
  * grading. Allowed while submissions are open, since the due date may have
@@ -257,8 +261,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const gradeRequest = await readMissingGradeRequest(request, context);
     if ("error" in gradeRequest) return gradeRequest.error;
 
-    const { studentId, uid, db, assignmentRef, body, score, feedback } =
-      gradeRequest;
+    const { studentId, uid, db, assignmentRef, body, feedback } = gradeRequest;
     const lastSavedAt = body.lastSavedAt;
 
     if (typeof lastSavedAt !== "string" || lastSavedAt === "") {
@@ -292,7 +295,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
       const recorded = await hasHistory(transaction, missingGradeRef);
       const changes = {
-        score,
+        score: MISSING_SCORE,
         feedback,
         updatedAt: new Date().toISOString(),
         updatedBy: uid,
@@ -305,7 +308,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       }
 
       appendHistory(transaction, missingGradeRef, {
-        score,
+        score: MISSING_SCORE,
         feedback,
         savedBy: uid,
         savedAt: changes.updatedAt,

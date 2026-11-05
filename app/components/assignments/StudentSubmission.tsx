@@ -1,4 +1,5 @@
 import type { Assignment, MissingGradeSummary, Submission } from "../Types";
+import MissingTag from "./MissingTag";
 
 type Props = {
     assignment: Assignment;
@@ -42,8 +43,9 @@ function MissingWorkGrade({
                     Missing-work grade
                 </p>
 
-                <p className="mt-1 text-xl font-semibold text-gray-900 dark:text-white">
-                    {`${missingGrade.score} / ${assignment.points}`}
+                <p className="mt-1 flex items-center gap-2 text-xl font-semibold text-gray-900 dark:text-white">
+                    <span>{`${missingGrade.score} / ${assignment.points}`}</span>
+                    <MissingTag />
                 </p>
 
                 {missingGrade.updatedAt && (
@@ -166,8 +168,11 @@ export default function StudentSubmission({
                         )}
 
                         {submission.submittedAfterMissingGrade && missingGrade && (
-                            <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
-                                {`Submitted after a missing-work grade of ${missingGrade.score} / ${assignment.points}`}
+                            <p className="mt-1 flex flex-wrap items-center gap-2 text-sm font-medium text-amber-600 dark:text-amber-400">
+                                <span>
+                                    {`Submitted after a missing-work grade of ${missingGrade.score} / ${assignment.points}`}
+                                </span>
+                                <MissingTag />
                             </p>
                         )}
                     </div>

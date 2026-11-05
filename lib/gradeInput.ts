@@ -16,6 +16,23 @@ export async function readJsonBody(
 }
 
 /**
+ * Reads a grade's optional feedback from a request body, trimmed. Returns it,
+ * or the message for a 400 response when it is over 5000 characters.
+ */
+export function readFeedback(
+  body: Record<string, unknown>
+): { feedback: string } | { error: string } {
+  const feedback =
+    typeof body.feedback === "string" ? body.feedback.trim() : "";
+
+  if (feedback.length > MAX_FEEDBACK_LENGTH) {
+    return { error: "Feedback must be 5000 characters or fewer." };
+  }
+
+  return { feedback };
+}
+
+/**
  * Reads a grade's score and feedback from a request body. The score must be a
  * number from 0 to `points`, and the trimmed feedback at most 5000 characters.
  * Returns the parsed values, or the message for a 400 response.
@@ -25,8 +42,6 @@ export function readScoreAndFeedback(
   points: number
 ): { score: number; feedback: string } | { error: string } {
   const score = body.score;
-  const feedback =
-    typeof body.feedback === "string" ? body.feedback.trim() : "";
 
   if (
     typeof score !== "number" ||
@@ -37,9 +52,7 @@ export function readScoreAndFeedback(
     return { error: `Score must be a number from 0 to ${points}.` };
   }
 
-  if (feedback.length > MAX_FEEDBACK_LENGTH) {
-    return { error: "Feedback must be 5000 characters or fewer." };
-  }
+  const feedback = readFeedback(body);
 
-  return { score, feedback };
+  return "error" in feedback ? feedback : { score, ...feedback };
 }

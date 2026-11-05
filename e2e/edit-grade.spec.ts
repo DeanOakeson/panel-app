@@ -49,9 +49,11 @@ test.describe("Professor edits a saved grade", () => {
     await reloaded.getByText("History", { exact: true }).click();
     const versions = reloaded.getByRole("listitem");
     await expect(versions).toHaveCount(2);
-    await expect(versions.nth(0)).toContainText(`${CARA_SCORE} / 100 · Graded by ${scenario.professor.name}`);
+    await expect(versions.nth(0)).toContainText(`${CARA_SCORE} / 100`);
+    await expect(versions.nth(0)).toContainText(`Graded by ${scenario.professor.name}`);
     await expect(versions.nth(0)).toContainText(CARA_FEEDBACK);
-    await expect(versions.nth(1)).toContainText(`95 / 100 · Edited by ${scenario.professor.name}`);
+    await expect(versions.nth(1)).toContainText("95 / 100");
+    await expect(versions.nth(1)).toContainText(`Edited by ${scenario.professor.name}`);
     await expect(versions.nth(1)).toContainText(EDITED_FEEDBACK);
   });
 

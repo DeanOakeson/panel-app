@@ -15,6 +15,8 @@ import {
 } from "@/lib/gradingStatus";
 import GradeForm from "./GradeForm";
 import GradeHistory from "./GradeHistory";
+import MissingTag from "./MissingTag";
+import MissingWorkForm from "./MissingWorkForm";
 import type {
     Assignment,
     Grade,
@@ -558,8 +560,11 @@ function SubmissionCard({
                 )}
 
                 {student.submittedAfterMissingGrade && student.missingGrade && (
-                    <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
-                        {`Submitted after a missing-work grade of ${student.missingGrade.score} / ${assignment.points}`}
+                    <p className="mt-1 flex flex-wrap items-center gap-2 text-sm font-medium text-amber-600 dark:text-amber-400">
+                        <span>
+                            {`Submitted after a missing-work grade of ${student.missingGrade.score} / ${assignment.points}`}
+                        </span>
+                        <MissingTag />
                     </p>
                 )}
             </div>
@@ -668,8 +673,9 @@ type MissingWorkCardProps = {
 };
 
 /**
- * Shows one student without a submission, their missing-work grade, and the
- * form to grade or edit it. A grade can only be added once submissions close.
+ * Shows one student without a submission, their missing-work grade of 0, and
+ * the form to mark the work missing or edit the grade's feedback. Work can
+ * only be marked missing once submissions close.
  */
 function MissingWorkCard({
     classId,
@@ -698,8 +704,9 @@ function MissingWorkCard({
                             Missing-work grade
                         </p>
 
-                        <p className="font-medium text-gray-900 dark:text-white">
-                            {`${missingGrade.score} / ${assignment.points}`}
+                        <p className="flex items-center gap-2 font-medium text-gray-900 dark:text-white">
+                            <span>{`${missingGrade.score} / ${assignment.points}`}</span>
+                            <MissingTag />
                         </p>
 
                         <p className="text-xs text-gray-500 dark:text-zinc-400">
@@ -749,23 +756,21 @@ function MissingWorkCard({
                         onClick={() => onEditingChange(true)}
                         className={secondaryButtonClass}
                     >
-                        {missingGrade ? "Edit missing-work grade" : "Grade missing work"}
+                        {missingGrade ? "Edit feedback" : "Mark missing"}
                     </button>
                 </div>
             )}
 
             {editing && (
                 <div className="mt-4 border-t border-gray-200 pt-4 dark:border-zinc-700">
-                    <GradeForm
+                    <MissingWorkForm
                         classId={classId}
                         assignmentId={assignment.id}
                         studentId={student.studentId}
-                        submittedAt={null}
                         points={assignment.points}
                         editing={
                             missingGrade
                                 ? {
-                                      score: missingGrade.score,
                                       feedback: missingGrade.feedback,
                                       lastSavedAt:
                                           missingGrade.updatedAt ?? missingGrade.gradedAt,
