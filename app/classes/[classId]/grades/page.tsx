@@ -461,7 +461,7 @@ function FilterStatus({
     return (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-blue-50 py-1 pl-3 pr-1 text-sm text-blue-950 dark:bg-blue-950 dark:text-blue-100">
             <p>
-                {`Showing ${shown} of ${plural(gradebook.students.length, "student")} · `}
+                {`Showing ${plural(shown, "student")} · `}
                 <span className="font-semibold">{filterLabel(filter.filter)}</span>
                 {` · ${assignment?.name ?? ""}`}
             </p>
@@ -514,7 +514,6 @@ function GradebookView({
      * it leaves. Clearing puts focus on the column's filter button.
      */
     function changeFilter(next: GradebookFilter | null) {
-        const total = plural(gradebook.students.length, "student");
         const cleared = filter;
 
         setStoredFilter(next);
@@ -524,11 +523,11 @@ function GradebookView({
             const assignment = gradebook.assignments.find((each) => each.id === next.assignmentId);
             const count = filterStudents(gradebook, next).length;
 
-            setAnnouncement(`Showing ${count} of ${total}: ${filterLabel(next.filter)} on ${assignment?.name}.`);
+            setAnnouncement(`Showing ${plural(count, "student")}: ${filterLabel(next.filter)} on ${assignment?.name}.`);
             return;
         }
 
-        setAnnouncement(`Showing all ${total}.`);
+        setAnnouncement("Showing all students.");
 
         if (cleared) {
             requestAnimationFrame(() =>

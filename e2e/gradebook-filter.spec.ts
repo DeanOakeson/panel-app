@@ -18,7 +18,7 @@ async function expectRows(page: Page, names: string[]) {
 
 /** Returns the toolbar's line that says which students a filter shows. */
 function filterStatus(page: Page) {
-  return page.getByText(/^Showing \d+ of \d+ students · /);
+  return page.getByText(/^Showing \d+ students? · /);
 }
 
 test.describe("Gradebook filter", () => {
@@ -45,9 +45,9 @@ test.describe("Gradebook filter", () => {
     await expect(menu).toBeHidden();
 
     await expectRows(page, ["Ben Carter", "Cara Diaz", "Dev Patel"]);
-    await expect(filterStatus(page)).toHaveText(`Showing 3 of 4 students · Not turned in · ${HOMEWORK}`);
+    await expect(filterStatus(page)).toHaveText(`Showing 3 students · Not turned in · ${HOMEWORK}`);
     await expect(page.getByRole("status").filter({ hasText: "Showing" })).toHaveText(
-      `Showing 3 of 4 students: Not turned in on ${HOMEWORK}.`
+      `Showing 3 students: Not turned in on ${HOMEWORK}.`
     );
     await expect(filterButton(page, HOMEWORK)).toHaveAccessibleName(
       `Filter students by ${HOMEWORK}, 1 to grade, showing not turned in`
@@ -62,7 +62,7 @@ test.describe("Gradebook filter", () => {
     await expectRows(page, ["Ava Martin", "Ben Carter", "Cara Diaz", "Dev Patel"]);
     await expect(filterStatus(page)).toHaveCount(0);
     await expect(filterButton(page, HOMEWORK)).toBeFocused();
-    await expect(page.getByRole("status").filter({ hasText: "Showing" })).toHaveText("Showing all 4 students.");
+    await expect(page.getByRole("status").filter({ hasText: "Showing" })).toHaveText("Showing all students.");
   });
 
   test("keeps a To grade filter through grading, and offers to clear it when no one is left", async ({ page, scenario }) => {
@@ -81,7 +81,7 @@ test.describe("Gradebook filter", () => {
     await expect(card).toContainText("18 / 20");
     await page.getByRole("link", { name: "← Back to grades" }).click();
 
-    await expect(filterStatus(page)).toHaveText(`Showing 0 of 4 students · To grade · ${HOMEWORK}`);
+    await expect(filterStatus(page)).toHaveText(`Showing 0 students · To grade · ${HOMEWORK}`);
     await expect(page.getByRole("rowheader")).toHaveCount(0);
     await expect(page.getByRole("table").getByText("No students match")).toBeVisible();
 

@@ -58,9 +58,14 @@ const DROPPED_ENTRY: Entry = {
     meaning: "Not enrolled in the class",
 };
 
+/** Column spans that let the hint fill the last row of a four-column key, by how many entries sit in that row. */
+const HINT_SPAN = ["@5xl:col-span-4", "@5xl:col-span-3", "@5xl:col-span-2", "@5xl:col-span-1"];
+
 /**
  * Explains each kind of gradebook cell in a small grid, with each sample
- * framed as it looks in a cell, and the grid's `hint` on its last line.
+ * framed as it looks in a cell, and the grid's `hint` after them. The grid
+ * has 2, 3 or 4 columns by the key's own width. At 4 columns the hint shares
+ * the last row; below that it sits on a line of its own under a rule.
  * `showDropped` adds the entry for students who left the class, shown only
  * when the grid has one.
  */
@@ -79,13 +84,13 @@ export default function GradebookLegend({
         <section
             id={id}
             aria-labelledby={`${id}-heading`}
-            className="rounded-lg border border-gray-200 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-gray-900"
+            className="@container rounded-lg border border-gray-200 bg-white px-3 py-1.5 dark:border-zinc-700 dark:bg-gray-900"
         >
             <h2 id={`${id}-heading`} className="sr-only">
                 Key
             </h2>
 
-            <ul className="grid grid-cols-[repeat(2,auto)] justify-start gap-x-6 gap-y-1.5 text-[13px] text-gray-700 lg:grid-cols-[repeat(3,auto)] dark:text-zinc-300">
+            <ul className="grid grid-cols-[repeat(2,auto)] justify-start gap-x-6 gap-y-1 text-[13px] text-gray-700 @3xl:grid-cols-[repeat(3,auto)] @5xl:grid-cols-[repeat(4,auto)] dark:text-zinc-300">
                 {entries.map((entry) => (
                     <li key={entry.key} className="flex items-center gap-2">
                         <span
@@ -101,14 +106,14 @@ export default function GradebookLegend({
                         </span>
                     </li>
                 ))}
-            </ul>
 
-            <p
-                aria-hidden="true"
-                className="mt-2 border-t border-gray-200 pt-1.5 text-sm text-gray-600 dark:border-zinc-700 dark:text-zinc-300"
-            >
-                {hint}
-            </p>
+                <li
+                    aria-hidden="true"
+                    className={`col-span-full mt-0.5 border-t border-gray-200 pt-1.5 text-sm text-gray-600 [contain:inline-size] @5xl:mt-0 @5xl:border-t-0 @5xl:pt-0 dark:border-zinc-700 dark:text-zinc-300 ${HINT_SPAN[entries.length % 4]}`}
+                >
+                    {hint}
+                </li>
+            </ul>
         </section>
     );
 }
