@@ -26,7 +26,7 @@ const ENTRIES: Entry[] = [
     {
         key: "missing-graded",
         example: (
-            <span className="flex flex-col items-center gap-0.5">
+            <span className="flex items-center gap-1.5">
                 <span className="whitespace-nowrap tabular-nums">
                     <span className="text-base font-semibold text-gray-900 dark:text-white">0</span>
                     <span className="text-sm text-gray-600 dark:text-zinc-300">/10</span>
@@ -81,7 +81,7 @@ export default function GradebookLegend({ id, showDropped }: { id: string; showD
                     <li key={entry.key} className="flex items-center gap-2">
                         <span
                             aria-hidden="true"
-                            className="flex min-h-9 min-w-18 shrink-0 items-center justify-center rounded-sm border border-gray-200 bg-white px-2 py-0.5 dark:border-zinc-700 dark:bg-gray-900"
+                            className="flex h-7 min-w-9 shrink-0 items-center justify-center rounded-sm border border-gray-200 bg-white px-1.5 dark:border-zinc-700 dark:bg-gray-900"
                         >
                             {entry.example}
                         </span>
