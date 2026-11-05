@@ -17,6 +17,7 @@ import GradeForm from "./GradeForm";
 import GradeHistory from "./GradeHistory";
 import MissingTag from "./MissingTag";
 import MissingWorkForm from "./MissingWorkForm";
+import StatusBadge from "./StatusBadge";
 import type {
     Assignment,
     Grade,
@@ -41,6 +42,8 @@ type Props = {
     onGraded: (studentId: string, grade: Grade) => void;
     /** Receives the missing-work grade the server saved for a student without a submission. */
     onMissingGraded: (studentId: string, grade: MissingGrade) => void;
+    /** A student whose card is highlighted, scrolled into view and focused once the list loads. */
+    focusStudentId?: string | null;
 };
 
 type Filter = "all" | "to-grade" | "graded" | "missing";
@@ -51,16 +54,6 @@ const FILTERS: { value: Filter; empty: string }[] = [
     { value: "graded", empty: "No submissions are graded yet." },
     { value: "missing", empty: "Every student has submitted." },
 ];
-
-const BADGE_CLASSES: Record<GradingStatus, string> = {
-    "needs-grading": "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200",
-    resubmitted: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
-    "submitted-after-missing":
-        "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
-    graded: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200",
-    missing: "bg-gray-100 text-gray-700 dark:bg-zinc-800 dark:text-zinc-300",
-    "missing-graded": "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200",
-};
 
 /** How long a card graded under Needs grading stays before it leaves the view. */
 const LEAVE_DELAY = 1500;
@@ -150,20 +143,18 @@ function describeCounts(counts: GradingCounts, closed: boolean) {
     return parts.join(" · ");
 }
 
+/** Returns a student card's classes, with a ring on the card a link pointed to. */
+function cardClass(highlighted: boolean) {
+    return `scroll-mt-6 rounded-lg border p-4 focus:outline-none ${
+        highlighted
+            ? "border-blue-500 ring-2 ring-blue-500/60 dark:border-blue-400 dark:ring-blue-400/60"
+            : "border-gray-200 dark:border-zinc-700"
+    }`;
+}
+
 /** Returns the name a professor knows a student by. */
 function displayName(student: RosterStudent) {
     return student.studentName ?? student.studentEmail ?? "Unknown student";
-}
-
-/** Shows a student's grading status as a colored label. */
-function StatusBadge({ status, closed }: { status: GradingStatus; closed: boolean }) {
-    return (
-        <span
-            className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${BADGE_CLASSES[status]}`}
-        >
-            {gradingStatusLabel(status, closed)}
-        </span>
-    );
 }
 
 /** Shows a student's name, with their email or ID beneath it, and their status. */
@@ -207,6 +198,7 @@ export default function ProfessorSubmissions({
     canGradeSubmissions,
     onGraded,
     onMissingGraded,
+    focusStudentId = null,
 }: Props) {
     const [alreadyGradedIds, setAlreadyGradedIds] = useState<ReadonlySet<string>>(
         new Set()
@@ -225,6 +217,41 @@ export default function ProfessorSubmissions({
 
         return () => timers.forEach((timer) => clearTimeout(timer));
     }, []);
+
+    const focusTarget = focusStudentId
+        ? students.find((student) => student.studentId === focusStudentId)
+        : undefined;
+    const focusTargetId = focusTarget?.studentId ?? null;
+    const focusTargetName = focusTarget ? displayName(focusTarget) : "";
+    const focusedOnce = useRef(false);
+
+    // Brings the linked student's card into view once, after the list renders
+    useEffect(() => {
+        if (loading || !focusTargetId || focusedOnce.current) return;
+
+        /** Scrolls the card to the middle of the view, focuses it and announces it. */
+        function focusCard() {
+            const card = document.getElementById(`student-${focusTargetId}`);
+
+            if (!card) return false;
+
+            focusedOnce.current = true;
+            card.scrollIntoView({ block: "center" });
+            card.focus({ preventScroll: true });
+            setAnnouncement(`Showing ${focusTargetName}.`);
+            return true;
+        }
+
+        const frame = requestAnimationFrame(() => {
+            if (focusCard()) return;
+
+            // The card is hidden by a filter, so show everyone first
+            setFilter("all");
+            requestAnimationFrame(focusCard);
+        });
+
+        return () => cancelAnimationFrame(frame);
+    }, [loading, focusTargetId, focusTargetName]);
 
     const counts = countGradingStatuses(
         students.map((student) => student.gradingStatus)
@@ -441,6 +468,7 @@ export default function ProfessorSubmissions({
                                 isMissingRow(student) ? (
                                     <MissingWorkCard
                                         key={student.studentId}
+                                        highlighted={student.studentId === focusTargetId}
                                         classId={classId}
                                         assignment={assignment}
                                         student={student}
@@ -457,6 +485,7 @@ export default function ProfessorSubmissions({
                                 ) : (
                                     <SubmissionCard
                                         key={student.studentId}
+                                        highlighted={student.studentId === focusTargetId}
                                         classId={classId}
                                         assignment={assignment}
                                         student={student}
@@ -493,6 +522,8 @@ type SubmissionCardProps = {
     editing: boolean;
     /** Whether another session saved the grade before this one. */
     savedElsewhere: boolean;
+    /** Whether the card is the one a link pointed to. */
+    highlighted: boolean;
     onEditingChange: (open: boolean) => void;
     onSaved: (studentId: string, grade: Grade, alreadyGraded: boolean) => void;
 };
@@ -506,13 +537,18 @@ function SubmissionCard({
     canGrade,
     editing,
     savedElsewhere,
+    highlighted,
     onEditingChange,
     onSaved,
 }: SubmissionCardProps) {
     const graded = student.grade !== null && !!student.gradedAt;
 
     return (
-        <article className="rounded-lg border border-gray-200 p-4 dark:border-zinc-700">
+        <article
+            id={`student-${student.studentId}`}
+            tabIndex={-1}
+            className={cardClass(highlighted)}
+        >
             <StudentHeading student={student} closed={closed} />
 
             <div className="mt-3">
@@ -668,6 +704,8 @@ type MissingWorkCardProps = {
     editing: boolean;
     /** Whether another session saved the missing-work grade before this one. */
     savedElsewhere: boolean;
+    /** Whether the card is the one a link pointed to. */
+    highlighted: boolean;
     onEditingChange: (open: boolean) => void;
     onSaved: (studentId: string, grade: MissingGrade, alreadyGraded: boolean) => void;
 };
@@ -684,13 +722,18 @@ function MissingWorkCard({
     closed,
     editing,
     savedElsewhere,
+    highlighted,
     onEditingChange,
     onSaved,
 }: MissingWorkCardProps) {
     const missingGrade = student.missingGrade;
 
     return (
-        <article className="rounded-lg border border-gray-200 p-4 dark:border-zinc-700">
+        <article
+            id={`student-${student.studentId}`}
+            tabIndex={-1}
+            className={cardClass(highlighted)}
+        >
             <StudentHeading student={student} closed={closed} />
 
             <p className="mt-2 text-sm text-gray-500 dark:text-zinc-400">

@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { formatClosesAt, hasClosed, whenPassed } from "@/lib/assignmentDeadline";
+import { announceGradeSaved } from "@/lib/gradeEvents";
 import { getGradingStatus, isMissingRow } from "@/lib/gradingStatus";
 
 import AssignmentInfo from "../../../../components/assignments/AssignmentInfo";
@@ -29,6 +30,9 @@ export default function AssignmentDetailPage() {
     }>();
 
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const focusStudentId = searchParams.get("student");
+    const fromGrades = searchParams.get("from") === "grades";
 
     const [assignment, setAssignment] = useState<Assignment | null>(null);
     const [submission, setSubmission] = useState<Submission | null>(null);
@@ -168,6 +172,7 @@ export default function AssignmentDetailPage() {
     // Updates only the graded student in place, so other students' grade
     // forms stay mounted with their unsaved drafts and the list keeps its order
     function handleGraded(studentId: string, grade: Grade) {
+        announceGradeSaved(classId);
         setStudents((current) =>
             current.map((student) =>
                 student.studentId === studentId && !isMissingRow(student)
@@ -192,6 +197,7 @@ export default function AssignmentDetailPage() {
 
     // Updates only the student whose missing work was graded, in place
     function handleMissingGraded(studentId: string, grade: MissingGrade) {
+        announceGradeSaved(classId);
         setStudents((current) =>
             current.map((student) =>
                 student.studentId === studentId && isMissingRow(student)
@@ -276,10 +282,10 @@ export default function AssignmentDetailPage() {
     return (
         <div className="mx-auto w-full max-w-3xl">
             <Link
-                href={`/classes/${classId}/assignments`}
+                href={`/classes/${classId}/${fromGrades ? "grades" : "assignments"}`}
                 className="text-sm text-blue-600 hover:text-blue-500 dark:text-blue-400"
             >
-                ← Back to assignments
+                {fromGrades ? "← Back to grades" : "← Back to assignments"}
             </Link>
 
             {loading ? (
@@ -303,6 +309,7 @@ export default function AssignmentDetailPage() {
                             canGradeSubmissions={isProfessor}
                             onGraded={handleGraded}
                             onMissingGraded={handleMissingGraded}
+                            focusStudentId={focusStudentId}
                         />
                     ) : (
                         <>
