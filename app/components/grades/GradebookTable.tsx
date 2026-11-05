@@ -6,6 +6,7 @@ import {
     describeCell,
     gridLayout,
     moveInGrid,
+    STUDENT_COLUMN_WIDTH,
     studentLabel,
     type Gradebook,
     type GradebookAssignment,
@@ -27,6 +28,9 @@ type Props = {
 
 const HINT_ID = "gradebook-keys-hint";
 
+/** The scroll container's left and right borders together, in pixels. */
+const CONTAINER_BORDER = 2;
+
 const GRID_KEYS: readonly string[] = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"];
 
 /** Returns the attribute value that finds a cell's button again, such as after its panel closes. */
@@ -47,7 +51,7 @@ export function revealInGrid(element: Element) {
     element.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
-/** Returns a short due line for a column header, like "Due Oct 30". */
+/** Returns a short due line for a column header, like "Due Nov 8" or "Closed Oct 30". */
 function shortDue(assignment: GradebookAssignment): string {
     if (assignment.closesAt) {
         const day = new Intl.DateTimeFormat("en-US", {
@@ -56,7 +60,7 @@ function shortDue(assignment: GradebookAssignment): string {
             day: "numeric",
         }).format(new Date(assignment.closesAt));
 
-        return `Due ${day}`;
+        return `${assignment.closed ? "Closed" : "Due"} ${day}`;
     }
 
     return assignment.dueDate ? `Due ${assignment.dueDate}` : "No due date";
@@ -75,17 +79,17 @@ function GradingSummary({ assignment }: { assignment: GradebookAssignment }) {
     }
 
     if (submitted === 0) {
-        return <span className="text-gray-600 dark:text-zinc-300">Nothing submitted</span>;
+        return <span className="text-gray-600 dark:text-zinc-300">None turned in</span>;
     }
 
     return <span className="font-semibold text-green-700 dark:text-green-400">All graded</span>;
 }
 
 /**
- * Shows a student's name, their email and a Not enrolled tag for someone who
- * left. `compact` leaves the email to the name's hover title.
+ * Shows a student's name, with their email in its hover title, and a Not
+ * enrolled tag for someone who left.
  */
-function StudentHeader({ student, compact }: { student: GradebookStudent; compact: boolean }) {
+function StudentHeader({ student }: { student: GradebookStudent }) {
     const label = studentLabel(student);
     const title = student.name && student.email ? `${student.name} (${student.email})` : label;
 
@@ -94,15 +98,6 @@ function StudentHeader({ student, compact }: { student: GradebookStudent; compac
             <p className="truncate font-medium text-gray-900 dark:text-white" title={title ?? undefined}>
                 {label ?? "Unknown student"}
             </p>
-
-            {!compact && student.name && student.email && (
-                <p
-                    className="truncate text-sm font-normal text-gray-600 dark:text-zinc-300"
-                    title={student.email}
-                >
-                    {student.email}
-                </p>
-            )}
 
             {!label && (
                 <p className="truncate text-sm font-normal text-gray-600 dark:text-zinc-300">
@@ -148,7 +143,7 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
     const headerRef = useRef<HTMLTableSectionElement>(null);
     const scrollerRef = useRef<HTMLDivElement>(null);
     const [headerHeight, setHeaderHeight] = useState(0);
-    const [available, setAvailable] = useState<number | null>(null);
+    const [room, setRoom] = useState<number | null>(null);
     const [active, setActive] = useState<GridPosition | null>(null);
 
     // Keeps the scroll padding equal to the header row, whose height follows the names' wrapping
@@ -164,23 +159,26 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
         return () => observer.disconnect();
     }, []);
 
-    // Sizes the columns to the width the page gives the grid
+    // Sizes the columns to the room the page gives the grid, less the frozen
+    // column, the container's border and any vertical scrollbar
     useEffect(() => {
-        const container = scrollerRef.current?.parentElement;
-        if (!container) return;
+        const scroller = scrollerRef.current;
+        const container = scroller?.parentElement;
+        if (!scroller || !container) return;
 
-        const observer = new ResizeObserver(([entry]) => {
-            setAvailable(entry.contentRect.width);
+        const observer = new ResizeObserver(() => {
+            const scrollbar = scroller.offsetWidth - scroller.clientWidth - CONTAINER_BORDER;
+
+            setRoom(container.clientWidth - CONTAINER_BORDER - scrollbar - STUDENT_COLUMN_WIDTH);
         });
 
         observer.observe(container);
+        observer.observe(scroller);
         return () => observer.disconnect();
     }, []);
 
-    const { compact, studentWidth, columnWidth, overflows } = gridLayout(
-        available,
-        assignments.length
-    );
+    const { columnWidth, overflows } = gridLayout(room, assignments.length);
+    const studentWidth = STUDENT_COLUMN_WIDTH;
     const studentColumnStyle = { width: studentWidth, minWidth: studentWidth, maxWidth: studentWidth };
     const columnStyle = { width: columnWidth, minWidth: columnWidth, maxWidth: columnWidth };
 
@@ -282,11 +280,11 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
                                 key={assignment.id}
                                 scope="col"
                                 style={{ ...columnStyle, scrollSnapAlign: "start" }}
-                                className={`sticky top-0 z-20 bg-gray-50 px-2 py-2 text-left align-top font-normal dark:bg-gray-800 ${stickyCellBase}`}
+                                className={`sticky top-0 z-20 bg-gray-50 px-2 py-1.5 text-left align-top font-normal dark:bg-gray-800 ${stickyCellBase}`}
                             >
                                 <Link
                                     href={`/classes/${gradebook.class.id}/assignments/${assignment.id}`}
-                                    title={assignment.name}
+                                    title={`${assignment.name} (out of ${assignment.points})`}
                                     tabIndex={tabIndexAt(-1, col)}
                                     data-grid-row={-1}
                                     data-grid-col={col}
@@ -295,13 +293,10 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
                                     {assignment.name}
                                 </Link>
 
-                                <p className="mt-0.5 text-sm leading-5 text-gray-700 dark:text-zinc-300">
-                                    Out of {assignment.points}
-                                </p>
+                                <span className="sr-only">Out of {assignment.points}.</span>
 
                                 <p className="text-sm leading-5 text-gray-700 dark:text-zinc-300">
                                     {shortDue(assignment)}
-                                    {assignment.closed && " · Closed"}
                                 </p>
 
                                 <p className="text-sm leading-5">
@@ -323,7 +318,7 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
                                     style={studentColumnStyle}
                                     className={`sticky left-0 z-10 border-r px-3 py-1 text-left align-middle font-normal ${stickyCellBase} ${bodyBackground}`}
                                 >
-                                    <StudentHeader student={student} compact={compact} />
+                                    <StudentHeader student={student} />
                                 </th>
 
                                 {assignments.map((assignment, col) => {
@@ -341,7 +336,7 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
                                     return (
                                         <td
                                             key={assignment.id}
-                                            className={`p-0.5 align-middle ${stickyCellBase} ${bodyBackground}`}
+                                            className={`p-px align-middle ${stickyCellBase} ${bodyBackground}`}
                                         >
                                             {cell ? (
                                                 <button
@@ -354,7 +349,7 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
                                                     data-grid-col={col}
                                                     data-cell={cellDataKey(key)}
                                                     onClick={() => onSelect(key)}
-                                                    className={`flex w-full items-center justify-center rounded-md px-2 py-1 ${compact ? "min-h-11" : "min-h-12"} ${cellInteraction} ${focusRing} ${
+                                                    className={`relative flex min-h-10 w-full items-center justify-center rounded-md px-2 py-1 ${cellInteraction} ${focusRing} ${
                                                         isSelected
                                                             ? "bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950 dark:ring-blue-400"
                                                             : ""
@@ -363,7 +358,7 @@ export default function GradebookTable({ gradebook, selected, onSelect }: Props)
                                                     <GradeCellContent display={display} points={assignment.points} />
                                                 </button>
                                             ) : (
-                                                <span className={`flex items-center justify-center text-base text-gray-500 dark:text-zinc-400 ${compact ? "min-h-11" : "min-h-12"}`}>
+                                                <span className="flex min-h-10 items-center justify-center text-base text-gray-500 dark:text-zinc-400">
                                                     <span aria-hidden="true">–</span>
                                                     <span className="sr-only">{display.srText}</span>
                                                 </span>

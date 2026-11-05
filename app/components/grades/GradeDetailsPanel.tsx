@@ -11,6 +11,7 @@ import {
     type GradebookCell,
     type GradebookStudent,
 } from "@/lib/gradebook";
+import { needsGrade, type GradingStatus } from "@/lib/gradingStatus";
 import MissingTag from "../assignments/MissingTag";
 import StatusBadge from "../assignments/StatusBadge";
 import { displayStudentName } from "./GradebookTable";
@@ -32,6 +33,12 @@ type Props = {
 };
 
 const TITLE_ID = "grade-details-title";
+
+/** Why work waits to be graded, beside the Needs grading badge, when it is more than new work. */
+const GRADING_REASONS: Partial<Record<GradingStatus, string>> = {
+    resubmitted: "Resubmitted after grading",
+    "submitted-after-missing": "Turned in after a missing-work grade",
+};
 
 /** Returns a cell's score line and the note beneath it. */
 function describeScore(
@@ -203,8 +210,18 @@ function PanelBody({
             </header>
 
             <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
-                <div>
-                    <StatusBadge status={cell.status} closed={assignment.closed} />
+                <div className="flex flex-wrap items-center gap-2">
+                    {needsGrade(cell.status) ? (
+                        <StatusBadge status="needs-grading" closed={assignment.closed} />
+                    ) : (
+                        <StatusBadge status={cell.status} closed={assignment.closed} />
+                    )}
+
+                    {GRADING_REASONS[cell.status] && (
+                        <span className="text-sm text-gray-700 dark:text-zinc-300">
+                            {GRADING_REASONS[cell.status]}
+                        </span>
+                    )}
                 </div>
 
                 <section aria-labelledby="grade-details-score">
@@ -212,7 +229,7 @@ function PanelBody({
                         id="grade-details-score"
                         className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-zinc-300"
                     >
-                        {cell.status === "resubmitted" ? "Earlier score" : "Score"}
+                        {GRADING_REASONS[cell.status] ? "Earlier score" : "Score"}
                     </h3>
 
                     {score.score !== null ? (

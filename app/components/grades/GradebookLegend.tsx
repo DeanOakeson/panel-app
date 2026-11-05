@@ -1,24 +1,6 @@
 import type { ReactNode } from "react";
-import type { CellDisplay } from "@/lib/gradebook";
-import GradeCellContent, { FeedbackIcon } from "./GradeCellContent";
-
-const SAMPLE_POINTS = 100;
-
-/** Returns a sample cell for the key, with every field not given left empty. */
-function sample(fields: Partial<CellDisplay>): CellDisplay {
-    return {
-        primary: null,
-        primaryMuted: false,
-        primaryLabel: null,
-        badge: null,
-        missingTag: false,
-        hasFeedback: false,
-        placeholder: null,
-        srText: "",
-        action: null,
-        ...fields,
-    };
-}
+import { BADGE_CLASSES } from "../assignments/StatusBadge";
+import { FeedbackIcon, SmallMissingTag } from "./GradeCellContent";
 
 type Entry = {
     key: string;
@@ -28,75 +10,51 @@ type Entry = {
     meaning: string;
 };
 
+/** Shows a status badge as the cells do. */
+function Badge({ label, tone }: { label: string; tone: keyof typeof BADGE_CLASSES }) {
+    return (
+        <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${BADGE_CLASSES[tone]}`}>
+            {label}
+        </span>
+    );
+}
+
 const ENTRIES: Entry[] = [
+    {
+        key: "needs-grading",
+        example: <Badge label="Needs grading" tone="needs-grading" />,
+        spoken: "Needs grading:",
+        meaning: "To grade",
+    },
     {
         key: "feedback",
         example: <FeedbackIcon />,
         spoken: "Speech bubble:",
-        meaning: "Has feedback",
-    },
-    {
-        key: "needs-grading",
-        example: (
-            <GradeCellContent
-                display={sample({ badge: { label: "Needs grading", tone: "needs-grading" } })}
-                points={SAMPLE_POINTS}
-            />
-        ),
-        spoken: "Needs grading:",
-        meaning: "Ready to grade",
-    },
-    {
-        key: "resubmitted",
-        example: (
-            <GradeCellContent
-                display={sample({ badge: { label: "Resubmitted", tone: "resubmitted" } })}
-                points={SAMPLE_POINTS}
-            />
-        ),
-        spoken: "Resubmitted:",
-        meaning: "New version to grade",
-    },
-    {
-        key: "submitted-after-missing",
-        example: (
-            <GradeCellContent
-                display={sample({
-                    badge: { label: "Needs grading", tone: "submitted-after-missing" },
-                })}
-                points={SAMPLE_POINTS}
-            />
-        ),
-        spoken: "Needs grading in amber:",
-        meaning: "Turned in after Missing",
-    },
-    {
-        key: "missing",
-        example: (
-            <GradeCellContent
-                display={sample({ badge: { label: "Missing", tone: "missing" } })}
-                points={SAMPLE_POINTS}
-            />
-        ),
-        spoken: "Missing:",
-        meaning: "Past due, no grade",
+        meaning: "Feedback",
     },
     {
         key: "missing-graded",
         example: (
-            <GradeCellContent
-                display={sample({ primary: "0", missingTag: true })}
-                points={SAMPLE_POINTS}
-            />
+            <span className="flex items-center gap-1">
+                <span className="tabular-nums">
+                    <span className="font-semibold text-gray-900 dark:text-white">0</span>
+                    <span className="text-gray-600 dark:text-zinc-300">/10</span>
+                </span>
+                <SmallMissingTag />
+            </span>
         ),
         spoken: "0 with a Missing tag:",
         meaning: "Missing-work grade",
     },
     {
+        key: "missing",
+        example: <Badge label="Missing" tone="missing" />,
+        spoken: "Missing:",
+        meaning: "Past due",
+    },
+    {
         key: "not-submitted",
-        example: (
-            <GradeCellContent display={sample({ placeholder: "Not submitted" })} points={SAMPLE_POINTS} />
-        ),
+        example: <span className="whitespace-nowrap text-gray-600 dark:text-zinc-300">Not submitted</span>,
         spoken: "Not submitted:",
         meaning: "Still open",
     },
@@ -106,7 +64,7 @@ const DROPPED_ENTRY: Entry = {
     key: "dropped",
     example: <span aria-hidden="true" className="px-1 text-base text-gray-500 dark:text-zinc-400">–</span>,
     spoken: "Dash:",
-    meaning: "Not enrolled then",
+    meaning: "Not enrolled",
 };
 
 /**
@@ -123,15 +81,11 @@ export default function GradebookLegend({ id, showDropped }: { id: string; showD
             aria-labelledby={`${id}-heading`}
             className="relative rounded-lg border border-gray-200 bg-white px-3 py-1.5 dark:border-zinc-700 dark:bg-gray-900"
         >
-            <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-gray-800 dark:text-zinc-200">
-                <li>
-                    <h2
-                        id={`${id}-heading`}
-                        className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-zinc-300"
-                    >
-                        Key
-                    </h2>
-                </li>
+            <h2 id={`${id}-heading`} className="sr-only">
+                Key
+            </h2>
+
+            <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-gray-800 dark:text-zinc-200">
 
                 {entries.map((entry) => (
                     <li key={entry.key} className="flex items-center gap-1.5">

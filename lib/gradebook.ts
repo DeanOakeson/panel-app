@@ -310,13 +310,15 @@ export type CellAction = {
 export type CellDisplay = {
   /** The score shown in the cell, or null when the cell shows no score. */
   primary: string | null;
-  /** Whether the score is shown muted, beneath a badge, because new work waits to be graded. */
-  primaryMuted: boolean;
-  /** Text shown before a muted score, like "earlier:". */
-  primaryLabel: string | null;
   badge: CellBadge | null;
+  /**
+   * Why work waits to be graded when it is more than a new submission, with
+   * the score that stands until then, like "Resubmitted" and "earlier 82/100".
+   */
+  reason: { label: string; earlier: string } | null;
   /** Whether a Missing tag marks the score as a missing-work grade. */
   missingTag: boolean;
+  /** Whether the cell's score has feedback, marked in the cell's corner. */
   hasFeedback: boolean;
   /** Muted text shown when the cell has no score and no badge, like "Not submitted". */
   placeholder: string | null;
@@ -342,9 +344,8 @@ export function describeCell(
 ): CellDisplay {
   const empty: CellDisplay = {
     primary: null,
-    primaryMuted: false,
-    primaryLabel: null,
     badge: null,
+    reason: null,
     missingTag: false,
     hasFeedback: false,
     placeholder: null,
@@ -361,6 +362,8 @@ export function describeCell(
   const hasFeedback = standingFeedback(cell) !== "";
   const feedbackText = hasFeedback ? ", has feedback" : "";
   const openAssignment: CellAction = { label: "Open assignment", urgent: false };
+  const needsGrading: CellBadge = { label: "Needs grading", tone: "needs-grading" };
+  const earlier = `earlier ${score}/${assignment.points}`;
 
   /** Returns the submission action for the professor, or Open assignment for an admin. */
   const gradeAction = (label: string, urgent: boolean): CellAction =>
@@ -379,7 +382,7 @@ export function describeCell(
     case "needs-grading":
       return {
         ...empty,
-        badge: { label: "Needs grading", tone: "needs-grading" },
+        badge: needsGrading,
         srText: "Needs grading",
         action: gradeAction("Grade submission", true),
       };
@@ -387,24 +390,18 @@ export function describeCell(
     case "resubmitted":
       return {
         ...empty,
-        primary: score,
-        primaryMuted: true,
-        primaryLabel: "earlier:",
-        badge: { label: "Resubmitted", tone: "resubmitted" },
-        hasFeedback,
-        srText: `Resubmitted, earlier score ${outOf} still stands${feedbackText}`,
+        badge: needsGrading,
+        reason: { label: "Resubmitted", earlier },
+        srText: `Needs grading, resubmitted, earlier score ${outOf} stands until then`,
         action: gradeAction("Grade new version", true),
       };
 
     case "submitted-after-missing":
       return {
         ...empty,
-        primary: score,
-        primaryMuted: true,
-        badge: { label: "Needs grading", tone: "submitted-after-missing" },
-        missingTag: true,
-        hasFeedback,
-        srText: `Needs grading, submitted after a missing-work grade of ${outOf}${feedbackText}`,
+        badge: needsGrading,
+        reason: { label: "After Missing", earlier },
+        srText: `Needs grading, turned in after a missing-work grade of ${outOf}`,
         action: gradeAction("Grade submission", true),
       };
 
@@ -501,53 +498,33 @@ export function moveInGrid(
 
 // #region Layout
 
-/** The frozen student column's width in pixels, with the email under each name. */
-const STUDENT_COLUMN_WIDTH = 240;
-
-/** The frozen student column's width in pixels in compact rows, which show names only. */
-const COMPACT_STUDENT_COLUMN_WIDTH = 176;
+/** The frozen student column's width in pixels. */
+export const STUDENT_COLUMN_WIDTH = 168;
 
 /** The narrowest an assignment column gets, in pixels. */
-const MIN_COLUMN_WIDTH = 144;
+const MIN_COLUMN_WIDTH = 120;
 
-/** Below this width in pixels, rows show names only so more of the grid fits. */
-const COMPACT_BELOW = 760;
-
-/** How wide the grid's columns are and whether rows are compact. */
+/** How wide the grid's assignment columns are. */
 export type GridLayout = {
-  /** Whether rows show names only. */
-  compact: boolean;
-  studentWidth: number;
   columnWidth: number;
   /** Whether the assignment columns are wider than the room, so the grid scrolls sideways. */
   overflows: boolean;
 };
 
 /**
- * Returns the grid's column sizes for `available` pixels of width, unknown
- * before the first measurement. When the assignments overflow, the columns
- * widen so a whole number of them fills the view, which lets horizontal
- * scrolling rest on column edges.
+ * Returns the assignment columns' width for `room` pixels beside the frozen
+ * student column, unknown before the first measurement. When the assignments
+ * overflow, the columns widen so a whole number of them fills the view, which
+ * lets horizontal scrolling rest on column edges.
  */
-export function gridLayout(available: number | null, assignmentCount: number): GridLayout {
-  const compact = available !== null && available < COMPACT_BELOW;
-  const studentWidth = compact ? COMPACT_STUDENT_COLUMN_WIDTH : STUDENT_COLUMN_WIDTH;
-
-  if (available === null) {
-    return { compact, studentWidth, columnWidth: MIN_COLUMN_WIDTH, overflows: false };
+export function gridLayout(room: number | null, assignmentCount: number): GridLayout {
+  if (room === null || assignmentCount * MIN_COLUMN_WIDTH <= room) {
+    return { columnWidth: MIN_COLUMN_WIDTH, overflows: false };
   }
 
-  // The scroll container's border takes 2 pixels
-  const room = available - 2 - studentWidth;
-  const overflows = assignmentCount * MIN_COLUMN_WIDTH > room;
   const visibleColumns = Math.max(1, Math.floor(room / MIN_COLUMN_WIDTH));
 
-  return {
-    compact,
-    studentWidth,
-    columnWidth: overflows ? Math.max(MIN_COLUMN_WIDTH, room / visibleColumns) : MIN_COLUMN_WIDTH,
-    overflows,
-  };
+  return { columnWidth: Math.max(MIN_COLUMN_WIDTH, room / visibleColumns), overflows: true };
 }
 
 // #endregion

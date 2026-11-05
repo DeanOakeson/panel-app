@@ -103,7 +103,7 @@ describe("describeCell", () => {
       assignment: closedAssignment,
       expected: {
         primary: "90",
-        primaryMuted: false,
+        reason: null,
         badge: null,
         missingTag: false,
         hasFeedback: true,
@@ -139,7 +139,7 @@ describe("describeCell", () => {
       adminAction: "Open assignment",
     },
     {
-      name: "a resubmission with the earlier score muted",
+      name: "a resubmission as work to grade, with the earlier score",
       cell: cell({
         status: "resubmitted",
         submittedAt: secondVersion,
@@ -147,12 +147,11 @@ describe("describeCell", () => {
       }),
       assignment: closedAssignment,
       expected: {
-        primary: "82",
-        primaryMuted: true,
-        primaryLabel: "earlier:",
-        badge: { label: "Resubmitted", tone: "resubmitted" },
-        hasFeedback: true,
-        srText: "Resubmitted, earlier score 82 out of 100 still stands, has feedback",
+        primary: null,
+        badge: { label: "Needs grading", tone: "needs-grading" },
+        reason: { label: "Resubmitted", earlier: "earlier 82/100" },
+        hasFeedback: false,
+        srText: "Needs grading, resubmitted, earlier score 82 out of 100 stands until then",
       },
       professorAction: "Grade new version",
       adminAction: "Open assignment",
@@ -166,12 +165,11 @@ describe("describeCell", () => {
       }),
       assignment: closedAssignment,
       expected: {
-        primary: "0",
-        primaryMuted: true,
-        primaryLabel: null,
-        badge: { label: "Needs grading", tone: "submitted-after-missing" },
-        missingTag: true,
-        srText: "Needs grading, submitted after a missing-work grade of 0 out of 100",
+        primary: null,
+        badge: { label: "Needs grading", tone: "needs-grading" },
+        reason: { label: "After Missing", earlier: "earlier 0/100" },
+        missingTag: false,
+        srText: "Needs grading, turned in after a missing-work grade of 0 out of 100",
       },
       professorAction: "Grade submission",
       adminAction: "Open assignment",
@@ -208,7 +206,7 @@ describe("describeCell", () => {
       assignment: closedAssignment,
       expected: {
         primary: "0",
-        primaryMuted: false,
+        reason: null,
         badge: null,
         missingTag: true,
         hasFeedback: true,
@@ -622,37 +620,23 @@ describe("moveInGrid", () => {
 });
 
 describe("gridLayout", () => {
-  it("keeps the email column and narrow columns while every assignment fits", () => {
-    expect(gridLayout(1000, 3)).toEqual({
-      compact: false,
-      studentWidth: 240,
-      columnWidth: 144,
-      overflows: false,
-    });
+  it("keeps 120-pixel columns while every assignment fits", () => {
+    expect(gridLayout(727, 6)).toEqual({ columnWidth: 120, overflows: false });
   });
 
-  it("widens overflowing columns so a whole number of them fills the view", () => {
-    const layout = gridLayout(1000, 8);
-    const room = 1000 - 2 - layout.studentWidth;
+  it("widens overflowing columns so a whole number of them fills the room", () => {
+    const layout = gridLayout(470, 6);
 
     expect(layout.overflows).toBe(true);
-    expect(layout.columnWidth).toBeGreaterThanOrEqual(144);
-    expect(Number.isInteger(room / layout.columnWidth)).toBe(true);
+    expect(layout.columnWidth).toBeGreaterThanOrEqual(120);
+    expect(470 / layout.columnWidth).toBe(3);
   });
 
-  it("switches to compact rows with a narrower student column below 760 pixels", () => {
-    const layout = gridLayout(656, 6);
-
-    expect(layout).toMatchObject({ compact: true, studentWidth: 176, overflows: true });
-    expect((656 - 2 - 176) / layout.columnWidth).toBe(3);
+  it("shows at least one whole column in a very narrow room", () => {
+    expect(gridLayout(100, 2)).toEqual({ columnWidth: 120, overflows: true });
   });
 
-  it("uses the full layout before the width is known", () => {
-    expect(gridLayout(null, 6)).toEqual({
-      compact: false,
-      studentWidth: 240,
-      columnWidth: 144,
-      overflows: false,
-    });
+  it("uses the narrow columns before the room is measured", () => {
+    expect(gridLayout(null, 6)).toEqual({ columnWidth: 120, overflows: false });
   });
 });
