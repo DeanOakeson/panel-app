@@ -20,7 +20,6 @@ import MissingWorkForm from "./MissingWorkForm";
 import type {
     Assignment,
     Grade,
-    MissingGrade,
     MissingStudent,
     RosterStudent,
     SubmittedStudent,
@@ -40,7 +39,7 @@ type Props = {
     /** Receives the grade the server saved for a student's submission. */
     onGraded: (studentId: string, grade: Grade) => void;
     /** Receives the missing-work grade the server saved for a student without a submission. */
-    onMissingGraded: (studentId: string, grade: MissingGrade) => void;
+    onMissingGraded: (studentId: string, grade: Grade) => void;
 };
 
 type Filter = "all" | "to-grade" | "graded" | "missing";
@@ -306,7 +305,7 @@ export default function ProfessorSubmissions({
         const savedStillToGrade =
             !!saved &&
             !isMissingRow(saved) &&
-            needsGrade(getGradingStatus(saved, grade, saved.missingGrade));
+            needsGrade(getGradingStatus(saved, grade));
         const left =
             students.filter(
                 (student) =>
@@ -360,7 +359,7 @@ export default function ProfessorSubmissions({
      */
     function handleMissingSaved(
         studentId: string,
-        grade: MissingGrade,
+        grade: Grade,
         alreadyGraded: boolean
     ) {
         const saved = students.find((student) => student.studentId === studentId);
@@ -623,6 +622,7 @@ function SubmissionCard({
                 </div>
             )}
 
+            {/* A submission after a missing-work grade is graded by saving over that grade, starting empty */}
             {canGrade && student.grade === null && (
                 <div className="mt-4 border-t border-gray-200 pt-4 dark:border-zinc-700">
                     <GradeForm
@@ -631,6 +631,15 @@ function SubmissionCard({
                         studentId={student.studentId}
                         submittedAt={student.submittedAt}
                         points={assignment.points}
+                        editing={
+                            student.missingGrade
+                                ? {
+                                      lastSavedAt:
+                                          student.missingGrade.updatedAt ??
+                                          student.missingGrade.gradedAt,
+                                  }
+                                : undefined
+                        }
                         onSaved={onSaved}
                     />
                 </div>
@@ -669,7 +678,7 @@ type MissingWorkCardProps = {
     /** Whether another session saved the missing-work grade before this one. */
     savedElsewhere: boolean;
     onEditingChange: (open: boolean) => void;
-    onSaved: (studentId: string, grade: MissingGrade, alreadyGraded: boolean) => void;
+    onSaved: (studentId: string, grade: Grade, alreadyGraded: boolean) => void;
 };
 
 /**

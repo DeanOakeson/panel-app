@@ -210,16 +210,16 @@ async function readEnrollments(uid: string) {
 }
 
 /**
- * Submissions, grades and missing-work grades belonging to this user, by
- * *uid*, everywhere they can exist. Two walks, deliberately overlapping:
+ * Submissions and grades belonging to this user, by *uid*, everywhere they can
+ * exist. Two walks, deliberately overlapping:
  *
  * 1. the enrollment-based walk: every assignment inside every class the user is
- *    currently enrolled in contributes `.../submissions/{uid}`,
- *    `.../grades/{uid}` and `.../missingGrades/{uid}`. Exact document paths, no index needed. This also
+ *    currently enrolled in contributes `.../submissions/{uid}` and
+ *    `.../grades/{uid}`. Exact document paths, no index needed. This also
  *    covers a grade whose submission doc is already gone, because it is derived
  *    from enrollment rather than from the submission list.
  * 2. the collection-group sweep: `where("studentId" == uid)` across all
- *    `submissions` / `grades` / `missingGrades` subcollections. This is what catches docs the
+ *    `submissions` / `grades` subcollections. This is what catches docs the
  *    enrollment walk cannot reach — the admin unenroll route
  *    (`app/api/admin/classes/[classId]/enrollments/[studentId]`) deletes only
  *    the enrollment mirror and leaves submissions behind, so after an
@@ -250,20 +250,17 @@ async function readUserOwnedClassDocs(uid: string, classIds: string[]) {
     for (const assignment of assignments.docs) {
       add(assignment.ref.collection("submissions").doc(uid));
       add(assignment.ref.collection("grades").doc(uid));
-      add(assignment.ref.collection("missingGrades").doc(uid));
     }
   }
 
   // Walk 2: uid-scoped sweep across every class, catches unenrolled leftovers.
-  const [submissions, grades, missingGrades] = await Promise.all([
+  const [submissions, grades] = await Promise.all([
     db.collectionGroup("submissions").where("studentId", "==", uid).get(),
     db.collectionGroup("grades").where("studentId", "==", uid).get(),
-    db.collectionGroup("missingGrades").where("studentId", "==", uid).get(),
   ]);
 
   for (const doc of submissions.docs) add(doc.ref);
   for (const doc of grades.docs) add(doc.ref);
-  for (const doc of missingGrades.docs) add(doc.ref);
 
   const refs = [...byPath.values()];
   return {
@@ -271,9 +268,6 @@ async function readUserOwnedClassDocs(uid: string, classIds: string[]) {
       ref.path.endsWith("/submissions/" + uid)
     ),
     gradeRefs: refs.filter((ref) => ref.path.endsWith("/grades/" + uid)),
-    missingGradeRefs: refs.filter((ref) =>
-      ref.path.endsWith("/missingGrades/" + uid)
-    ),
   };
 }
 
@@ -281,8 +275,8 @@ async function readUserOwnedClassDocs(uid: string, classIds: string[]) {
  * DELETE /api/admin/users/[uid] — ADMIN-ONLY.
  *
  * Removes the Firebase Auth account, the `users/{uid}` profile, the user's
- * `users/{uid}/classes/*` enrollment mirrors, and their submission, grade and
- * missing-work grade docs, with each grade's history. Self-deletion is refused.
+ * `users/{uid}/classes/*` enrollment mirrors, and their submission and grade
+ * docs, with each grade's history. Self-deletion is refused.
  *
  * Submissions/grades are found by uid rather than by current enrollment, so a
  * submission left behind by an earlier unenroll is still removed — see
@@ -330,15 +324,14 @@ export async function DELETE(
     // a mid-way failure leaves a recoverable (and retryable) state rather than
     // a half-wiped one.
     const enrollments = await readEnrollments(uid);
-    const { submissionRefs, gradeRefs, missingGradeRefs } =
-      await readUserOwnedClassDocs(
+    const { submissionRefs, gradeRefs } = await readUserOwnedClassDocs(
       uid,
       enrollments.map((e) => e.classId)
     );
 
     // History goes before its grade, so a failure part way leaves the grade
     // for a retry to find again
-    for (const gradeRef of [...gradeRefs, ...missingGradeRefs]) {
+    for (const gradeRef of gradeRefs) {
       await db.recursiveDelete(gradeHistory(gradeRef));
     }
 
@@ -346,7 +339,6 @@ export async function DELETE(
       ...enrollments.map((e) => e.ref),
       ...submissionRefs,
       ...gradeRefs,
-      ...missingGradeRefs,
       userRef,
     ];
 
@@ -373,7 +365,6 @@ export async function DELETE(
       removedEnrollments: enrollments.length,
       removedSubmissions: submissionRefs.length,
       removedGrades: gradeRefs.length,
-      removedMissingGrades: missingGradeRefs.length,
     });
   } catch (error) {
     console.error("DELETE /api/admin/users/[uid] failed:", error);

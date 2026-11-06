@@ -7,12 +7,19 @@ import {
   gradingStatusRank,
   isMissingRow,
   isMissingStatus,
+  isMissingWorkGrade,
   needsGrade,
+  summarizeMissingGrade,
 } from "@/lib/gradingStatus";
 
 const version = { submittedAt: "2026-10-30T12:00:00.000Z" };
 const laterVersion = { submittedAt: "2026-10-31T12:00:00.000Z" };
-const missingGrade = { score: 0, gradedAt: "2026-10-29T12:00:00.000Z" };
+const missingGrade = {
+  score: 0,
+  feedback: "Nothing received.",
+  submittedAt: null,
+  gradedAt: "2026-10-29T12:00:00.000Z",
+};
 
 const noCounts = {
   students: 0,
@@ -42,22 +49,43 @@ describe("getGradingStatus", () => {
     expect(getGradingStatus(laterVersion, version)).toBe("resubmitted");
   });
 
-  it("returns missing-graded without a submission but with a missing-work grade", () => {
-    expect(getGradingStatus(null, null, missingGrade)).toBe("missing-graded");
+  it("returns missing-graded without a submission but with a grade", () => {
+    expect(getGradingStatus(null, missingGrade)).toBe("missing-graded");
   });
 
-  it("returns submitted-after-missing for an ungraded submission after a missing-work grade", () => {
-    expect(getGradingStatus(version, null, missingGrade)).toBe("submitted-after-missing");
+  it("returns submitted-after-missing for a submission whose grade is still a missing-work grade", () => {
+    expect(getGradingStatus(version, missingGrade)).toBe("submitted-after-missing");
   });
 
-  it("returns graded or resubmitted once the later submission has its own grade", () => {
-    expect(getGradingStatus(version, { ...version }, missingGrade)).toBe("graded");
-    expect(getGradingStatus(laterVersion, version, missingGrade)).toBe("resubmitted");
+  it("returns graded once the later submission is graded over the missing-work grade", () => {
+    expect(getGradingStatus(version, { ...missingGrade, ...version })).toBe("graded");
+  });
+});
+
+describe("isMissingWorkGrade", () => {
+  it("is true for a grade with no submittedAt", () => {
+    expect(isMissingWorkGrade(missingGrade)).toBe(true);
+    expect(isMissingWorkGrade({})).toBe(true);
   });
 
-  it("treats a null missing-work grade as none", () => {
-    expect(getGradingStatus(null, null, null)).toBe("missing");
-    expect(getGradingStatus(version, null, null)).toBe("needs-grading");
+  it("is false for a grade that belongs to a submission", () => {
+    expect(isMissingWorkGrade(version)).toBe(false);
+  });
+});
+
+describe("summarizeMissingGrade", () => {
+  it("summarizes a missing-work grade", () => {
+    expect(summarizeMissingGrade(missingGrade)).toEqual({
+      score: 0,
+      feedback: "Nothing received.",
+      gradedAt: missingGrade.gradedAt,
+      updatedAt: null,
+    });
+  });
+
+  it("returns null for no grade or a grade that belongs to a submission", () => {
+    expect(summarizeMissingGrade(undefined)).toBeNull();
+    expect(summarizeMissingGrade({ ...missingGrade, ...version })).toBeNull();
   });
 });
 

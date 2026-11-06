@@ -149,11 +149,12 @@ async function addMissingGrade(
     assignmentId,
     score,
     feedback,
+    submittedAt: null,
     gradedBy: "owner",
     gradedAt: "2026-11-02T08:00:00.000Z",
     ...edit,
   };
-  await assignmentDoc().collection("missingGrades").doc(studentUid).set(grade);
+  await assignmentDoc().collection("grades").doc(studentUid).set(grade);
 
   return grade;
 }
@@ -574,6 +575,32 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
             gradedAt: missing.gradedAt,
             updatedAt: null,
           },
+        },
+      ]);
+    });
+
+    it("shows a later submission graded over a missing-work grade as a plain grade", async () => {
+      await enrollStudent("ada", "Ada Lovelace");
+      await addSubmission("ada", "Ada Lovelace");
+      const grade = await addGrade("ada", 72, "Late", undefined, {
+        updatedAt: "2026-11-04T09:00:00.000Z",
+        updatedBy: "owner",
+      });
+
+      const res = await getSubmissions(ownerToken);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).students).toEqual([
+        {
+          ...submissionResponse("ada"),
+          studentName: "Ada Lovelace",
+          studentEmail: "ada@example.com",
+          gradingStatus: "graded",
+          grade: 72,
+          feedback: "Late",
+          gradedAt: grade.gradedAt,
+          gradeUpdatedAt: "2026-11-04T09:00:00.000Z",
+          missingGrade: null,
         },
       ]);
     });

@@ -5,8 +5,12 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { getDeadline } from "@/lib/assignmentDeadline";
 import { loadEnrolledStudentIds } from "@/lib/classRoster";
-import { getGradingStatus, gradingStatusRank } from "@/lib/gradingStatus";
-import type { MissingGradeSummary } from "@/app/components/Types";
+import {
+  getGradingStatus,
+  gradingStatusRank,
+  isMissingWorkGrade,
+  summarizeMissingGrade,
+} from "@/lib/gradingStatus";
 
 type RouteContext = {
   params: Promise<{
@@ -18,17 +22,24 @@ type RouteContext = {
 const BUCKET = "assignment-submissions";
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
-/** Returns what the roster and the student see of a stored missing-work grade. */
-function summarizeMissingGrade(
+/**
+ * Returns the grade fields a submission row shows, which describe only a
+ * grade that belongs to a submission. A missing-work grade shows as ungraded.
+ */
+function submissionGradeFields(
+  submission: DocumentData,
   stored: DocumentData | undefined
-): MissingGradeSummary | null {
-  if (!stored) return null;
+) {
+  const grade = stored && !isMissingWorkGrade(stored) ? stored : undefined;
 
   return {
-    score: stored.score,
-    feedback: stored.feedback ?? "",
-    gradedAt: stored.gradedAt,
-    updatedAt: stored.updatedAt ?? null,
+    grade: grade?.score ?? null,
+    feedback: grade?.feedback ?? "",
+    gradedAt: grade?.gradedAt ?? null,
+    gradeUpdatedAt: grade?.updatedAt ?? null,
+    resubmittedAfterGrading:
+      !!grade && submission.submittedAt !== grade.submittedAt,
+    submittedAfterMissingGrade: !!stored && isMissingWorkGrade(stored),
   };
 }
 
@@ -335,18 +346,15 @@ export async function GET(
 
     const submissionsRef = assignmentRef.collection("submissions");
     const gradesRef = assignmentRef.collection("grades");
-    const missingGradesRef = assignmentRef.collection("missingGrades");
 
     // The professor and admins see every enrolled student, and anyone else
-    // who submitted or has a missing-work grade
+    // who submitted or has a grade
     if (role === "professor" || role === "admin") {
-      const [snapshot, gradeSnapshot, missingGradeSnapshot, enrolledIds] =
-        await Promise.all([
-          submissionsRef.get(),
-          gradesRef.get(),
-          missingGradesRef.get(),
-          loadEnrolledStudentIds(classId),
-        ]);
+      const [snapshot, gradeSnapshot, enrolledIds] = await Promise.all([
+        submissionsRef.get(),
+        gradesRef.get(),
+        loadEnrolledStudentIds(classId),
+      ]);
 
       const submissionsById = new Map(
         snapshot.docs.map((doc) => [doc.id, doc.data()])
@@ -354,17 +362,11 @@ export async function GET(
       const grades = new Map(
         gradeSnapshot.docs.map((gradeDoc) => [gradeDoc.id, gradeDoc.data()])
       );
-      const missingGrades = new Map(
-        missingGradeSnapshot.docs.map((missingDoc) => [
-          missingDoc.id,
-          missingDoc.data(),
-        ])
-      );
       const studentIds = [
         ...new Set([
           ...enrolledIds,
           ...submissionsById.keys(),
-          ...missingGrades.keys(),
+          ...grades.keys(),
         ]),
       ];
 
@@ -383,13 +385,12 @@ export async function GET(
           const student = students.get(studentId);
           const submission = submissionsById.get(studentId);
           const grade = grades.get(studentId);
-          const missingGrade = summarizeMissingGrade(missingGrades.get(studentId));
           const identity = {
             studentId,
             studentName: (student?.name as string | undefined) ?? null,
             studentEmail: (student?.email as string | undefined) ?? null,
-            gradingStatus: getGradingStatus(submission, grade, missingGrade),
-            missingGrade,
+            gradingStatus: getGradingStatus(submission, grade),
+            missingGrade: summarizeMissingGrade(grade),
           };
 
           if (!submission) {
@@ -414,13 +415,7 @@ export async function GET(
             fileSize: submission.fileSize,
             submittedAt: submission.submittedAt,
             status: submission.status || "submitted",
-            grade: grade?.score ?? null,
-            feedback: grade?.feedback ?? "",
-            gradedAt: grade?.gradedAt ?? null,
-            gradeUpdatedAt: grade?.updatedAt ?? null,
-            resubmittedAfterGrading:
-              !!grade && submission.submittedAt !== grade.submittedAt,
-            submittedAfterMissingGrade: !!missingGrade,
+            ...submissionGradeFields(submission, grade),
             fileUrl: error ? null : data.signedUrl,
           };
         })
@@ -456,12 +451,12 @@ export async function GET(
     }
 
     // Students can access only their own submission and grades
-    const [submissionDoc, gradeDoc, missingGradeDoc] = await Promise.all([
+    const [submissionDoc, gradeDoc] = await Promise.all([
       submissionsRef.doc(uid).get(),
       gradesRef.doc(uid).get(),
-      missingGradesRef.doc(uid).get(),
     ]);
-    const missingGrade = summarizeMissingGrade(missingGradeDoc.data());
+    const grade = gradeDoc.data();
+    const missingGrade = summarizeMissingGrade(grade);
 
     if (!submissionDoc.exists) {
       return NextResponse.json({
@@ -472,7 +467,6 @@ export async function GET(
     }
 
     const submission = submissionDoc.data()!;
-    const grade = gradeDoc.data();
 
     const { data, error } = await getSupabaseAdmin().storage
       .from(BUCKET)
@@ -496,13 +490,7 @@ export async function GET(
         fileSize: submission.fileSize,
         submittedAt: submission.submittedAt,
         status: submission.status || "submitted",
-        grade: grade?.score ?? null,
-        feedback: grade?.feedback ?? "",
-        gradedAt: grade?.gradedAt ?? null,
-        gradeUpdatedAt: grade?.updatedAt ?? null,
-        resubmittedAfterGrading:
-          !!grade && submission.submittedAt !== grade.submittedAt,
-        submittedAfterMissingGrade: !!missingGrade,
+        ...submissionGradeFields(submission, grade),
         fileUrl: data.signedUrl,
       },
       missingGrade,

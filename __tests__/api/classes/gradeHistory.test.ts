@@ -28,13 +28,13 @@ function assignmentDoc() {
     .doc(assignmentId);
 }
 
-function historyOf(collection: "grades" | "missingGrades", studentId: string) {
-  return assignmentDoc().collection(collection).doc(studentId).collection("history");
+function historyOf(studentId: string) {
+  return assignmentDoc().collection("grades").doc(studentId).collection("history");
 }
 
 /** Returns a grade's history entries, oldest first. */
-async function readHistory(collection: "grades" | "missingGrades", studentId: string) {
-  const snapshot = await historyOf(collection, studentId).orderBy("savedAt").get();
+async function readHistory(studentId: string) {
+  const snapshot = await historyOf(studentId).orderBy("savedAt").get();
 
   return snapshot.docs.map((entry) => entry.data());
 }
@@ -106,7 +106,7 @@ describe("submission grade history", () => {
     const { grade } = await res.json();
 
     expect(res.status).toBe(201);
-    expect(await readHistory("grades", submitter)).toEqual([
+    expect(await readHistory(submitter)).toEqual([
       {
         score: 80,
         feedback: "First pass",
@@ -127,7 +127,7 @@ describe("submission grade history", () => {
       await patchGrade({ submittedAt, score: 90, feedback: "Third", lastSavedAt: first.grade.updatedAt })
     ).json();
 
-    const history = await readHistory("grades", submitter);
+    const history = await readHistory(submitter);
     expect(history.map((entry) => [entry.action, entry.score, entry.feedback])).toEqual([
       ["created", 80, ""],
       ["edited", 85, "Second"],
@@ -153,7 +153,7 @@ describe("submission grade history", () => {
     const res = await patchGrade({ submittedAt, score: 70, lastSavedAt: "2026-11-02T10:00:00.000Z" });
 
     expect(res.status).toBe(200);
-    expect(await readHistory("grades", submitter)).toEqual([
+    expect(await readHistory(submitter)).toEqual([
       {
         score: 60,
         feedback: "Legacy",
@@ -185,14 +185,14 @@ describe("submission grade history", () => {
     const res = await act();
 
     expect([400, 409]).toContain(res.status);
-    expect(await readHistory("grades", submitter)).toHaveLength(1);
+    expect(await readHistory(submitter)).toHaveLength(1);
   });
 
   it("writes no history for an invalid new grade", async () => {
     const res = await postGrade({ submittedAt, score: -1 });
 
     expect(res.status).toBe(400);
-    expect(await readHistory("grades", submitter)).toHaveLength(0);
+    expect(await readHistory(submitter)).toHaveLength(0);
   });
 });
 
@@ -204,7 +204,7 @@ describe("missing-work grade history", () => {
     ).json();
     await patchMissing({ score: 0, feedback: "Excused part", lastSavedAt: first.grade.updatedAt });
 
-    const history = await readHistory("missingGrades", absentUid);
+    const history = await readHistory(absentUid);
     expect(history.map((entry) => [entry.action, entry.feedback])).toEqual([
       ["created", "Nothing in"],
       ["edited", "Emailed late"],
@@ -227,7 +227,7 @@ describe("missing-work grade history", () => {
 
     expect(stale.status).toBe(409);
     expect(invalid.status).toBe(400);
-    expect(await readHistory("missingGrades", absentUid)).toHaveLength(1);
+    expect(await readHistory(absentUid)).toHaveLength(1);
   });
 });
 
@@ -240,7 +240,6 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/grade-history/[s
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.missingGrade).toEqual([]);
     expect(
       body.grade.map((entry: { action: string; score: number; savedByName: string }) => [
         entry.action,
@@ -253,16 +252,25 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/grade-history/[s
     ]);
   });
 
-  it("gives an admin the history", async () => {
+  it("gives an admin the history, with no submittedAt on a missing-work grade's versions", async () => {
     await postMissing({ score: 0, feedback: "Nothing in" });
     const { idToken } = await createSignedInUser("admin@example.com", "admin");
 
     const res = await getHistory(absentUid, idToken);
 
     expect(res.status).toBe(200);
-    expect((await res.json()).missingGrade).toEqual([
-      expect.objectContaining({ action: "created", feedback: "Nothing in", savedByName: "Dr. Owner" }),
-    ]);
+    expect(await res.json()).toEqual({
+      grade: [
+        {
+          score: 0,
+          feedback: "Nothing in",
+          savedBy: ownerUid,
+          savedAt: expect.any(String),
+          action: "created",
+          savedByName: "Dr. Owner",
+        },
+      ],
+    });
   });
 
   it("returns 403 to the student whose grade it is", async () => {

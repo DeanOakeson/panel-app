@@ -1,3 +1,5 @@
+import type { MissingGradeSummary } from "@/app/components/Types";
+
 /** Where a student's work on an assignment stands for the professor. */
 export type GradingStatus =
   | "needs-grading"
@@ -15,7 +17,7 @@ export type SubmittedStatus = Exclude<GradingStatus, MissingStatus>;
 
 /** How many students on an assignment are in each grading state. */
 export type GradingCounts = {
-  /** Enrolled students plus anyone else who submitted or has a missing-work grade. */
+  /** Enrolled students plus anyone else who submitted or has a grade. */
   students: number;
   submitted: number;
   /** Submissions without a grade for their current file, resubmitted ones included. */
@@ -34,31 +36,58 @@ export type GradingCounts = {
 type Versioned = { submittedAt?: unknown };
 
 /**
- * Returns a student's grading status from their submission, their grade and
- * their missing-work grade, each null when absent. A grade covers the version
- * whose submittedAt it stores.
+ * Returns whether a grade is a missing-work grade: a grade given to a student
+ * without a submission, which stores a null submittedAt until the professor
+ * grades a later submission over it.
+ */
+export function isMissingWorkGrade(grade: Versioned): boolean {
+  return grade.submittedAt == null;
+}
+
+/**
+ * Returns what the roster and the student see of a stored grade while it is a
+ * missing-work grade, or null for a grade that belongs to a submission.
+ */
+export function summarizeMissingGrade(
+  stored: (Versioned & Record<string, unknown>) | null | undefined
+): MissingGradeSummary | null {
+  if (!stored || !isMissingWorkGrade(stored)) return null;
+
+  return {
+    score: stored.score as number,
+    feedback: (stored.feedback as string | undefined) ?? "",
+    gradedAt: stored.gradedAt as string,
+    updatedAt: (stored.updatedAt as string | undefined) ?? null,
+  };
+}
+
+/**
+ * Returns a student's grading status from their submission and their grade,
+ * each null when absent. A grade covers the version whose submittedAt it
+ * stores, and a missing-work grade covers none.
  */
 export function getGradingStatus(
   submission: Versioned,
-  grade: Versioned | null | undefined,
-  missingGrade?: object | null
+  grade: Versioned | null | undefined
 ): SubmittedStatus;
 export function getGradingStatus(
   submission: Versioned | null | undefined,
-  grade: Versioned | null | undefined,
-  missingGrade?: object | null
+  grade: Versioned | null | undefined
 ): GradingStatus;
 export function getGradingStatus(
   submission: Versioned | null | undefined,
-  grade: Versioned | null | undefined,
-  missingGrade?: object | null
+  grade: Versioned | null | undefined
 ): GradingStatus {
   if (!submission) {
-    return missingGrade ? "missing-graded" : "missing";
+    return grade ? "missing-graded" : "missing";
   }
 
   if (!grade) {
-    return missingGrade ? "submitted-after-missing" : "needs-grading";
+    return "needs-grading";
+  }
+
+  if (isMissingWorkGrade(grade)) {
+    return "submitted-after-missing";
   }
 
   return grade.submittedAt === submission.submittedAt ? "graded" : "resubmitted";

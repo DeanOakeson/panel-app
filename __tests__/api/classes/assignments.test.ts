@@ -66,12 +66,13 @@ async function addWork(
 
 /** Stores a missing-work grade for a student. */
 async function addMissingGrade(assignmentId: string, studentUid: string) {
-  await assignmentDoc(assignmentId).collection("missingGrades").doc(studentUid).set({
+  await assignmentDoc(assignmentId).collection("grades").doc(studentUid).set({
     studentId: studentUid,
     classId,
     assignmentId,
     score: 0,
     feedback: "",
+    submittedAt: null,
     gradedBy: "owner",
     gradedAt: "2026-11-02T09:00:00.000Z",
   });

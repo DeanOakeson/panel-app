@@ -8,10 +8,10 @@ type RouteContext = {
 };
 
 /**
- * Returns every saved version of a student's submission grade and of their
- * missing-work grade, oldest first, each with the saver's name (null without
- * a profile). Only the class's professor and admins can read it. Students see
- * their current grade only.
+ * Returns every saved version of a student's grade, oldest first, each with
+ * the saver's name (null without a profile). Versions saved as a missing-work
+ * grade have no submittedAt. Only the class's professor and admins can read
+ * it. Students see their current grade only.
  */
 export async function GET(request: NextRequest, { params }: RouteContext) {
   try {
@@ -37,12 +37,9 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       return NextResponse.json({ error: "Assignment not found." }, { status: 404 });
     }
 
-    const [grade, missingGrade] = await Promise.all([
-      loadGradeHistory(assignmentRef.collection("grades").doc(studentId)),
-      loadGradeHistory(assignmentRef.collection("missingGrades").doc(studentId)),
-    ]);
+    const grade = await loadGradeHistory(assignmentRef.collection("grades").doc(studentId));
 
-    const saverIds = [...new Set([...grade, ...missingGrade].map((entry) => entry.savedBy))];
+    const saverIds = [...new Set(grade.map((entry) => entry.savedBy))];
     // getAll() rejects an empty argument list
     const savers = saverIds.length === 0
       ? []
@@ -61,10 +58,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       savedByName: names.get(entry.savedBy) ?? null,
     });
 
-    return NextResponse.json({
-      grade: grade.map(withName),
-      missingGrade: missingGrade.map(withName),
-    });
+    return NextResponse.json({ grade: grade.map(withName) });
   } catch (error) {
     console.error(
       "GET /api/classes/[classId]/assignments/[assignmentId]/grade-history/[studentId] failed:",

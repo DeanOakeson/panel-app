@@ -100,13 +100,24 @@ async function seedGrade(uid: string, classId: string) {
     });
 }
 
+/** Returns the user's grade on the seeded assignment of a class. */
+function gradeRefIn(classId: string, uid: string) {
+  return db()
+    .collection("classes")
+    .doc(classId)
+    .collection("assignments")
+    .doc("a1")
+    .collection("grades")
+    .doc(uid);
+}
+
 async function seedMissingGrade(uid: string, classId: string) {
   await db()
     .collection("classes")
     .doc(classId)
     .collection("assignments")
     .doc("a1")
-    .collection("missingGrades")
+    .collection("grades")
     .doc(uid)
     .set({
       studentId: uid,
@@ -114,6 +125,7 @@ async function seedMissingGrade(uid: string, classId: string) {
       assignmentId: "a1",
       score: 0,
       feedback: "Missing",
+      submittedAt: null,
       gradedBy: adminUid,
       gradedAt: "2026-01-02T00:00:00.000Z",
     });
@@ -199,7 +211,7 @@ describe("DELETE /api/admin/users/[uid] cascade — orphan paths", () => {
     expect(stragglers.empty).toBe(true);
   });
 
-  it("removes the user's missing-work grades, enrolled or not, and reports them", async () => {
+  it("removes the user's missing-work grades, enrolled or not, and reports them as grades", async () => {
     const target = await createSignedInUser("student@example.com", "student");
     await seedClassWithAssignment("class-1");
     await seedClassWithAssignment("class-2");
@@ -210,10 +222,10 @@ describe("DELETE /api/admin/users/[uid] cascade — orphan paths", () => {
     const res = await deleteUser(target.uid, adminToken);
 
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({ removedMissingGrades: 2 });
+    await expect(res.json()).resolves.toMatchObject({ removedGrades: 2 });
 
     const stragglers = await db()
-      .collectionGroup("missingGrades")
+      .collectionGroup("grades")
       .where("studentId", "==", target.uid)
       .get();
 
@@ -223,22 +235,24 @@ describe("DELETE /api/admin/users/[uid] cascade — orphan paths", () => {
   it("removes the history under the user's grades and missing-work grades", async () => {
     const target = await createSignedInUser("student@example.com", "student");
     await seedClassWithAssignment("class-1");
+    await seedClassWithAssignment("class-2");
     await seedEnrollMirror(target.uid, "class-1");
     await seedSubmission(target.uid, "class-1", "done");
     await seedGrade(target.uid, "class-1");
-    await seedMissingGrade(target.uid, "class-1");
+    await seedMissingGrade(target.uid, "class-2");
 
-    const assignment = db().collection("classes").doc("class-1").collection("assignments").doc("a1");
+    const gradeRef = gradeRefIn("class-1", target.uid);
+    const missingGradeRef = gradeRefIn("class-2", target.uid);
     const entry = { score: 0, feedback: "", savedBy: adminUid, savedAt: "2026-01-02T00:00:00.000Z", action: "created" };
-    await assignment.collection("grades").doc(target.uid).collection("history").add(entry);
-    await assignment.collection("missingGrades").doc(target.uid).collection("history").add(entry);
+    await gradeRef.collection("history").add({ ...entry, submittedAt: "2026-01-01T00:00:00.000Z" });
+    await missingGradeRef.collection("history").add(entry);
 
     const res = await deleteUser(target.uid, adminToken);
 
     expect(res.status).toBe(200);
     const [gradeHistory, missingGradeHistory] = await Promise.all([
-      assignment.collection("grades").doc(target.uid).collection("history").get(),
-      assignment.collection("missingGrades").doc(target.uid).collection("history").get(),
+      gradeRef.collection("history").get(),
+      missingGradeRef.collection("history").get(),
     ]);
     expect(gradeHistory.empty).toBe(true);
     expect(missingGradeHistory.empty).toBe(true);
@@ -248,12 +262,12 @@ describe("DELETE /api/admin/users/[uid] cascade — orphan paths", () => {
     // Not enrolled, so a retry can only find the grades by their studentId
     const target = await createSignedInUser("student@example.com", "student");
     await seedClassWithAssignment("class-1");
+    await seedClassWithAssignment("class-2");
     await seedGrade(target.uid, "class-1");
-    await seedMissingGrade(target.uid, "class-1");
+    await seedMissingGrade(target.uid, "class-2");
 
-    const assignment = db().collection("classes").doc("class-1").collection("assignments").doc("a1");
-    const gradeRef = assignment.collection("grades").doc(target.uid);
-    const missingGradeRef = assignment.collection("missingGrades").doc(target.uid);
+    const gradeRef = gradeRefIn("class-1", target.uid);
+    const missingGradeRef = gradeRefIn("class-2", target.uid);
     const entry = { score: 0, feedback: "", savedBy: adminUid, action: "created" };
     for (const ref of [gradeRef, missingGradeRef]) {
       await ref.collection("history").add({ ...entry, savedAt: "2026-01-02T00:00:00.000Z" });

@@ -6,7 +6,12 @@ import Link from "next/link";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { formatClosesAt, hasClosed, whenPassed } from "@/lib/assignmentDeadline";
-import { getGradingStatus, isMissingRow } from "@/lib/gradingStatus";
+import {
+    getGradingStatus,
+    isMissingRow,
+    isMissingWorkGrade,
+    summarizeMissingGrade,
+} from "@/lib/gradingStatus";
 
 import AssignmentInfo from "../../../../components/assignments/AssignmentInfo";
 import StudentSubmission from "../../../../components/assignments/StudentSubmission";
@@ -16,7 +21,6 @@ import SubmissionUploadForm from "../../../../components/assignments/SubmissionU
 import type {
     Assignment,
     Grade,
-    MissingGrade,
     MissingGradeSummary,
     RosterStudent,
     Submission,
@@ -166,24 +170,26 @@ export default function AssignmentDetailPage() {
     }
 
     // Updates only the graded student in place, so other students' grade
-    // forms stay mounted with their unsaved drafts and the list keeps its order
+    // forms stay mounted with their unsaved drafts and the list keeps its order.
+    // A missing-work grade, which another session can save first, leaves the
+    // submission ungraded.
     function handleGraded(studentId: string, grade: Grade) {
+        const missing = isMissingWorkGrade(grade);
+
         setStudents((current) =>
             current.map((student) =>
                 student.studentId === studentId && !isMissingRow(student)
                     ? {
                           ...student,
-                          grade: grade.score,
-                          feedback: grade.feedback,
-                          gradedAt: grade.gradedAt,
-                          gradeUpdatedAt: grade.updatedAt ?? null,
+                          grade: missing ? null : grade.score,
+                          feedback: missing ? "" : grade.feedback,
+                          gradedAt: missing ? null : grade.gradedAt,
+                          gradeUpdatedAt: missing ? null : grade.updatedAt ?? null,
                           resubmittedAfterGrading:
-                              grade.submittedAt !== student.submittedAt,
-                          gradingStatus: getGradingStatus(
-                              student,
-                              grade,
-                              student.missingGrade
-                          ),
+                              !missing && grade.submittedAt !== student.submittedAt,
+                          submittedAfterMissingGrade: missing,
+                          missingGrade: summarizeMissingGrade(grade),
+                          gradingStatus: getGradingStatus(student, grade),
                       }
                     : student
             )
@@ -191,18 +197,13 @@ export default function AssignmentDetailPage() {
     }
 
     // Updates only the student whose missing work was graded, in place
-    function handleMissingGraded(studentId: string, grade: MissingGrade) {
+    function handleMissingGraded(studentId: string, grade: Grade) {
         setStudents((current) =>
             current.map((student) =>
                 student.studentId === studentId && isMissingRow(student)
                     ? {
                           ...student,
-                          missingGrade: {
-                              score: grade.score,
-                              feedback: grade.feedback,
-                              gradedAt: grade.gradedAt,
-                              updatedAt: grade.updatedAt ?? null,
-                          },
+                          missingGrade: summarizeMissingGrade(grade),
                           gradingStatus: "missing-graded",
                       }
                     : student
