@@ -48,6 +48,10 @@ function MissingWorkGrade({
                     <MissingTag />
                 </p>
 
+                <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">
+                    Graded {formatDate(missingGrade.gradedAt)}
+                </p>
+
                 {missingGrade.updatedAt && (
                     <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">
                         Updated {formatDate(missingGrade.updatedAt)}

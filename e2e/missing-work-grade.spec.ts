@@ -108,7 +108,19 @@ test.describe("Professor grades a student who did not submit", () => {
     await expect(own.getByText("Missing-work grade", { exact: true })).toBeVisible();
     await expectMissingScore(own, "0 / 100");
     await expect(own).toContainText(FEEDBACK);
+    await expect(own.getByText(/^Graded (?!before)/)).toBeVisible();
+    await expect(own.getByText(/^Updated /)).toHaveCount(0);
     await expect(own.getByText("History", { exact: true })).toHaveCount(0);
+
+    // An edit keeps the original Graded date and adds when it was updated
+    await dev.getByRole("button", { name: "Edit feedback" }).click();
+    await markMissing(dev, EDITED_FEEDBACK, "Save feedback");
+    await expect(dev).toContainText(EDITED_FEEDBACK);
+
+    await devPage.reload();
+    await expect(own).toContainText(EDITED_FEEDBACK);
+    await expect(own.getByText(/^Graded (?!before)/)).toBeVisible();
+    await expect(own.getByText(/^Updated /)).toBeVisible();
   });
 
   test("is not offered while submissions are open", async ({ page, scenario }) => {
