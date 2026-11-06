@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
-import type { MissingGrade } from "../Types";
+import type { Grade } from "../Types";
 
 type MissingWorkFormProps = {
   classId: string;
@@ -19,7 +19,7 @@ type MissingWorkFormProps = {
    * Receives the student's uid, the stored missing-work grade, and whether
    * another session had saved one first.
    */
-  onSaved: (studentId: string, grade: MissingGrade, alreadyGraded: boolean) => void;
+  onSaved: (studentId: string, grade: Grade, alreadyGraded: boolean) => void;
   onCancel: () => void;
 };
 

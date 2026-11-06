@@ -3,6 +3,8 @@ import { closesAtOrNull } from "@/lib/assignmentDeadline";
 import {
   countGradingStatuses,
   getGradingStatus,
+  isMissingWorkGrade,
+  summarizeMissingGrade,
   type GradingCounts,
   type GradingStatus,
 } from "@/lib/gradingStatus";
@@ -87,11 +89,13 @@ export type StoredDoc = Record<string, unknown>;
 /** An assignment document as stored, with its ID. */
 export type StoredAssignment = StoredDoc & { id: string };
 
-/** The submissions, grades and missing-work grades stored on one assignment, by student uid. */
+/**
+ * The submissions and grades stored on one assignment, by student uid. A grade
+ * with no submittedAt is a missing-work grade.
+ */
 export type StoredWork = {
   submissions: Map<string, StoredDoc>;
   grades: Map<string, StoredDoc>;
-  missingGrades: Map<string, StoredDoc>;
 };
 
 /** Everything buildGradebook reads. */
@@ -119,14 +123,14 @@ function text(value: unknown): string | null {
 
 /**
  * Returns every student on any assignment's roster: the enrolled students,
- * and anyone who submitted or has a missing-work grade.
+ * and anyone who submitted or has a grade.
  */
 export function rosterIds(enrolledIds: string[], work: StoredWork[]): string[] {
   const ids = new Set(enrolledIds);
 
   for (const assignmentWork of work) {
     for (const studentId of assignmentWork.submissions.keys()) ids.add(studentId);
-    for (const studentId of assignmentWork.missingGrades.keys()) ids.add(studentId);
+    for (const studentId of assignmentWork.grades.keys()) ids.add(studentId);
   }
 
   return [...ids];
@@ -142,28 +146,18 @@ export function standingScore(
   return null;
 }
 
-/** Returns a stored missing-work grade as the roster sees it. */
-function summarizeMissingGrade(stored: StoredDoc | undefined): MissingGradeSummary | null {
-  if (!stored) return null;
-
-  return {
-    score: stored.score as number,
-    feedback: text(stored.feedback) ?? "",
-    gradedAt: text(stored.gradedAt) ?? "",
-    updatedAt: text(stored.updatedAt),
-  };
-}
-
 /**
  * Returns one student's cell for an assignment, or null when they are not on
- * its roster: not enrolled, with no submission and no missing-work grade.
+ * its roster: not enrolled, with no submission and no grade. A missing-work
+ * grade fills `missingGrade` and leaves `grade` null.
  */
 function buildCell(studentId: string, enrolled: boolean, work: StoredWork): GradebookCell | null {
   const submission = work.submissions.get(studentId);
-  const storedGrade = submission ? work.grades.get(studentId) : undefined;
-  const missingGrade = summarizeMissingGrade(work.missingGrades.get(studentId));
+  const stored = work.grades.get(studentId);
+  const storedGrade = submission && stored && !isMissingWorkGrade(stored) ? stored : undefined;
+  const missingGrade = summarizeMissingGrade(stored);
 
-  if (!enrolled && !submission && !missingGrade) return null;
+  if (!enrolled && !submission && !stored) return null;
 
   const grade: GradebookGrade | null = storedGrade
     ? {
@@ -175,7 +169,7 @@ function buildCell(studentId: string, enrolled: boolean, work: StoredWork): Grad
       }
     : null;
   const cell = {
-    status: getGradingStatus(submission, storedGrade, missingGrade),
+    status: getGradingStatus(submission, stored),
     submittedAt: text(submission?.submittedAt),
     grade,
     missingGrade,

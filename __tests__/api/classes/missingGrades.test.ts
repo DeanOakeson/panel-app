@@ -4,7 +4,10 @@ import {
   PATCH,
   POST,
 } from "@/app/api/classes/[classId]/assignments/[assignmentId]/missing-grades/[studentId]/route";
-import { POST as postGrade } from "@/app/api/classes/[classId]/assignments/[assignmentId]/submissions/[studentId]/grade/route";
+import {
+  PATCH as patchGrade,
+  POST as postGrade,
+} from "@/app/api/classes/[classId]/assignments/[assignmentId]/submissions/[studentId]/grade/route";
 import {
   GET as getSubmissions,
   POST as postSubmission,
@@ -39,10 +42,6 @@ function assignmentDoc() {
     .doc(assignmentId);
 }
 
-function missingGradeDoc(id: string) {
-  return assignmentDoc().collection("missingGrades").doc(id);
-}
-
 function submissionDoc(id: string) {
   return assignmentDoc().collection("submissions").doc(id);
 }
@@ -73,6 +72,33 @@ function sendMissingGrade(
     ),
     { params: Promise.resolve(ids) }
   );
+}
+
+/** Sends a grade for the student's submission through the submission grade route. */
+function sendGrade(method: "POST" | "PATCH", body: Record<string, unknown>) {
+  const handler = method === "POST" ? postGrade : patchGrade;
+
+  return handler(
+    new NextRequest(
+      `http://localhost/api/classes/${classId}/assignments/${assignmentId}/submissions/${studentUid}/grade`,
+      {
+        method,
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${ownerToken}`,
+        },
+        body: JSON.stringify(body),
+      }
+    ),
+    { params: Promise.resolve(ids) }
+  );
+}
+
+/** Returns the student's grade history, oldest first. */
+async function readHistory() {
+  const snapshot = await gradeDoc(studentUid).collection("history").orderBy("savedAt").get();
+
+  return snapshot.docs.map((entry) => entry.data());
 }
 
 /** Sends the student's first or later file through the real submit route. */
@@ -126,11 +152,12 @@ async function storeMissingGrade(overrides: Record<string, unknown> = {}) {
     assignmentId,
     score: 0,
     feedback: "Nothing turned in",
+    submittedAt: null,
     gradedBy: "original-grader",
     gradedAt,
     ...overrides,
   };
-  await missingGradeDoc(studentUid).set(grade);
+  await gradeDoc(studentUid).set(grade);
 
   return grade;
 }
@@ -177,7 +204,7 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
       const res = await postMissing({ score: 0 });
 
       expect(res.status).toBe(401);
-      expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+      expect((await gradeDoc(studentUid).get()).exists).toBe(false);
     });
   });
 
@@ -188,14 +215,14 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
       const res = await postMissing({ score: 0 }, idToken);
 
       expect(res.status).toBe(403);
-      expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+      expect((await gradeDoc(studentUid).get()).exists).toBe(false);
     });
 
     it("returns 403 for an enrolled student, even for their own missing work", async () => {
       const res = await postMissing({}, studentToken);
 
       expect(res.status).toBe(403);
-      expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+      expect((await gradeDoc(studentUid).get()).exists).toBe(false);
     });
 
     it("lets an admin grade missing work", async () => {
@@ -204,7 +231,7 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
       const res = await postMissing({ feedback: "Late policy" }, idToken);
 
       expect(res.status).toBe(201);
-      expect((await missingGradeDoc(studentUid).get()).data()).toMatchObject({
+      expect((await gradeDoc(studentUid).get()).data()).toMatchObject({
         score: 0,
         feedback: "Late policy",
         gradedBy: uid,
@@ -233,7 +260,7 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
 
       expect(res.status).toBe(404);
       expect(await res.json()).toEqual({ error: expect.stringMatching(/not enrolled/) });
-      expect((await missingGradeDoc("zoe").get()).exists).toBe(false);
+      expect((await gradeDoc("zoe").get()).exists).toBe(false);
     });
 
     it("returns 404 for a student enrolled only in another class", async () => {
@@ -248,7 +275,7 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
       const res = await postMissing({ score: 0 }, ownerToken, { ...ids, studentId: uid });
 
       expect(res.status).toBe(404);
-      expect((await missingGradeDoc(uid).get()).exists).toBe(false);
+      expect((await gradeDoc(uid).get()).exists).toBe(false);
     });
 
     it.each([
@@ -262,21 +289,21 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
 
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: "A missing-work grade is always 0." });
-      expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+      expect((await gradeDoc(studentUid).get()).exists).toBe(false);
     });
 
     it("returns 400 for feedback over 5000 characters", async () => {
       const res = await postMissing({ feedback: "x".repeat(5001) }, ownerToken);
 
       expect(res.status).toBe(400);
-      expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+      expect((await gradeDoc(studentUid).get()).exists).toBe(false);
     });
 
     it("returns 400 for a body that is not JSON", async () => {
       const res = await postMissing("{not json", ownerToken);
 
       expect(res.status).toBe(400);
-      expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+      expect((await gradeDoc(studentUid).get()).exists).toBe(false);
     });
 
     it("saves a score of 0, trimmed feedback and who graded it against the student, assignment and course", async () => {
@@ -285,13 +312,14 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
       const res = await postMissing({ feedback: "  Never turned in  " }, ownerToken);
 
       expect(res.status).toBe(201);
-      const saved = (await missingGradeDoc(studentUid).get()).data();
+      const saved = (await gradeDoc(studentUid).get()).data();
       expect(saved).toEqual({
         studentId: studentUid,
         classId,
         assignmentId,
         score: 0,
         feedback: "Never turned in",
+        submittedAt: null,
         gradedBy: ownerUid,
         gradedAt: expect.any(String),
       });
@@ -299,13 +327,26 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
       expect((await res.json()).grade).toEqual(saved);
     });
 
-    it("creates no submission, no grade and no file", async () => {
+    it("creates no submission and no file", async () => {
       const res = await postMissing({ score: 0 }, ownerToken);
 
       expect(res.status).toBe(201);
       expect((await submissionDoc(studentUid).get()).exists).toBe(false);
-      expect((await gradeDoc(studentUid).get()).exists).toBe(false);
       expect(storage.upload).not.toHaveBeenCalled();
+    });
+
+    it("records the grade's creation in its history with no submittedAt", async () => {
+      await postMissing({ feedback: "Never turned in" }, ownerToken);
+
+      expect(await readHistory()).toEqual([
+        {
+          score: 0,
+          feedback: "Never turned in",
+          savedBy: ownerUid,
+          savedAt: expect.any(String),
+          action: "created",
+        },
+      ]);
     });
 
     it("returns 409 and saves nothing while submissions are still open", async () => {
@@ -317,7 +358,7 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
       expect(await res.json()).toEqual({
         error: "Submissions are still open. You can grade missing work once the due date passes.",
       });
-      expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+      expect((await gradeDoc(studentUid).get()).exists).toBe(false);
     });
 
     it("returns 409 and saves nothing for an assignment with no due date", async () => {
@@ -327,7 +368,7 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
 
       expect(res.status).toBe(409);
       expect(await res.json()).toEqual({ error: expect.stringMatching(/no due date/) });
-      expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+      expect((await gradeDoc(studentUid).get()).exists).toBe(false);
     });
 
     it("returns 500 and saves nothing for an invalid due date", async () => {
@@ -337,14 +378,14 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
 
       expect(res.status).toBe(500);
       expect(await res.json()).toEqual({ error: "This assignment has an invalid due date." });
-      expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+      expect((await gradeDoc(studentUid).get()).exists).toBe(false);
     });
 
     it("accepts a grade once the due date has passed", async () => {
       const res = await postMissing({}, ownerToken);
 
       expect(res.status).toBe(201);
-      expect((await missingGradeDoc(studentUid).get()).data()).toMatchObject({ score: 0 });
+      expect((await gradeDoc(studentUid).get()).data()).toMatchObject({ score: 0 });
     });
 
     it.each([
@@ -354,7 +395,7 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
       const res = await postMissing(body, ownerToken);
 
       expect(res.status).toBe(201);
-      expect((await missingGradeDoc(studentUid).get()).data()).toMatchObject({
+      expect((await gradeDoc(studentUid).get()).data()).toMatchObject({
         score: 0,
         feedback: "",
       });
@@ -373,7 +414,27 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
 
       expect(res.status).toBe(409);
       expect(await res.json()).toEqual({ error: expect.stringMatching(/Grade their submission/) });
-      expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+      expect((await gradeDoc(studentUid).get()).exists).toBe(false);
+    });
+
+    it("returns 409 without the grade and changes nothing when the student has a grade for a submission", async () => {
+      const stored = {
+        studentId: studentUid,
+        classId,
+        assignmentId,
+        score: 88,
+        feedback: "Good",
+        submittedAt: "2026-10-31T09:00:00.000Z",
+        gradedBy: ownerUid,
+        gradedAt,
+      };
+      await gradeDoc(studentUid).set(stored);
+
+      const res = await postMissing({ feedback: "Missing" }, ownerToken);
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "This student already has a grade." });
+      expect((await gradeDoc(studentUid).get()).data()).toEqual(stored);
     });
 
     it("returns 409 with the stored grade for missing work that is already graded", async () => {
@@ -382,7 +443,7 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/
       const res = await postMissing({ feedback: "Second" }, ownerToken);
 
       expect(res.status).toBe(409);
-      const stored = (await missingGradeDoc(studentUid).get()).data();
+      const stored = (await gradeDoc(studentUid).get()).data();
       expect(stored).toMatchObject({ score: 0, feedback: "First" });
       expect(await res.json()).toEqual({
         error: expect.stringMatching(/already been graded/),
@@ -419,7 +480,7 @@ describe("POST missing-grade eligibility is checked inside the transaction", () 
     expect(await res.json()).toEqual({
       error: "Submissions are still open. You can grade missing work once the due date passes.",
     });
-    expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+    expect((await gradeDoc(studentUid).get()).exists).toBe(false);
   });
 
   it("returns 409 when the due date is removed before the write", async () => {
@@ -428,7 +489,7 @@ describe("POST missing-grade eligibility is checked inside the transaction", () 
     const res = await postMissing({}, ownerToken);
 
     expect(res.status).toBe(409);
-    expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+    expect((await gradeDoc(studentUid).get()).exists).toBe(false);
   });
 
   it("returns 404 when the student is unenrolled before the write", async () => {
@@ -440,7 +501,7 @@ describe("POST missing-grade eligibility is checked inside the transaction", () 
 
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "This student is not enrolled in this class." });
-    expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+    expect((await gradeDoc(studentUid).get()).exists).toBe(false);
   });
 
   it("returns 404 when the assignment is deleted before the write", async () => {
@@ -450,7 +511,7 @@ describe("POST missing-grade eligibility is checked inside the transaction", () 
 
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "Assignment not found." });
-    expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+    expect((await gradeDoc(studentUid).get()).exists).toBe(false);
   });
 });
 
@@ -464,7 +525,7 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]/missing-grades
       const res = await patchMissing({ lastSavedAt, feedback: "Changed" });
 
       expect(res.status).toBe(401);
-      expect((await missingGradeDoc(studentUid).get()).data()).toEqual(stored);
+      expect((await gradeDoc(studentUid).get()).data()).toEqual(stored);
     });
   });
 
@@ -478,7 +539,7 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]/missing-grades
         const res = await patchMissing({ lastSavedAt, feedback: "Changed" }, idToken);
 
         expect(res.status).toBe(403);
-        expect((await missingGradeDoc(studentUid).get()).data()).toEqual(stored);
+        expect((await gradeDoc(studentUid).get()).data()).toEqual(stored);
       }
     );
 
@@ -489,7 +550,7 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]/missing-grades
       const res = await patchMissing({ lastSavedAt, feedback: "Admin note" }, idToken);
 
       expect(res.status).toBe(200);
-      expect((await missingGradeDoc(studentUid).get()).data()).toMatchObject({
+      expect((await gradeDoc(studentUid).get()).data()).toMatchObject({
         score: 0,
         feedback: "Admin note",
         updatedBy: uid,
@@ -504,7 +565,7 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]/missing-grades
 
       expect(res.status).toBe(404);
       expect(await res.json()).toEqual({ error: expect.stringMatching(/not been graded/) });
-      expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+      expect((await gradeDoc(studentUid).get()).exists).toBe(false);
     });
 
     it.each([
@@ -521,7 +582,7 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]/missing-grades
       const res = await patchMissing(body, ownerToken);
 
       expect(res.status).toBe(400);
-      expect((await missingGradeDoc(studentUid).get()).data()).toEqual(stored);
+      expect((await gradeDoc(studentUid).get()).data()).toEqual(stored);
     });
 
     it("updates only the trimmed feedback, records the edit, and keeps the original grading", async () => {
@@ -534,7 +595,7 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]/missing-grades
       );
 
       expect(res.status).toBe(200);
-      const saved = (await missingGradeDoc(studentUid).get()).data();
+      const saved = (await gradeDoc(studentUid).get()).data();
       expect(saved).toEqual({
         ...stored,
         score: 0,
@@ -553,7 +614,7 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]/missing-grades
       const res = await patchMissing({ lastSavedAt, feedback: "Extended" }, ownerToken);
 
       expect(res.status).toBe(200);
-      expect((await missingGradeDoc(studentUid).get()).data()).toMatchObject({
+      expect((await gradeDoc(studentUid).get()).data()).toMatchObject({
         score: 0,
         feedback: "Extended",
       });
@@ -570,7 +631,7 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]/missing-grades
       );
 
       expect(res.status).toBe(200);
-      expect((await missingGradeDoc(studentUid).get()).data()).toMatchObject({
+      expect((await gradeDoc(studentUid).get()).data()).toMatchObject({
         score: 0,
         feedback: "Second pass",
         gradedAt,
@@ -589,32 +650,31 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]/missing-grades
 
       expect(res.status).toBe(409);
       expect(await res.json()).toEqual({ error: expect.any(String), grade: stored });
-      expect((await missingGradeDoc(studentUid).get()).data()).toEqual(stored);
+      expect((await gradeDoc(studentUid).get()).data()).toEqual(stored);
+    });
+
+    it("returns 409 and changes nothing once the grade belongs to a submission", async () => {
+      const stored = await storeMissingGrade({ score: 70, submittedAt: "2026-10-31T09:00:00.000Z" });
+
+      const res = await patchMissing({ lastSavedAt, feedback: "Mine" }, ownerToken);
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({
+        error: expect.stringMatching(/Edit it through the submission's grade/),
+      });
+      expect((await gradeDoc(studentUid).get()).data()).toEqual(stored);
     });
   });
 });
 
 describe("missing-work grades alongside submissions and their grades", () => {
   it("leaves the submission grading endpoint returning 404 for a student with only a missing-work grade", async () => {
-    await storeMissingGrade();
+    const stored = await storeMissingGrade();
 
-    const res = await postGrade(
-      new NextRequest(
-        `http://localhost/api/classes/${classId}/assignments/${assignmentId}/submissions/${studentUid}/grade`,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${ownerToken}`,
-          },
-          body: JSON.stringify({ score: 0, submittedAt: gradedAt }),
-        }
-      ),
-      { params: Promise.resolve(ids) }
-    );
+    const res = await sendGrade("POST", { score: 0, submittedAt: gradedAt });
 
     expect(res.status).toBe(404);
-    expect((await gradeDoc(studentUid).get()).exists).toBe(false);
+    expect((await gradeDoc(studentUid).get()).data()).toEqual(stored);
     expect((await submissionDoc(studentUid).get()).exists).toBe(false);
   });
 
@@ -626,7 +686,7 @@ describe("missing-work grades alongside submissions and their grades", () => {
     const submitted = await submitFile(studentToken);
 
     expect(submitted.status).toBe(201);
-    expect((await missingGradeDoc(studentUid).get()).data()).toEqual(stored);
+    expect((await gradeDoc(studentUid).get()).data()).toEqual(stored);
 
     const roster = await getRosterOrOwn(ownerToken);
     const [row] = (await roster.json()).students;
@@ -635,6 +695,10 @@ describe("missing-work grades alongside submissions and their grades", () => {
       gradingStatus: "submitted-after-missing",
       fileName: "late.pdf",
       grade: null,
+      feedback: "",
+      gradedAt: null,
+      gradeUpdatedAt: null,
+      resubmittedAfterGrading: false,
       submittedAfterMissingGrade: true,
       missingGrade: {
         score: 0,
@@ -652,43 +716,96 @@ describe("missing-work grades alongside submissions and their grades", () => {
     });
   });
 
-  it("grades the later submission as a separate grade and keeps both records", async () => {
+  it("returns 409 with the missing-work grade from the grade POST for a later submission", async () => {
+    const created = await postMissing({ score: 0, feedback: "Missing" }, ownerToken);
+    const stored = (await created.json()).grade;
+    await setDueDate(futureDueDate);
+    await submitFile(studentToken);
+    const { submittedAt } = (await submissionDoc(studentUid).get()).data()!;
+
+    const res = await sendGrade("POST", { score: 70, feedback: "Late but solid", submittedAt });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: expect.any(String), grade: stored });
+    expect((await gradeDoc(studentUid).get()).data()).toEqual(stored);
+  });
+
+  it("grades the later submission through the grade PATCH, keeping the 0 in history", async () => {
     const created = await postMissing({ score: 0, feedback: "Missing" }, ownerToken);
     const missingGrade = (await created.json()).grade;
     await setDueDate(futureDueDate);
     await submitFile(studentToken);
     const { submittedAt } = (await submissionDoc(studentUid).get()).data()!;
 
-    const graded = await postGrade(
-      new NextRequest(
-        `http://localhost/api/classes/${classId}/assignments/${assignmentId}/submissions/${studentUid}/grade`,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${ownerToken}`,
-          },
-          body: JSON.stringify({ score: 70, feedback: "Late but solid", submittedAt }),
-        }
-      ),
-      { params: Promise.resolve(ids) }
-    );
-
-    expect(graded.status).toBe(201);
-    expect((await gradeDoc(studentUid).get()).data()).toMatchObject({
+    const graded = await sendGrade("PATCH", {
       score: 70,
+      feedback: "Late but solid",
       submittedAt,
+      lastSavedAt: missingGrade.gradedAt,
     });
-    expect((await missingGradeDoc(studentUid).get()).data()).toEqual(missingGrade);
+
+    expect(graded.status).toBe(200);
+    expect((await gradeDoc(studentUid).get()).data()).toEqual({
+      ...missingGrade,
+      score: 70,
+      feedback: "Late but solid",
+      submittedAt,
+      updatedAt: expect.any(String),
+      updatedBy: ownerUid,
+    });
+    expect(await readHistory()).toEqual([
+      {
+        score: 0,
+        feedback: "Missing",
+        savedBy: ownerUid,
+        savedAt: missingGrade.gradedAt,
+        action: "created",
+      },
+      {
+        score: 70,
+        feedback: "Late but solid",
+        submittedAt,
+        savedBy: ownerUid,
+        savedAt: expect.any(String),
+        action: "edited",
+      },
+    ]);
 
     const roster = await getRosterOrOwn(ownerToken);
     const [row] = (await roster.json()).students;
     expect(row).toMatchObject({
       gradingStatus: "graded",
       grade: 70,
-      submittedAfterMissingGrade: true,
-      missingGrade: { score: 0 },
+      gradedAt: missingGrade.gradedAt,
+      gradeUpdatedAt: expect.any(String),
+      submittedAfterMissingGrade: false,
+      missingGrade: null,
     });
+
+    const own = await getRosterOrOwn(studentToken);
+    expect(await own.json()).toMatchObject({
+      submission: { grade: 70, submittedAfterMissingGrade: false },
+      missingGrade: null,
+    });
+  });
+
+  it("refuses to edit the missing-work grade's feedback once a submission is graded over it", async () => {
+    const created = await postMissing({ score: 0, feedback: "Missing" }, ownerToken);
+    const missingGrade = (await created.json()).grade;
+    await setDueDate(futureDueDate);
+    await submitFile(studentToken);
+    const { submittedAt } = (await submissionDoc(studentUid).get()).data()!;
+    const graded = await sendGrade("PATCH", {
+      score: 70,
+      submittedAt,
+      lastSavedAt: missingGrade.gradedAt,
+    });
+    const { grade } = await graded.json();
+
+    const res = await patchMissing({ lastSavedAt: grade.updatedAt, feedback: "Too late" }, ownerToken);
+
+    expect(res.status).toBe(409);
+    expect((await gradeDoc(studentUid).get()).data()).toEqual(grade);
   });
 
   it("refuses a missing-work grade once the student has submitted through the submit route", async () => {
@@ -699,6 +816,6 @@ describe("missing-work grades alongside submissions and their grades", () => {
     const res = await postMissing({ score: 0 }, ownerToken);
 
     expect(res.status).toBe(409);
-    expect((await missingGradeDoc(studentUid).get()).exists).toBe(false);
+    expect((await gradeDoc(studentUid).get()).exists).toBe(false);
   });
 });

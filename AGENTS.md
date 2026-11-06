@@ -11,7 +11,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 ## Project Context — Panel App
 
 A Next.js (App Router) app that is a Canvas-style interface.  
-Live demo: https://panel-app-ten.vercel.app/
+Live demo: https://panel-app-tawny.vercel.app/
 
 ### Stack
 - **Framework**: Next.js 16 (App Router) + React 19 + TypeScript

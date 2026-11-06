@@ -31,16 +31,13 @@ const NOW = Date.parse("2026-11-04T12:00:00.000Z");
 function work({
   submissions = {},
   grades = {},
-  missingGrades = {},
 }: {
   submissions?: Record<string, StoredDoc>;
   grades?: Record<string, StoredDoc>;
-  missingGrades?: Record<string, StoredDoc>;
 } = {}): StoredWork {
   return {
     submissions: new Map(Object.entries(submissions)),
     grades: new Map(Object.entries(grades)),
-    missingGrades: new Map(Object.entries(missingGrades)),
   };
 }
 
@@ -308,12 +305,12 @@ describe("gradingHref", () => {
 });
 
 describe("rosterIds", () => {
-  it("joins enrolled students with anyone who submitted or has a missing-work grade", () => {
+  it("joins enrolled students with anyone who submitted or has a grade", () => {
     const ids = rosterIds(
       ["ava", "ben"],
       [
         work({ submissions: { ava: {}, dropped: {} } }),
-        work({ missingGrades: { gone: {} } }),
+        work({ grades: { gone: { score: 0, submittedAt: null } } }),
       ]
     );
 
@@ -434,10 +431,8 @@ describe("buildGradebook", () => {
             grades: {
               ava: { score: 0, feedback: "", submittedAt: firstVersion, gradedAt },
               ben: { score: 82, feedback: "Good", submittedAt: firstVersion, gradedAt },
-            },
-            missingGrades: {
-              cara: { score: 0, feedback: "Nothing", gradedAt },
-              dev: { score: 0, feedback: "", gradedAt },
+              cara: { score: 0, feedback: "Nothing", submittedAt: null, gradedAt },
+              dev: { score: 0, feedback: "", submittedAt: null, gradedAt },
             },
           }),
         ],
@@ -477,6 +472,43 @@ describe("buildGradebook", () => {
     });
   });
 
+  it("shows a submission regraded over a missing-work grade as plain graded", () => {
+    const gradebook = buildGradebook(
+      source({
+        assignments: [{ id: "a", name: "A", points: 100, dueDate: "2026-11-01" }],
+        work: [
+          work({
+            submissions: { dev: { submittedAt: secondVersion } },
+            grades: {
+              dev: {
+                score: 72,
+                feedback: "Late",
+                submittedAt: secondVersion,
+                gradedAt,
+                updatedAt: "2026-11-02T09:00:00.000Z",
+              },
+            },
+          }),
+        ],
+        enrolledIds: ["dev"],
+      })
+    );
+
+    expect(gradebook.students[0].cells[0]).toEqual({
+      status: "graded",
+      score: 72,
+      submittedAt: secondVersion,
+      grade: {
+        score: 72,
+        feedback: "Late",
+        gradedAt,
+        updatedAt: "2026-11-02T09:00:00.000Z",
+        submittedAt: secondVersion,
+      },
+      missingGrade: null,
+    });
+  });
+
   it("gives a student who left no cell where they have no work", () => {
     const gradebook = buildGradebook(
       source({
@@ -488,7 +520,7 @@ describe("buildGradebook", () => {
         work: [
           work({ submissions: { gone: { submittedAt: firstVersion } } }),
           work(),
-          work({ missingGrades: { gone: { score: 0, feedback: "", gradedAt } } }),
+          work({ grades: { gone: { score: 0, feedback: "", submittedAt: null, gradedAt } } }),
         ],
         enrolledIds: ["ava"],
       })
@@ -514,10 +546,8 @@ describe("buildGradebook", () => {
       grades: {
         ava: { score: 9, submittedAt: firstVersion, gradedAt },
         ben: { score: 8, submittedAt: firstVersion, gradedAt },
-      },
-      missingGrades: {
-        dev: { score: 0, gradedAt },
-        cara: { score: 0, gradedAt },
+        dev: { score: 0, submittedAt: null, gradedAt },
+        cara: { score: 0, submittedAt: null, gradedAt },
       },
     });
     const enrolledIds = ["ava", "ben", "cara", "dev", "eve"];
@@ -533,11 +563,7 @@ describe("buildGradebook", () => {
     );
     const expected = countGradingStatuses(
       ["ava", "ben", "cara", "dev", "eve", "gone"].map((studentId) =>
-        getGradingStatus(
-          stored.submissions.get(studentId),
-          stored.grades.get(studentId),
-          stored.missingGrades.has(studentId) ? {} : null
-        )
+        getGradingStatus(stored.submissions.get(studentId), stored.grades.get(studentId))
       )
     );
 
@@ -773,10 +799,8 @@ describe("gradingProgress", () => {
               ava: { score: 9, submittedAt: firstVersion, gradedAt },
               ben: { score: 8, submittedAt: firstVersion, gradedAt },
               gone: { score: 7, submittedAt: firstVersion, gradedAt },
-            },
-            missingGrades: {
-              dev: { score: 0, gradedAt },
-              eve: { score: 0, gradedAt },
+              dev: { score: 0, submittedAt: null, gradedAt },
+              eve: { score: 0, submittedAt: null, gradedAt },
             },
           }),
         ],

@@ -48,6 +48,10 @@ function MissingWorkGrade({
                     <MissingTag />
                 </p>
 
+                <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">
+                    Graded {formatDate(missingGrade.gradedAt)}
+                </p>
+
                 {missingGrade.updatedAt && (
                     <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">
                         Updated {formatDate(missingGrade.updatedAt)}
@@ -154,6 +158,13 @@ export default function StudentSubmission({
                                 ? `${submission.grade} / ${assignment.points}`
                                 : "Not graded yet"}
                         </p>
+
+                        {/* Keep the original graded date after an edit, as the professor's view does (PANEL-93) */}
+                        {submission.gradedAt && (
+                            <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">
+                                Graded {formatDate(submission.gradedAt)}
+                            </p>
+                        )}
 
                         {submission.gradeUpdatedAt && (
                             <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">

@@ -1,6 +1,6 @@
 # Panel App
 
-🔗 https://panel-app-ten.vercel.app/
+🔗 https://panel-app-tawny.vercel.app/
 
 
 ---

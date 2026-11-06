@@ -51,36 +51,30 @@ export function enrollmentQuery(classId: string, studentId: string): Query {
 
 /**
  * Counts an assignment's grading states. Every enrolled student counts, and
- * so does anyone else who submitted or has a missing-work grade.
+ * so does anyone else who submitted or has a grade.
  */
 export async function loadGradingCounts(
   assignmentRef: DocumentReference,
   enrolledIds: string[]
 ): Promise<GradingCounts> {
-  const [submissions, grades, missingGrades] = await Promise.all([
+  const [submissions, grades] = await Promise.all([
     assignmentRef.collection("submissions").select("submittedAt").get(),
     assignmentRef.collection("grades").select("submittedAt").get(),
-    assignmentRef.collection("missingGrades").select().get(),
   ]);
 
   const submissionsById = new Map(
     submissions.docs.map((submission) => [submission.id, submission.data()])
   );
   const gradesById = new Map(grades.docs.map((grade) => [grade.id, grade.data()]));
-  const missingGradedIds = new Set(missingGrades.docs.map((missing) => missing.id));
   const studentIds = new Set([
     ...enrolledIds,
     ...submissionsById.keys(),
-    ...missingGradedIds,
+    ...gradesById.keys(),
   ]);
 
   return countGradingStatuses(
     [...studentIds].map((studentId) =>
-      getGradingStatus(
-        submissionsById.get(studentId),
-        gradesById.get(studentId),
-        missingGradedIds.has(studentId) ? {} : null
-      )
+      getGradingStatus(submissionsById.get(studentId), gradesById.get(studentId))
     )
   );
 }
@@ -107,22 +101,17 @@ export async function loadGradebook(
 
   const work: StoredWork[] = await Promise.all(
     assignmentSnapshot.docs.map(async (assignment) => {
-      const [submissions, grades, missingGrades] = await Promise.all([
+      const [submissions, grades] = await Promise.all([
         assignment.ref.collection("submissions").select("submittedAt").get(),
         assignment.ref
           .collection("grades")
           .select("score", "feedback", "submittedAt", "gradedAt", "updatedAt")
-          .get(),
-        assignment.ref
-          .collection("missingGrades")
-          .select("score", "feedback", "gradedAt", "updatedAt")
           .get(),
       ]);
 
       return {
         submissions: new Map(submissions.docs.map((doc) => [doc.id, doc.data()])),
         grades: new Map(grades.docs.map((doc) => [doc.id, doc.data()])),
-        missingGrades: new Map(missingGrades.docs.map((doc) => [doc.id, doc.data()])),
       };
     })
   );

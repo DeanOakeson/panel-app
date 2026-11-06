@@ -121,14 +121,15 @@ async function addGrade(
   });
 }
 
-/** Stores a missing-work grade. */
+/** Stores a missing-work grade: a grade of 0 with no submittedAt. */
 async function addMissingGrade(assignmentId: string, studentId: string, feedback = "") {
-  await assignmentDoc(assignmentId).collection("missingGrades").doc(studentId).set({
+  await assignmentDoc(assignmentId).collection("grades").doc(studentId).set({
     studentId,
     classId,
     assignmentId,
     score: 0,
     feedback,
+    submittedAt: null,
     gradedBy: "owner",
     gradedAt,
   });
@@ -318,20 +319,30 @@ describe("GET /api/classes/[classId]/gradebook cells", () => {
     });
   });
 
-  it("shows a grade made after a missing-work grade as graded, keeping both", async () => {
+  it("shows a submission regraded over a missing-work grade as plain graded", async () => {
     await addAssignment("closed");
     await enrollStudent("late");
     await addMissingGrade("closed", "late", "Was missing");
     await addSubmission("closed", "late", secondVersion);
-    await addGrade("closed", "late", 60, "Late but done", secondVersion);
+
+    const regraded = await send(
+      patchGrade,
+      "PATCH",
+      `/api/classes/${classId}/assignments/closed/submissions/late/grade`,
+      { classId, assignmentId: "closed", studentId: "late" },
+      ownerToken,
+      { score: 60, feedback: "Late but done", submittedAt: secondVersion, lastSavedAt: gradedAt }
+    );
+    expect(regraded.status).toBe(200);
 
     const cell = cellOf(await loadGradebook(ownerToken), "late", "closed");
 
     expect(cell).toMatchObject({
       status: "graded",
       score: 60,
-      grade: { feedback: "Late but done" },
-      missingGrade: { feedback: "Was missing" },
+      submittedAt: secondVersion,
+      grade: { feedback: "Late but done", submittedAt: secondVersion },
+      missingGrade: null,
     });
   });
 
@@ -563,10 +574,11 @@ describe("GET /api/classes/[classId]/gradebook performance", () => {
         for (const [studentIndex, studentId] of studentIds.entries()) {
           if (studentIndex % 10 === 9) {
             writes.push((batch) =>
-              batch.set(ref.collection("missingGrades").doc(studentId), {
+              batch.set(ref.collection("grades").doc(studentId), {
                 studentId,
                 score: 0,
                 feedback: "Missing",
+                submittedAt: null,
                 gradedAt,
               })
             );

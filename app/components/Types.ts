@@ -40,12 +40,12 @@ export type Submission = {
     gradeUpdatedAt: string | null;
     /** True when the graded file has been replaced. */
     resubmittedAfterGrading: boolean;
-    /** True when the student submitted after their missing work was graded. */
+    /** True while the student's grade is a missing-work grade given before this submission. */
     submittedAfterMissingGrade: boolean;
     fileUrl: string | null;
 };
 
-/** A missing-work grade as the roster and the student see it. */
+/** A missing-work grade, one with no submittedAt, as the roster and the student see it. */
 export type MissingGradeSummary = {
     score: number;
     feedback: string;
@@ -62,7 +62,7 @@ type ListedStudent = {
     studentName: string | null;
     /** Null when the student has no profile. */
     studentEmail: string | null;
-    /** The student's missing-work grade. Null when they have none. */
+    /** The student's missing-work grade. Null when their grade belongs to a submission, or they have none. */
     missingGrade: MissingGradeSummary | null;
 };
 
@@ -77,7 +77,7 @@ export type SubmittedStudent = ListedStudent &
 export type RosterStudent = MissingStudent | SubmittedStudent;
 
 /**
- * A professor's grade for one submission, stored at
+ * A grade for one student on an assignment, stored at
  * classes/{classId}/assignments/{assignmentId}/grades/{studentUid}.
  * The IDs repeat the path so a collection-group query on grades can filter by them.
  */
@@ -87,30 +87,12 @@ export type Grade = {
     assignmentId: string;
     score: number;
     feedback: string;
-    /** The graded submission's submittedAt, which identifies the file version. */
-    submittedAt: string;
-    /** The grading professor's uid. */
-    gradedBy: string;
-    /** ISO 8601 string. */
-    gradedAt: string;
-    /** ISO 8601 string of the latest edit. Absent until edited. */
-    updatedAt?: string;
-    /** The uid of the professor who last edited the grade. Absent until edited. */
-    updatedBy?: string;
-};
-
-/**
- * A professor's grade for a student who did not submit, stored at
- * classes/{classId}/assignments/{assignmentId}/missingGrades/{studentUid}.
- * It stays apart from the grades collection, and a later submission leaves it in place.
- */
-export type MissingGrade = {
-    studentId: string;
-    classId: string;
-    assignmentId: string;
-    score: number;
-    feedback: string;
-    /** The grading professor's or admin's uid. */
+    /**
+     * The graded submission's submittedAt, which identifies the file version.
+     * Null on a missing-work grade, given to a student without a submission.
+     */
+    submittedAt: string | null;
+    /** The uid of the professor or admin who graded. */
     gradedBy: string;
     /** ISO 8601 string. */
     gradedAt: string;

@@ -11,7 +11,6 @@ type HistoryEntry = GradeHistoryEntry & {
     savedByName: string | null;
 };
 
-type History = { grade: HistoryEntry[]; missingGrade: HistoryEntry[] };
 
 type Props = {
     classId: string;
@@ -23,18 +22,10 @@ type Props = {
 };
 
 /**
- * Lists the saved versions of one kind of grade, oldest first. `missing` tags
- * each score as a missing-work grade.
+ * Lists the saved versions of a grade, oldest first, tagging each version
+ * saved as a missing-work grade.
  */
-function HistoryList({
-    entries,
-    points,
-    missing,
-}: {
-    entries: HistoryEntry[];
-    points: number;
-    missing: boolean;
-}) {
+function HistoryList({ entries, points }: { entries: HistoryEntry[]; points: number }) {
     return (
         <ol className="mt-1 space-y-2">
             {entries.map((entry) => (
@@ -44,7 +35,7 @@ function HistoryList({
                 >
                     <p className="flex flex-wrap items-center gap-x-2 text-sm text-gray-900 dark:text-white">
                         <span className="font-medium">{`${entry.score} / ${points}`}</span>
-                        {missing && <MissingTag />}
+                        {!entry.submittedAt && <MissingTag />}
                         <span className="text-gray-500 dark:text-zinc-400">
                             {`· ${entry.action === "created" ? "Graded" : "Edited"} by ${
                                 entry.savedByName ?? "Unknown user"
@@ -65,7 +56,7 @@ function HistoryList({
 
 /**
  * Shows a "History" disclosure listing every saved version of a student's
- * submission grade and missing-work grade. Loads when first opened.
+ * grade. Loads when first opened.
  */
 export default function GradeHistory({
     classId,
@@ -75,7 +66,7 @@ export default function GradeHistory({
     version,
 }: Props) {
     const [open, setOpen] = useState(false);
-    const [history, setHistory] = useState<History | null>(null);
+    const [history, setHistory] = useState<HistoryEntry[] | null>(null);
     const [loadedVersion, setLoadedVersion] = useState<string | null>(null);
     const [error, setError] = useState("");
 
@@ -108,7 +99,7 @@ export default function GradeHistory({
                 }
 
                 if (!cancelled) {
-                    setHistory(data);
+                    setHistory(data.grade);
                     setError("");
                     setLoadedVersion(version);
                 }
@@ -126,8 +117,6 @@ export default function GradeHistory({
         };
     }, [open, version, loadedVersion, classId, assignmentId, studentId]);
 
-    const both = !!history && history.grade.length > 0 && history.missingGrade.length > 0;
-
     return (
         <details
             className="mt-3"
@@ -142,32 +131,10 @@ export default function GradeHistory({
                     <p className="text-sm text-red-600">{error}</p>
                 ) : !history ? (
                     <p className="text-sm text-gray-500 dark:text-zinc-400">Loading history...</p>
-                ) : history.grade.length === 0 && history.missingGrade.length === 0 ? (
+                ) : history.length === 0 ? (
                     <p className="text-sm text-gray-500 dark:text-zinc-400">No saved versions yet.</p>
                 ) : (
-                    <div className="space-y-3">
-                        {history.missingGrade.length > 0 && (
-                            <div>
-                                {both && (
-                                    <p className="text-sm text-gray-500 dark:text-zinc-400">
-                                        Missing-work grade
-                                    </p>
-                                )}
-                                <HistoryList entries={history.missingGrade} points={points} missing />
-                            </div>
-                        )}
-
-                        {history.grade.length > 0 && (
-                            <div>
-                                {both && (
-                                    <p className="text-sm text-gray-500 dark:text-zinc-400">
-                                        Submission grade
-                                    </p>
-                                )}
-                                <HistoryList entries={history.grade} points={points} missing={false} />
-                            </div>
-                        )}
-                    </div>
+                    <HistoryList entries={history} points={points} />
                 )}
             </div>
         </details>

@@ -6,6 +6,7 @@ import { getClassAccess } from "@/lib/classAccess";
 import { enrollmentQuery } from "@/lib/classRoster";
 import { readFeedback, readJsonBody } from "@/lib/gradeInput";
 import { appendHistory, entryFromStoredGrade, hasHistory } from "@/lib/gradeHistory";
+import { isMissingWorkGrade } from "@/lib/gradingStatus";
 
 type RouteContext = {
   params: Promise<{ classId: string; assignmentId: string; studentId: string }>;
@@ -139,10 +140,11 @@ function stillOpenError(dueDate: unknown): { error: string; status: number } | n
 
 /**
  * Grades an enrolled student who has not submitted with a score of 0 and
- * optional feedback. Only allowed once submissions have closed. Saves to the
- * assignment's missingGrades collection and never creates a submission. A 409 for a student who has submitted points to
- * normal grading, and a 409 for missing work already graded includes the
- * stored grade. Each save adds an entry to the grade's history subcollection.
+ * optional feedback. Only allowed once submissions have closed. Saves the
+ * student's grade with a null submittedAt and never creates a submission. A
+ * 409 for a student who has submitted points to normal grading, and a 409 for
+ * a student who already has a grade includes it when it is a missing-work
+ * grade. Each save adds an entry to the grade's history subcollection.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
@@ -160,15 +162,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
     } = gradeRequest;
 
     const submissionRef = assignmentRef.collection("submissions").doc(studentId);
-    const missingGradeRef = assignmentRef.collection("missingGrades").doc(studentId);
+    const gradeRef = assignmentRef.collection("grades").doc(studentId);
 
     // Every eligibility check reads inside the transaction, so a due-date
     // change, an unenrollment or a submission cannot land before the write
     const result = await db.runTransaction(async (transaction) => {
-      const [assignmentDoc, submissionDoc, missingGradeDoc] = await transaction.getAll(
+      const [assignmentDoc, submissionDoc, gradeDoc] = await transaction.getAll(
         assignmentRef,
         submissionRef,
-        missingGradeRef
+        gradeRef
       );
       const enrollment = await transaction.get(enrollmentQuery(classId, studentId));
 
@@ -190,12 +192,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
         };
       }
 
-      if (missingGradeDoc.exists) {
-        return {
-          error: "This student's missing work has already been graded.",
-          status: 409,
-          grade: missingGradeDoc.data(),
-        };
+      if (gradeDoc.exists) {
+        const stored = gradeDoc.data()!;
+
+        return isMissingWorkGrade(stored)
+          ? {
+              error: "This student's missing work has already been graded.",
+              status: 409,
+              grade: stored,
+            }
+          : { error: "This student already has a grade.", status: 409 };
       }
 
       const grade = {
@@ -204,11 +210,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
         assignmentId,
         score: MISSING_SCORE,
         feedback,
+        submittedAt: null,
         gradedBy: uid,
         gradedAt: new Date().toISOString(),
       };
-      transaction.create(missingGradeRef, grade);
-      appendHistory(transaction, missingGradeRef, {
+      transaction.create(gradeRef, grade);
+      appendHistory(transaction, gradeRef, {
         score: MISSING_SCORE,
         feedback,
         savedBy: uid,
@@ -241,11 +248,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
 /**
  * Edits a missing-work grade's feedback, keeping its score of 0. Takes the
- * same body as POST plus `lastSavedAt`, the grade's `updatedAt` (or `gradedAt` when never
- * edited) as the professor saw it. A 409 for a grade saved since then
- * includes the stored grade. `gradedAt` and `gradedBy` keep the original
- * grading. Allowed while submissions are open, since the due date may have
- * moved after grading.
+ * same body as POST plus `lastSavedAt`, the grade's `updatedAt` (or
+ * `gradedAt` when never edited) as the professor saw it. A 409 for a grade
+ * saved since then includes the stored grade, and a 409 for a grade that
+ * belongs to a submission points to the grade route. `gradedAt` and
+ * `gradedBy` keep the original grading. Allowed while submissions are open,
+ * since the due date may have moved after grading.
  */
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
@@ -262,19 +270,27 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       );
     }
 
-    const missingGradeRef = assignmentRef.collection("missingGrades").doc(studentId);
+    const gradeRef = assignmentRef.collection("grades").doc(studentId);
 
     const result = await db.runTransaction(async (transaction) => {
-      const missingGradeDoc = await transaction.get(missingGradeRef);
+      const gradeDoc = await transaction.get(gradeRef);
 
-      if (!missingGradeDoc.exists) {
+      if (!gradeDoc.exists) {
         return {
           error: "This student's missing work has not been graded yet.",
           status: 404,
         };
       }
 
-      const stored = missingGradeDoc.data()!;
+      const stored = gradeDoc.data()!;
+
+      if (!isMissingWorkGrade(stored)) {
+        return {
+          error:
+            "This grade belongs to the student's submission. Edit it through the submission's grade.",
+          status: 409,
+        };
+      }
 
       if ((stored.updatedAt ?? stored.gradedAt) !== lastSavedAt) {
         return {
@@ -284,21 +300,21 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         };
       }
 
-      const recorded = await hasHistory(transaction, missingGradeRef);
+      const recorded = await hasHistory(transaction, gradeRef);
       const changes = {
         score: MISSING_SCORE,
         feedback,
         updatedAt: new Date().toISOString(),
         updatedBy: uid,
       };
-      transaction.update(missingGradeRef, changes);
+      transaction.update(gradeRef, changes);
 
       // A grade saved before history was kept gets its stored version first
       if (!recorded) {
-        appendHistory(transaction, missingGradeRef, entryFromStoredGrade(stored));
+        appendHistory(transaction, gradeRef, entryFromStoredGrade(stored));
       }
 
-      appendHistory(transaction, missingGradeRef, {
+      appendHistory(transaction, gradeRef, {
         score: MISSING_SCORE,
         feedback,
         savedBy: uid,

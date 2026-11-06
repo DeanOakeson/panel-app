@@ -9,7 +9,7 @@ import type {
 export type GradeHistoryEntry = {
   score: number;
   feedback: string;
-  /** The graded submission's version. Absent on missing-work grades. */
+  /** The graded submission's version. Absent on a missing-work grade. */
   submittedAt?: string;
   /** The uid of whoever saved this version. */
   savedBy: string;
@@ -18,7 +18,7 @@ export type GradeHistoryEntry = {
   action: "created" | "edited";
 };
 
-/** Returns the history subcollection of a grade or missing-work grade document. */
+/** Returns the history subcollection of a grade document. */
 export function gradeHistory(gradeRef: DocumentReference): CollectionReference {
   return gradeRef.collection("history");
 }

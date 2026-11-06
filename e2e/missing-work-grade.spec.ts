@@ -108,7 +108,19 @@ test.describe("Professor grades a student who did not submit", () => {
     await expect(own.getByText("Missing-work grade", { exact: true })).toBeVisible();
     await expectMissingScore(own, "0 / 100");
     await expect(own).toContainText(FEEDBACK);
+    await expect(own.getByText(/^Graded (?!before)/)).toBeVisible();
+    await expect(own.getByText(/^Updated /)).toHaveCount(0);
     await expect(own.getByText("History", { exact: true })).toHaveCount(0);
+
+    // An edit keeps the original Graded date and adds when it was updated
+    await dev.getByRole("button", { name: "Edit feedback" }).click();
+    await markMissing(dev, EDITED_FEEDBACK, "Save feedback");
+    await expect(dev).toContainText(EDITED_FEEDBACK);
+
+    await devPage.reload();
+    await expect(own).toContainText(EDITED_FEEDBACK);
+    await expect(own.getByText(/^Graded (?!before)/)).toBeVisible();
+    await expect(own.getByText(/^Updated /)).toBeVisible();
   });
 
   test("is not offered while submissions are open", async ({ page, scenario }) => {
@@ -125,7 +137,7 @@ test.describe("Professor grades a student who did not submit", () => {
     await expect(studentCard(page, "Dev Patel").getByRole("button", { name: "Mark missing" })).toBeVisible();
   });
 
-  test("a later submission keeps the missing-work grade and is flagged for grading", async ({
+  test("a later submission is flagged for grading and graded over the missing-work grade", async ({
     page,
     scenario,
     pageAs,
@@ -172,13 +184,38 @@ test.describe("Professor grades a student who did not submit", () => {
       page.getByText("4 of 4 submitted · 3 need grading (1 resubmitted, 1 after a missing-work grade)")
     ).toBeVisible();
 
+    // The form starts empty and saves over the missing-work grade
+    await expect(flagged.getByLabel("Score")).toHaveValue("");
+    await expect(flagged.getByLabel("Feedback")).toHaveValue("");
+    const saved = page.waitForRequest(
+      (request) => request.url().endsWith(`/submissions/${scenario.students.dev.uid}/grade`)
+    );
     await saveGrade(flagged, "72", "Late, but complete.");
+    expect((await saved).method()).toBe("PATCH");
+
     await expectStatus(flagged, "Graded");
     await expect(flagged).toContainText(`72 / ${closed.points}`);
-    await expect(flagged.getByText(notice)).toBeVisible();
+    await expect(flagged.getByText(notice)).toHaveCount(0);
+
+    // The 0 stays in the grade's history
+    await flagged.getByText("History", { exact: true }).click();
+    const versions = flagged.getByRole("listitem");
+    await expect(versions).toHaveCount(2);
+    await expectMissingScore(versions.nth(0), `0 / ${closed.points}`);
+    await expect(versions.nth(0)).toContainText(`Graded by ${professor.name}`);
+    await expect(versions.nth(1)).toContainText(`72 / ${closed.points}`);
+    await expect(versions.nth(1).getByText("Missing", { exact: true })).toHaveCount(0);
+    await expect(versions.nth(1)).toContainText(`Edited by ${professor.name}`);
+
+    await page.reload();
+    const regraded = studentCard(page, "Dev Patel");
+    await expectStatus(regraded, "Graded");
+    await expect(regraded).toContainText(`72 / ${closed.points}`);
+    await expect(regraded.getByText(notice)).toHaveCount(0);
 
     await devPage.reload();
     await expect(own).toContainText(`72 / ${closed.points}`);
-    await expect(own.getByText(notice)).toBeVisible();
+    await expect(own).toContainText("Late, but complete.");
+    await expect(own.getByText(notice)).toHaveCount(0);
   });
 });
