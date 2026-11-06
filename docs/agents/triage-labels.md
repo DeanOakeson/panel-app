@@ -1,6 +1,6 @@
 # Triage Labels
 
-The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker. These labels apply on the **GitHub side only** (bug reports); ClickUp owns backlog/sprint state (see `issue-tracker.md`).
+The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker. These labels apply on the **GitHub side only** (bug reports). Jira owns the backlog and sprint state (see `issue-tracker.md`).
 
 | Label in mattpocock/skills | Label in our tracker | Meaning                                  |
 | -------------------------- | -------------------- | ---------------------------------------- |
