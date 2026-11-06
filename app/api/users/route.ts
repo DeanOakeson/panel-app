@@ -1,26 +1,17 @@
 
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { getAdminDb } from "@/lib/firebaseAdmin";
 import { requireAdmin } from "@/lib/adminGuard";
+import { verifyRequestToken } from "@/lib/authToken";
 import { FieldValue } from "firebase-admin/firestore";
-
-function getBearerToken(req: Request): string | null {
-  const authorization = req.headers.get("authorization");
-  return authorization?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
-}
 
 // GET /api/users
 export async function GET(req: Request) {
   try {
-    const token = getBearerToken(req);
-
-    if (!token) {
-      return Response.json(
-        { error: "Missing authentication token" },
-        { status: 401 }
-      );
-    }
-
-    const decoded = await getAdminAuth().verifyIdToken(token);
+    // 401 for a missing, bad or expired token (PANEL-94); outages throw to the
+    // catch below and answer 500.
+    const auth = await verifyRequestToken(req);
+    if (auth.error) return auth.error;
+    const { decoded } = auth;
 
     const snapshot = await getAdminDb()
       .collection("users")
@@ -53,16 +44,11 @@ export async function GET(req: Request) {
 // This endpoint never grants admin or professor privileges.
 export async function POST(req: Request) {
   try {
-    const token = getBearerToken(req);
-
-    if (!token) {
-      return Response.json(
-        { error: "Missing authentication token" },
-        { status: 401 }
-      );
-    }
-
-    const decoded = await getAdminAuth().verifyIdToken(token);
+    // 401 for a missing, bad or expired token (PANEL-94); outages throw to the
+    // catch below and answer 500.
+    const auth = await verifyRequestToken(req);
+    if (auth.error) return auth.error;
+    const { decoded } = auth;
     const body = await req.json();
 
     const name = typeof body.name === "string" ? body.name.trim() : "";
