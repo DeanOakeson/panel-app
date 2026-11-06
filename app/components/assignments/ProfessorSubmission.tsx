@@ -4,14 +4,26 @@ import { useEffect, useRef, useState } from "react";
 import { formatTimestamp } from "@/lib/assignmentDeadline";
 import {
     countGradingStatuses,
+    describeToGradeDetail,
     getGradingStatus,
     gradingStatusLabel,
+    isMissingRow,
+    isMissingStatus,
     needsGrade,
     type GradingCounts,
     type GradingStatus,
 } from "@/lib/gradingStatus";
 import GradeForm from "./GradeForm";
-import type { Assignment, Grade, RosterStudent, SubmittedStudent } from "../Types";
+import GradeHistory from "./GradeHistory";
+import MissingTag from "./MissingTag";
+import MissingWorkForm from "./MissingWorkForm";
+import type {
+    Assignment,
+    Grade,
+    MissingStudent,
+    RosterStudent,
+    SubmittedStudent,
+} from "../Types";
 
 type Props = {
     classId: string;
@@ -22,8 +34,12 @@ type Props = {
     error: string;
     /** Whether submissions have closed, which labels students without one as missing. */
     closed: boolean;
+    /** Whether the viewer can grade submissions, which only the class's professor can. */
+    canGradeSubmissions: boolean;
     /** Receives the grade the server saved for a student's submission. */
     onGraded: (studentId: string, grade: Grade) => void;
+    /** Receives the missing-work grade the server saved for a student without a submission. */
+    onMissingGraded: (studentId: string, grade: Grade) => void;
 };
 
 type Filter = "all" | "to-grade" | "graded" | "missing";
@@ -38,8 +54,11 @@ const FILTERS: { value: Filter; empty: string }[] = [
 const BADGE_CLASSES: Record<GradingStatus, string> = {
     "needs-grading": "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200",
     resubmitted: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+    "submitted-after-missing":
+        "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
     graded: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200",
     missing: "bg-gray-100 text-gray-700 dark:bg-zinc-800 dark:text-zinc-300",
+    "missing-graded": "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200",
 };
 
 /** How long a card graded under Needs grading stays before it leaves the view. */
@@ -69,8 +88,10 @@ function matchesFilter(status: GradingStatus, filter: Filter) {
             return true;
         case "to-grade":
             return needsGrade(status);
-        default:
-            return status === filter;
+        case "graded":
+            return status === "graded";
+        case "missing":
+            return isMissingStatus(status);
     }
 }
 
@@ -102,24 +123,26 @@ function filterCount(counts: GradingCounts, filter: Filter) {
 
 /**
  * Returns the summary line, like
- * "5 of 6 submitted · 3 need grading (1 resubmitted) · 1 missing".
+ * "5 of 6 submitted · 3 need grading (1 resubmitted) · 1 missing (1 graded)".
  */
 function describeCounts(counts: GradingCounts, closed: boolean) {
     const parts = [`${counts.submitted} of ${counts.students} submitted`];
 
     if (counts.toGrade > 0) {
         const verb = counts.toGrade === 1 ? "needs" : "need";
-        const resubmitted =
-            counts.resubmitted > 0 ? ` (${counts.resubmitted} resubmitted)` : "";
+        const detail = describeToGradeDetail(counts);
 
-        parts.push(`${counts.toGrade} ${verb} grading${resubmitted}`);
+        parts.push(`${counts.toGrade} ${verb} grading${detail ? ` (${detail})` : ""}`);
     } else if (counts.submitted > 0) {
         parts.push("all graded");
     }
 
-    if (counts.missing > 0 && counts.submitted > 0) {
+    if (counts.missing > 0 && (counts.submitted > 0 || counts.missingGraded > 0)) {
+        const graded =
+            counts.missingGraded > 0 ? ` (${counts.missingGraded} graded)` : "";
+
         parts.push(
-            `${counts.missing} ${gradingStatusLabel("missing", closed).toLowerCase()}`
+            `${counts.missing} ${gradingStatusLabel("missing", closed).toLowerCase()}${graded}`
         );
     }
 
@@ -180,7 +203,9 @@ export default function ProfessorSubmissions({
     loading,
     error,
     closed,
+    canGradeSubmissions,
     onGraded,
+    onMissingGraded,
 }: Props) {
     const [alreadyGradedIds, setAlreadyGradedIds] = useState<ReadonlySet<string>>(
         new Set()
@@ -279,7 +304,7 @@ export default function ProfessorSubmissions({
         const saved = students.find((student) => student.studentId === studentId);
         const savedStillToGrade =
             !!saved &&
-            saved.gradingStatus !== "missing" &&
+            !isMissingRow(saved) &&
             needsGrade(getGradingStatus(saved, grade));
         const left =
             students.filter(
@@ -296,11 +321,8 @@ export default function ProfessorSubmissions({
         setAnnouncement(`${result} ${remaining}`);
     }
 
-    /**
-     * Passes a stored grade up, closes the row's editor, and remembers whether
-     * the row was saved elsewhere first.
-     */
-    function handleSaved(studentId: string, grade: Grade, alreadyGraded: boolean) {
+    /** Remembers whether a row's grade was saved elsewhere first. */
+    function rememberSavedElsewhere(studentId: string, alreadyGraded: boolean) {
         setAlreadyGradedIds((current) => {
             const next = new Set(current);
 
@@ -312,6 +334,14 @@ export default function ProfessorSubmissions({
 
             return next;
         });
+    }
+
+    /**
+     * Passes a stored grade up, closes the row's editor, and remembers whether
+     * the row was saved elsewhere first.
+     */
+    function handleSaved(studentId: string, grade: Grade, alreadyGraded: boolean) {
+        rememberSavedElsewhere(studentId, alreadyGraded);
         setKeptIds((current) => new Set(current).add(studentId));
         setEditing(studentId, false);
         announceSaved(studentId, grade, alreadyGraded);
@@ -321,6 +351,28 @@ export default function ProfessorSubmissions({
         }
 
         onGraded(studentId, grade);
+    }
+
+    /**
+     * Passes a stored missing-work grade up, closes the row's editor, and
+     * announces it.
+     */
+    function handleMissingSaved(
+        studentId: string,
+        grade: Grade,
+        alreadyGraded: boolean
+    ) {
+        const saved = students.find((student) => student.studentId === studentId);
+        const name = saved ? displayName(saved) : "this student";
+
+        rememberSavedElsewhere(studentId, alreadyGraded);
+        setEditing(studentId, false);
+        setAnnouncement(
+            alreadyGraded
+                ? `${name}'s missing work was already graded elsewhere. Showing the saved grade.`
+                : `Missing-work grade saved for ${name}.`
+        );
+        onMissingGraded(studentId, grade);
     }
 
     return (
@@ -385,17 +437,22 @@ export default function ProfessorSubmissions({
                     ) : (
                         <div className="mt-4 space-y-4">
                             {visibleStudents.map((student) =>
-                                student.gradingStatus === "missing" ? (
-                                    <article
+                                isMissingRow(student) ? (
+                                    <MissingWorkCard
                                         key={student.studentId}
-                                        className="rounded-lg border border-gray-200 p-4 dark:border-zinc-700"
-                                    >
-                                        <StudentHeading student={student} closed={closed} />
-
-                                        <p className="mt-2 text-sm text-gray-500 dark:text-zinc-400">
-                                            No submission
-                                        </p>
-                                    </article>
+                                        classId={classId}
+                                        assignment={assignment}
+                                        student={student}
+                                        closed={closed}
+                                        editing={editingIds.has(student.studentId)}
+                                        savedElsewhere={alreadyGradedIds.has(
+                                            student.studentId
+                                        )}
+                                        onEditingChange={(open) =>
+                                            setEditing(student.studentId, open)
+                                        }
+                                        onSaved={handleMissingSaved}
+                                    />
                                 ) : (
                                     <SubmissionCard
                                         key={student.studentId}
@@ -403,6 +460,7 @@ export default function ProfessorSubmissions({
                                         assignment={assignment}
                                         student={student}
                                         closed={closed}
+                                        canGrade={canGradeSubmissions}
                                         editing={editingIds.has(student.studentId)}
                                         savedElsewhere={alreadyGradedIds.has(
                                             student.studentId
@@ -428,6 +486,8 @@ type SubmissionCardProps = {
     student: SubmittedStudent;
     /** Whether submissions have closed. */
     closed: boolean;
+    /** Whether the viewer can grade the submission. */
+    canGrade: boolean;
     /** Whether the grade editor is open. */
     editing: boolean;
     /** Whether another session saved the grade before this one. */
@@ -442,6 +502,7 @@ function SubmissionCard({
     assignment,
     student,
     closed,
+    canGrade,
     editing,
     savedElsewhere,
     onEditingChange,
@@ -496,6 +557,15 @@ function SubmissionCard({
                         Resubmitted after grading
                     </p>
                 )}
+
+                {student.submittedAfterMissingGrade && student.missingGrade && (
+                    <p className="mt-1 flex flex-wrap items-center gap-2 text-sm font-medium text-amber-600 dark:text-amber-400">
+                        <span>
+                            {`Submitted after a missing-work grade of ${student.missingGrade.score} / ${assignment.points}`}
+                        </span>
+                        <MissingTag />
+                    </p>
+                )}
             </div>
 
             {student.feedback && (
@@ -508,7 +578,20 @@ function SubmissionCard({
                 </div>
             )}
 
-            {(student.fileUrl || (graded && !editing)) && (
+            {(graded || student.missingGrade) && (
+                <GradeHistory
+                    classId={classId}
+                    assignmentId={assignment.id}
+                    studentId={student.studentId}
+                    points={assignment.points}
+                    version={[
+                        student.gradeUpdatedAt ?? student.gradedAt,
+                        student.missingGrade?.updatedAt ?? student.missingGrade?.gradedAt,
+                    ].join("|")}
+                />
+            )}
+
+            {(student.fileUrl || (canGrade && graded && !editing)) && (
                 <div className="mt-4 flex flex-wrap gap-2">
                     {student.fileUrl && (
                         <a
@@ -521,7 +604,7 @@ function SubmissionCard({
                         </a>
                     )}
 
-                    {graded && !editing && (
+                    {canGrade && graded && !editing && (
                         <button
                             type="button"
                             onClick={() => onEditingChange(true)}
@@ -539,7 +622,8 @@ function SubmissionCard({
                 </div>
             )}
 
-            {student.grade === null && (
+            {/* A submission after a missing-work grade is graded by saving over that grade, starting empty */}
+            {canGrade && student.grade === null && (
                 <div className="mt-4 border-t border-gray-200 pt-4 dark:border-zinc-700">
                     <GradeForm
                         classId={classId}
@@ -547,12 +631,21 @@ function SubmissionCard({
                         studentId={student.studentId}
                         submittedAt={student.submittedAt}
                         points={assignment.points}
+                        editing={
+                            student.missingGrade
+                                ? {
+                                      lastSavedAt:
+                                          student.missingGrade.updatedAt ??
+                                          student.missingGrade.gradedAt,
+                                  }
+                                : undefined
+                        }
                         onSaved={onSaved}
                     />
                 </div>
             )}
 
-            {graded && editing && (
+            {canGrade && graded && editing && (
                 <div className="mt-4 border-t border-gray-200 pt-4 dark:border-zinc-700">
                     <GradeForm
                         classId={classId}
@@ -565,6 +658,134 @@ function SubmissionCard({
                             feedback: student.feedback,
                             lastSavedAt: student.gradeUpdatedAt ?? student.gradedAt!,
                         }}
+                        onSaved={onSaved}
+                        onCancel={() => onEditingChange(false)}
+                    />
+                </div>
+            )}
+        </article>
+    );
+}
+
+type MissingWorkCardProps = {
+    classId: string;
+    assignment: Assignment;
+    student: MissingStudent;
+    /** Whether submissions have closed. */
+    closed: boolean;
+    /** Whether the grade form is open. */
+    editing: boolean;
+    /** Whether another session saved the missing-work grade before this one. */
+    savedElsewhere: boolean;
+    onEditingChange: (open: boolean) => void;
+    onSaved: (studentId: string, grade: Grade, alreadyGraded: boolean) => void;
+};
+
+/**
+ * Shows one student without a submission, their missing-work grade of 0, and
+ * the form to mark the work missing or edit the grade's feedback. Work can
+ * only be marked missing once submissions close.
+ */
+function MissingWorkCard({
+    classId,
+    assignment,
+    student,
+    closed,
+    editing,
+    savedElsewhere,
+    onEditingChange,
+    onSaved,
+}: MissingWorkCardProps) {
+    const missingGrade = student.missingGrade;
+
+    return (
+        <article className="rounded-lg border border-gray-200 p-4 dark:border-zinc-700">
+            <StudentHeading student={student} closed={closed} />
+
+            <p className="mt-2 text-sm text-gray-500 dark:text-zinc-400">
+                No submission
+            </p>
+
+            {missingGrade && (
+                <>
+                    <div className="mt-3">
+                        <p className="text-sm text-gray-500 dark:text-zinc-400">
+                            Missing-work grade
+                        </p>
+
+                        <p className="flex items-center gap-2 font-medium text-gray-900 dark:text-white">
+                            <span>{`${missingGrade.score} / ${assignment.points}`}</span>
+                            <MissingTag />
+                        </p>
+
+                        <p className="text-xs text-gray-500 dark:text-zinc-400">
+                            Graded {formatTimestamp(missingGrade.gradedAt)}
+                        </p>
+
+                        {missingGrade.updatedAt && (
+                            <p className="text-xs text-gray-500 dark:text-zinc-400">
+                                Updated {formatTimestamp(missingGrade.updatedAt)}
+                            </p>
+                        )}
+
+                        {savedElsewhere && (
+                            <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
+                                Saved elsewhere first. Showing the saved grade.
+                            </p>
+                        )}
+                    </div>
+
+                    {missingGrade.feedback && (
+                        <div className="mt-3">
+                            <p className="text-sm text-gray-500 dark:text-zinc-400">
+                                Feedback
+                            </p>
+
+                            <p className="whitespace-pre-line text-gray-900 dark:text-white">
+                                {missingGrade.feedback}
+                            </p>
+                        </div>
+                    )}
+
+                    <GradeHistory
+                        classId={classId}
+                        assignmentId={assignment.id}
+                        studentId={student.studentId}
+                        points={assignment.points}
+                        version={missingGrade.updatedAt ?? missingGrade.gradedAt}
+                    />
+                </>
+            )}
+
+            {/* Missing work can be graded once submissions close, and edited after that */}
+            {!editing && (missingGrade || closed) && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        onClick={() => onEditingChange(true)}
+                        className={secondaryButtonClass}
+                    >
+                        {missingGrade ? "Edit feedback" : "Mark missing"}
+                    </button>
+                </div>
+            )}
+
+            {editing && (
+                <div className="mt-4 border-t border-gray-200 pt-4 dark:border-zinc-700">
+                    <MissingWorkForm
+                        classId={classId}
+                        assignmentId={assignment.id}
+                        studentId={student.studentId}
+                        points={assignment.points}
+                        editing={
+                            missingGrade
+                                ? {
+                                      feedback: missingGrade.feedback,
+                                      lastSavedAt:
+                                          missingGrade.updatedAt ?? missingGrade.gradedAt,
+                                  }
+                                : undefined
+                        }
                         onSaved={onSaved}
                         onCancel={() => onEditingChange(false)}
                     />

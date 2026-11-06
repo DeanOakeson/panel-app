@@ -1,8 +1,11 @@
-import type { Assignment, Submission } from "../Types";
+import type { Assignment, MissingGradeSummary, Submission } from "../Types";
+import MissingTag from "./MissingTag";
 
 type Props = {
     assignment: Assignment;
     submission: Submission | null;
+    /** The grade the professor gave while the student had no submission. */
+    missingGrade: MissingGradeSummary | null;
     loading: boolean;
     error: string;
 };
@@ -25,9 +28,60 @@ function formatFileSize(bytes: number) {
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+/** Shows a missing-work grade the professor gave before the student submitted. */
+function MissingWorkGrade({
+    assignment,
+    missingGrade,
+}: {
+    assignment: Assignment;
+    missingGrade: MissingGradeSummary;
+}) {
+    return (
+        <div className="mt-4 space-y-4">
+            <div className="border-t border-gray-200 pt-4 dark:border-zinc-800">
+                <p className="text-sm text-gray-500 dark:text-zinc-400">
+                    Missing-work grade
+                </p>
+
+                <p className="mt-1 flex items-center gap-2 text-xl font-semibold text-gray-900 dark:text-white">
+                    <span>{`${missingGrade.score} / ${assignment.points}`}</span>
+                    <MissingTag />
+                </p>
+
+                <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">
+                    Graded {formatDate(missingGrade.gradedAt)}
+                </p>
+
+                {missingGrade.updatedAt && (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">
+                        Updated {formatDate(missingGrade.updatedAt)}
+                    </p>
+                )}
+            </div>
+
+            {missingGrade.feedback && (
+                <div>
+                    <p className="text-sm text-gray-500 dark:text-zinc-400">
+                        Professor feedback
+                    </p>
+
+                    <p className="mt-1 whitespace-pre-line text-gray-900 dark:text-white">
+                        {missingGrade.feedback}
+                    </p>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/**
+ * Shows a student their submission and its grade, or the missing-work grade
+ * when they have not submitted.
+ */
 export default function StudentSubmission({
     assignment,
     submission,
+    missingGrade,
     loading,
     error,
 }: Props) {
@@ -123,6 +177,15 @@ export default function StudentSubmission({
                                 Graded before your latest submission
                             </p>
                         )}
+
+                        {submission.submittedAfterMissingGrade && missingGrade && (
+                            <p className="mt-1 flex flex-wrap items-center gap-2 text-sm font-medium text-amber-600 dark:text-amber-400">
+                                <span>
+                                    {`Submitted after a missing-work grade of ${missingGrade.score} / ${assignment.points}`}
+                                </span>
+                                <MissingTag />
+                            </p>
+                        )}
                     </div>
 
                     {submission.feedback && (
@@ -138,9 +201,18 @@ export default function StudentSubmission({
                     )}
                 </div>
             ) : (
-                <p className="mt-3 text-sm text-gray-500 dark:text-zinc-400">
-                    You have not submitted this assignment yet.
-                </p>
+                <>
+                    <p className="mt-3 text-sm text-gray-500 dark:text-zinc-400">
+                        You have not submitted this assignment yet.
+                    </p>
+
+                    {missingGrade && (
+                        <MissingWorkGrade
+                            assignment={assignment}
+                            missingGrade={missingGrade}
+                        />
+                    )}
+                </>
             )}
         </section>
     );

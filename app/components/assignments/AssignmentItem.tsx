@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { formatClosesAt } from "@/lib/assignmentDeadline";
-import type { GradingCounts } from "@/lib/gradingStatus";
+import { describeToGradeDetail, type GradingCounts } from "@/lib/gradingStatus";
 
 export type Assignment = {
   id: string;
@@ -49,6 +49,8 @@ function GradingProgress({ counts }: { counts: GradingCounts }) {
     );
   }
 
+  const detail = describeToGradeDetail(counts);
+
   return (
     <p className="text-sm text-gray-600 dark:text-zinc-300">
       {counts.submitted}/{counts.students} submitted
@@ -58,7 +60,7 @@ function GradingProgress({ counts }: { counts: GradingCounts }) {
           {counts.toGrade > 0 ? (
             <span className="font-semibold text-amber-700 dark:text-amber-400">
               {counts.toGrade} to grade
-              {counts.resubmitted > 0 && ` (${counts.resubmitted} resubmitted)`}
+              {detail && ` (${detail})`}
             </span>
           ) : (
             <span className="font-semibold text-green-700 dark:text-green-400">

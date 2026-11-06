@@ -43,6 +43,18 @@ test.describe("Professor edits a saved grade", () => {
     await page.reload();
     await expect(studentCard(page, "Cara Diaz")).toContainText("95 / 100");
     await expect(studentCard(page, "Cara Diaz").getByText(timestampLine("Updated"))).toBeVisible();
+
+    // History keeps the original grade and the edit, oldest first
+    const reloaded = studentCard(page, "Cara Diaz");
+    await reloaded.getByText("History", { exact: true }).click();
+    const versions = reloaded.getByRole("listitem");
+    await expect(versions).toHaveCount(2);
+    await expect(versions.nth(0)).toContainText(`${CARA_SCORE} / 100`);
+    await expect(versions.nth(0)).toContainText(`Graded by ${scenario.professor.name}`);
+    await expect(versions.nth(0)).toContainText(CARA_FEEDBACK);
+    await expect(versions.nth(1)).toContainText("95 / 100");
+    await expect(versions.nth(1)).toContainText(`Edited by ${scenario.professor.name}`);
+    await expect(versions.nth(1)).toContainText(EDITED_FEEDBACK);
   });
 
   test("grades a resubmitted version, which clears Resubmitted", async ({ page, scenario }) => {

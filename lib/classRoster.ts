@@ -1,4 +1,4 @@
-import type { DocumentReference } from "firebase-admin/firestore";
+import type { DocumentReference, Query } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import {
   countGradingStatuses,
@@ -31,8 +31,21 @@ export async function loadEnrolledStudentIds(classId: string): Promise<string[]>
 }
 
 /**
+ * Returns the query for a student's enrollment in a class, which matches
+ * nothing when they are not enrolled.
+ */
+export function enrollmentQuery(classId: string, studentId: string): Query {
+  return getAdminDb()
+    .collection("users")
+    .doc(studentId)
+    .collection("classes")
+    .where("class_id", "==", classId)
+    .limit(1);
+}
+
+/**
  * Counts an assignment's grading states. Every enrolled student counts, and
- * so does anyone else who submitted.
+ * so does anyone else who submitted or has a grade.
  */
 export async function loadGradingCounts(
   assignmentRef: DocumentReference,
@@ -47,7 +60,11 @@ export async function loadGradingCounts(
     submissions.docs.map((submission) => [submission.id, submission.data()])
   );
   const gradesById = new Map(grades.docs.map((grade) => [grade.id, grade.data()]));
-  const studentIds = new Set([...enrolledIds, ...submissionsById.keys()]);
+  const studentIds = new Set([
+    ...enrolledIds,
+    ...submissionsById.keys(),
+    ...gradesById.keys(),
+  ]);
 
   return countGradingStatuses(
     [...studentIds].map((studentId) =>
