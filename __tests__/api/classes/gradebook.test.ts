@@ -543,11 +543,11 @@ describe("GET /api/classes/[classId]/gradebook consistency", () => {
 
 describe("GET /api/classes/[classId]/gradebook performance", () => {
   it(
-    "answers in under 2 seconds for 40 students and 12 assignments",
+    "answers in under 2 seconds for 40 students and 20 assignments",
     async () => {
       const db = getAdminDb();
       const studentIds = Array.from({ length: 40 }, (_, index) => `student-${index}`);
-      const assignmentIds = Array.from({ length: 12 }, (_, index) => `assignment-${index}`);
+      const assignmentIds = Array.from({ length: 20 }, (_, index) => `assignment-${index}`);
       const writes: ((batch: WriteBatch) => void)[] = [];
 
       for (const studentId of studentIds) {
@@ -566,7 +566,7 @@ describe("GET /api/classes/[classId]/gradebook performance", () => {
           batch.set(ref, {
             name: `Assignment ${assignmentIndex}`,
             points: 100,
-            dueDate: assignmentIndex < 8 ? pastDueDate : futureDueDate,
+            dueDate: assignmentIndex < 14 ? pastDueDate : futureDueDate,
             createdAt: `2026-09-${String(assignmentIndex + 1).padStart(2, "0")}T00:00:00.000Z`,
           })
         );
@@ -622,11 +622,11 @@ describe("GET /api/classes/[classId]/gradebook performance", () => {
         timings.push(performance.now() - started);
 
         expect(gradebook.students).toHaveLength(40);
-        expect(gradebook.assignments).toHaveLength(12);
+        expect(gradebook.assignments).toHaveLength(20);
       }
 
       const median = timings.sort((first, second) => first - second)[1];
-      console.log(`Gradebook median for 40 students x 12 assignments: ${median.toFixed(0)} ms`);
+      console.log(`Gradebook median for 40 students x 20 assignments: ${median.toFixed(0)} ms`);
 
       expect(median).toBeLessThan(2000);
     },
