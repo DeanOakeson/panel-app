@@ -75,6 +75,9 @@ test.describe("Professor edits a saved grade", () => {
     await caraPage.goto(scenario.closed.path);
     await expect(ownSubmission(caraPage)).toContainText(`${CARA_SCORE} / 100`);
     await expect(ownSubmission(caraPage)).toContainText(CARA_FEEDBACK);
+    // Before the edit: the graded date only
+    await expect(ownSubmission(caraPage).getByText(/^Graded (?!before)/)).toBeVisible();
+    await expect(ownSubmission(caraPage).getByText(/^Updated /)).toHaveCount(0);
 
     await signIn(page, scenario.professor);
     await page.goto(scenario.closed.path);
@@ -89,5 +92,7 @@ test.describe("Professor edits a saved grade", () => {
     await expect(submission).toContainText(EDITED_FEEDBACK);
     await expect(submission).not.toContainText(CARA_FEEDBACK);
     await expect(submission.getByText(/^Updated /)).toBeVisible();
+    // PANEL-93: the original graded date stays after the edit
+    await expect(submission.getByText(/^Graded (?!before)/)).toBeVisible();
   });
 });
