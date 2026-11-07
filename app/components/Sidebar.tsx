@@ -30,7 +30,7 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="flex h-screen w-20 shrink-0 flex-col items-center overflow-y-auto bg-gray-800 py-5 text-white sm:w-24">
+    <aside className="flex h-screen w-20 shrink-0 flex-col items-center overflow-y-auto bg-gray-800 py-5 text-white lg:w-24">
       {/* Logo */}
       <button
         onClick={() => router.push("/dashboard")}
