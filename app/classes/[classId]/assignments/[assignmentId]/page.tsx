@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { formatClosesAt, hasClosed, whenPassed } from "@/lib/assignmentDeadline";
+import { announceGradeSaved } from "@/lib/gradeEvents";
 import {
     getGradingStatus,
     isMissingRow,
@@ -33,6 +34,9 @@ export default function AssignmentDetailPage() {
     }>();
 
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const focusStudentId = searchParams.get("student");
+    const fromGrades = searchParams.get("from") === "grades";
 
     const [assignment, setAssignment] = useState<Assignment | null>(null);
     const [submission, setSubmission] = useState<Submission | null>(null);
@@ -174,6 +178,7 @@ export default function AssignmentDetailPage() {
     // A missing-work grade, which another session can save first, leaves the
     // submission ungraded.
     function handleGraded(studentId: string, grade: Grade) {
+        announceGradeSaved(classId);
         const missing = isMissingWorkGrade(grade);
 
         setStudents((current) =>
@@ -198,6 +203,7 @@ export default function AssignmentDetailPage() {
 
     // Updates only the student whose missing work was graded, in place
     function handleMissingGraded(studentId: string, grade: Grade) {
+        announceGradeSaved(classId);
         setStudents((current) =>
             current.map((student) =>
                 student.studentId === studentId && isMissingRow(student)
@@ -276,12 +282,24 @@ export default function AssignmentDetailPage() {
 
     return (
         <div className="mx-auto w-full max-w-3xl">
-            <Link
-                href={`/classes/${classId}/assignments`}
-                className="text-sm text-blue-600 hover:text-blue-500 dark:text-blue-400"
-            >
-                ← Back to assignments
-            </Link>
+            {fromGrades ? (
+                // Stays in view while the professor scrolls to the card they came to grade
+                <div className="sticky -top-6 z-20 -mx-6 -mt-6 border-b border-gray-200 bg-gray-50/95 px-6 py-3 backdrop-blur dark:border-zinc-800 dark:bg-gray-900/95">
+                    <Link
+                        href={`/classes/${classId}/grades`}
+                        className="text-sm font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400"
+                    >
+                        ← Back to grades
+                    </Link>
+                </div>
+            ) : (
+                <Link
+                    href={`/classes/${classId}/assignments`}
+                    className="text-sm text-blue-600 hover:text-blue-500 dark:text-blue-400"
+                >
+                    ← Back to assignments
+                </Link>
+            )}
 
             {loading ? (
                 <p className="mt-6 text-gray-600 dark:text-gray-300">
@@ -304,6 +322,7 @@ export default function AssignmentDetailPage() {
                             canGradeSubmissions={isProfessor}
                             onGraded={handleGraded}
                             onMissingGraded={handleMissingGraded}
+                            focusStudentId={focusStudentId}
                         />
                     ) : (
                         <>

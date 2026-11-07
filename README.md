@@ -172,3 +172,37 @@ A failed test keeps a screenshot and a trace in `test-results/`. Open the trace 
 ### In CI
 
 The `e2e` job in `.github/workflows/checks.yml` runs these tests on every pull request to `dev` or `main`, beside the lint, build and Vitest job. When it fails, the Playwright report and traces are attached to the run as the `playwright-report` artifact.
+
+---
+
+## Gradebook load test
+
+`npm run test:load` checks that the gradebook API answers in under 2 seconds at a representative size. It runs `scripts/gradebook-load-test.mjs`, which seeds LOAD 2000 through the app's own API:
+
+* 40 students and 20 assignments, with 14 closed, 5 open and 1 with no due date
+* a fixed mix of cells that covers every grading state
+* one student who leaves the class
+
+The professor then loads `GET /api/classes/{id}/gradebook` once to warm up and 20 more times. The script prints the median, p95 and max, and fails when p95 reaches 2000 ms.
+
+Time a production build, since `next dev` compiles routes on demand. Uploads need storage, so point the app at the e2e storage stub. Run each command in its own terminal:
+
+```bash
+npm run build
+npx firebase emulators:start --project demo-panel-app --only auth,firestore
+node e2e/support/supabase-stub.mjs --port 54321
+FIREBASE_PROJECT_ID=demo-panel-app FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_SECRET_KEY=e2e-stub-key npx next start --hostname 127.0.0.1
+```
+
+These emulators start empty and keep nothing. Create the admin, then run the test:
+
+```bash
+ADMIN_EMAIL=admin@panel-app.test ADMIN_PASSWORD=demo1234 FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node scripts/seed-admin.mjs
+npm run test:load
+```
+
+Running it again adds only what is missing. `LOAD_TEST_SKIP_SEED=1 npm run test:load` only times the course that is already there.
+
+The load test's servers use ports 3000, 4000, 8080, 9099 and 54321, the same as `npm test` and `npm run test:e2e`. Stop them before running those.
+
+To test a deployed app, see the comment at the top of the script. It covers the environment variables and the production guard.

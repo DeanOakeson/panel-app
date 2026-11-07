@@ -72,3 +72,7 @@ npm run emulators        # Auth :9099, Firestore :8080, UI :4000
 2. For auth or data changes, add or update tests under `__tests__/`.
 3. Confirm the change still builds (`npm run build` for non-trivial work).
 4. Summarize what you changed and why.
+
+### Pull Requests
+- Every pull request title MUST include the key of its Jira issue, for example `Professor gradebook (PANEL-36)`. The issues live in the PANEL project at https://panel-app.atlassian.net.
+- Reviewers and Jira find the issue through that key.

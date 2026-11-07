@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { getClosesAt } from "@/lib/assignmentDeadline";
+import { closesAtOrNull } from "@/lib/assignmentDeadline";
 import { loadEnrolledStudentIds, loadGradingCounts } from "@/lib/classRoster";
 
 type RouteContext = { params: Promise<{ classId: string }> };
@@ -148,15 +148,6 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       { error: "Failed to create assignment." },
       { status: 500 }
     );
-  }
-}
-
-/** Returns when submissions close for a due date, or null when it has none or is malformed. */
-function closesAtOrNull(dueDate: unknown): string | null {
-  try {
-    return getClosesAt(dueDate);
-  } catch {
-    return null;
   }
 }
 

@@ -4,7 +4,7 @@
 
 ### Issue tracker
 
-ClickUp is the source of truth for the product/sprint backlog; GitHub Issues here hold bug reports only. See `docs/agents/issue-tracker.md`.
+Jira (project PANEL) is the source of truth for the product backlog, the sprint and bugs. GitHub Issues here hold occasional bug reports. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

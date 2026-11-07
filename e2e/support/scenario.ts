@@ -81,7 +81,7 @@ async function request<T = Record<string, unknown>>(
 }
 
 /** Calls one of the app's API routes. */
-function api<T = Record<string, unknown>>(method: string, route: string, token: string, json?: unknown) {
+export function api<T = Record<string, unknown>>(method: string, route: string, token: string, json?: unknown) {
   return request<T>(method, `${APP_URL}${route}`, { token, json });
 }
 
@@ -108,7 +108,7 @@ export async function resetEmulators() {
 }
 
 /** Signs up and creates the users/{uid} profile, as the login page's sign-up does. */
-async function createAccount(person: { name: string; email: string }, role: "student" | "professor") {
+export async function createAccount(person: { name: string; email: string }, role: "student" | "professor") {
   const account = await identityToolkit<{ localId: string; idToken: string }>("signUp", {
     email: person.email,
     password: PASSWORD,
@@ -129,7 +129,7 @@ async function promoteToAdmin(uid: string) {
 }
 
 /** Uploads a one-page PDF as a student's submission. */
-async function submit(student: Person, courseId: string, assignmentId: string, fileName: string) {
+export async function submit(student: Person, courseId: string, assignmentId: string, fileName: string) {
   const form = new FormData();
   form.append("file", new File([new Uint8Array(makePdf(`${student.name}: ${fileName}`))], fileName, { type: "application/pdf" }));
 
@@ -140,7 +140,7 @@ async function submit(student: Person, courseId: string, assignmentId: string, f
 }
 
 /** Grades a student's current submission as the professor. */
-async function grade(
+export async function grade(
   professor: Person,
   courseId: string,
   assignmentId: string,
@@ -164,7 +164,7 @@ async function grade(
 }
 
 /** Returns a calendar date in Mountain Time, `days` from today, as YYYY-MM-DD. */
-function dateFromToday(days: number) {
+export function dateFromToday(days: number) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Denver" }).format(
     new Date(Date.now() + days * 24 * 60 * 60 * 1000)
   );
@@ -178,6 +178,43 @@ export async function setDueDate(professor: Person, courseId: string, assignment
   await api("PATCH", `/api/classes/${courseId}/assignments/${assignmentId}`, professor.token, {
     dueDate: dateFromToday(days),
   });
+}
+
+/** Creates an assignment as the professor, due on a YYYY-MM-DD date. */
+export async function createAssignment(
+  professor: Person,
+  courseId: string,
+  name: string,
+  points: number,
+  dueDate: string
+): Promise<SeededAssignment> {
+  const { assignment } = await api<{ assignment: { id: string } }>(
+    "POST",
+    `/api/classes/${courseId}/assignments`,
+    professor.token,
+    { name, description: `${name} for the e2e tests.`, points, dueDate }
+  );
+
+  return { id: assignment.id, name, points, path: `/classes/${courseId}/assignments/${assignment.id}` };
+}
+
+/**
+ * Saves a missing-work grade of 0 for a student without a submission, as the
+ * professor. The assignment must already be closed.
+ */
+export async function gradeMissing(
+  professor: Person,
+  courseId: string,
+  assignmentId: string,
+  student: Person,
+  feedback: string
+) {
+  await api(
+    "POST",
+    `/api/classes/${courseId}/assignments/${assignmentId}/missing-grades/${student.uid}`,
+    professor.token,
+    { feedback }
+  );
 }
 
 // #endregion
@@ -217,22 +254,10 @@ export async function seedScenario(): Promise<Scenario> {
     )
   );
 
-  /** Creates an assignment as the professor. */
-  const createAssignment = async (name: string, points: number, dueDate: string): Promise<SeededAssignment> => {
-    const { assignment } = await api<{ assignment: { id: string } }>(
-      "POST",
-      `/api/classes/${course.id}/assignments`,
-      professor.token,
-      { name, description: `${name} for the e2e tests.`, points, dueDate }
-    );
-
-    return { id: assignment.id, name, points, path: `/classes/${course.id}/assignments/${assignment.id}` };
-  };
-
   // The submit route refuses files after the due date, so the closed
   // assignment collects its work while open and is closed afterwards
-  const closed = await createAssignment("Project 1: Requirements", 100, dateFromToday(14));
-  const open = await createAssignment("Homework 2: Use Cases", 20, dateFromToday(7));
+  const closed = await createAssignment(professor, course.id, "Project 1: Requirements", 100, dateFromToday(14));
+  const open = await createAssignment(professor, course.id, "Homework 2: Use Cases", 20, dateFromToday(7));
 
   await Promise.all([
     submit(ava, course.id, closed.id, "Martin_Project1.pdf"),
