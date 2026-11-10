@@ -25,7 +25,7 @@ type RouteContext = {
 };
 
 const BUCKET = "assignment-submissions";
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_FILE_SIZE = 4 * 1024 * 1024;
 const MAX_STORED_SUBMISSIONS = 3;
 const MAX_FILE_NAME_LENGTH = 255;
 

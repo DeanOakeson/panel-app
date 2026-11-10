@@ -8,6 +8,25 @@ import {
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { clearEmulators, createSignedInUser } from "../../helpers/emulators";
 
+
+// Only Supabase Storage is stubbed; Firebase runs against the emulators.
+vi.mock("@/lib/supabaseAdmin", () => ({
+  getSupabaseAdmin: vi.fn(() => ({
+    storage: {
+      from: vi.fn(() => ({
+        list: vi.fn().mockResolvedValue({
+          data: [],
+          error: null,
+        }),
+        remove: vi.fn().mockResolvedValue({
+          data: [],
+          error: null,
+        }),
+      })),
+    },
+  })),
+}));
+
 const classId = "class-1";
 const assignmentId = "assignment-1";
 

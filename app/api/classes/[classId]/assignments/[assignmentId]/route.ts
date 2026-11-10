@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { getEffectiveClosesAt } from "@/lib/assignmentDeadline";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 type RouteContext = {
   params: Promise<{ classId: string; assignmentId: string }>;
@@ -385,8 +386,43 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     );
   }
 }
+const SUBMISSION_BUCKET = "assignment-submissions";
 
-/** Deletes an assignment. */
+/** Finds all files inside a Supabase Storage folder and its subfolders. */
+async function listStorageFiles(
+  storage: ReturnType<typeof getSupabaseAdmin>,
+  folderPath: string
+): Promise<string[]> {
+  const filePaths: string[] = [];
+  const limit = 1000;
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await storage.storage
+      .from(SUBMISSION_BUCKET)
+      .list(folderPath, { limit, offset });
+
+    if (error) throw error;
+
+    for (const entry of data ?? []) {
+      const entryPath = `${folderPath}/${entry.name}`;
+
+      if (entry.id) {
+        filePaths.push(entryPath);
+      } else {
+        const nestedFiles = await listStorageFiles(storage, entryPath);
+        filePaths.push(...nestedFiles);
+      }
+    }
+
+    if (!data || data.length < limit) break;
+
+    offset += limit;
+  }
+
+  return filePaths;
+}
+/** Deletes an assignment, its Firestore records, and its submission files. */
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
   try {
     const { classId, assignmentId } = await params;
@@ -394,10 +430,34 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
 
     if (auth.error) return auth.error;
 
-    await auth.assignmentRef.delete();
+    const storage = getSupabaseAdmin();
+
+    // Find every uploaded submission file for this assignment.
+    const assignmentFolder = `${classId}/${assignmentId}`;
+
+    const filePaths = await listStorageFiles(storage, assignmentFolder);
+
+    // Delete Supabase Storage files in batches.
+    for (let i = 0; i < filePaths.length; i += 1000) {
+      const batch = filePaths.slice(i, i + 1000);
+
+      const { error } = await storage.storage
+        .from(SUBMISSION_BUCKET)
+        .remove(batch);
+
+      if (error) throw error;
+    }
+
+    // Delete the assignment and all its Firestore subcollections.
+    const db = getAdminDb();
+    await db.recursiveDelete(auth.assignmentRef);
 
     return NextResponse.json(
-      { deleted: true, id: assignmentId },
+      {
+        deleted: true,
+        id: assignmentId,
+        removedSubmissionFiles: filePaths.length,
+      },
       { status: 200 }
     );
   } catch (error) {

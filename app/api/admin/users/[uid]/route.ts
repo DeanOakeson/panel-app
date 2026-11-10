@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { requireAdmin } from "@/lib/adminGuard";
 import { gradeHistory } from "@/lib/gradeHistory";
-import type { DocumentReference } from "firebase-admin/firestore";
+import type { DocumentData, DocumentReference } from "firebase-admin/firestore";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+
+const SUBMISSION_BUCKET = "assignment-submissions";
 
 type RouteContext = { params: Promise<{ uid: string }> };
 
@@ -271,6 +274,75 @@ async function readUserOwnedClassDocs(uid: string, classIds: string[]) {
   };
 }
 
+
+function getSubmissionFilePaths(data: DocumentData | undefined): string[] {
+  if (!data) return [];
+
+  const paths = new Set<string>();
+
+  if (typeof data.filePath === "string") {
+    paths.add(data.filePath);
+  }
+
+  if (Array.isArray(data.submissionHistory)) {
+    for (const submission of data.submissionHistory) {
+      if (typeof submission?.filePath === "string") {
+        paths.add(submission.filePath);
+      }
+    }
+  }
+
+  return [...paths];
+}
+
+async function readUserSubmissionFilePaths(
+  submissionRefs: DocumentReference[],
+) {
+  const snapshots = await Promise.all(
+    submissionRefs.map((ref) => ref.get()),
+  );
+
+  const paths = new Set<string>();
+
+  for (const snapshot of snapshots) {
+    if (!snapshot.exists) continue;
+
+    for (const path of getSubmissionFilePaths(snapshot.data())) {
+      paths.add(path);
+    }
+  }
+
+  return [...paths];
+}
+
+async function findUnreferencedSubmissionFiles(
+  candidatePaths: string[],
+  deletingSubmissionRefs: DocumentReference[],
+) {
+  if (candidatePaths.length === 0) return [];
+
+  const db = getAdminDb();
+  const candidates = new Set(candidatePaths);
+  const deletingPaths = new Set(
+    deletingSubmissionRefs.map((ref) => ref.path),
+  );
+  const referencedPaths = new Set<string>();
+
+  const submissions = await db.collectionGroup("submissions").get();
+
+  for (const submission of submissions.docs) {
+    if (deletingPaths.has(submission.ref.path)) continue;
+
+    for (const path of getSubmissionFilePaths(submission.data())) {
+      if (candidates.has(path)) {
+        referencedPaths.add(path);
+      }
+    }
+  }
+
+  return candidatePaths.filter((path) => !referencedPaths.has(path));
+}
+
 /**
  * DELETE /api/admin/users/[uid] — ADMIN-ONLY.
  *
@@ -300,7 +372,7 @@ export async function DELETE(
     if (uid === admin.uid) {
       return NextResponse.json(
         { error: "You cannot delete your own account." },
-        { status: 403 }
+        { status: 403 },
       );
     }
 
@@ -309,52 +381,135 @@ export async function DELETE(
     const userDoc = await userRef.get();
 
     let authAccountExists = true;
+
     try {
       await getAdminAuth().getUser(uid);
     } catch (err: unknown) {
-      if ((err as { code?: string })?.code !== "auth/user-not-found") throw err;
+      if ((err as { code?: string })?.code !== "auth/user-not-found") {
+        throw err;
+      }
+
       authAccountExists = false;
     }
 
     if (!userDoc.exists && !authAccountExists) {
-      return NextResponse.json({ error: "User not found." }, { status: 404 });
+      return NextResponse.json(
+        { error: "User not found." },
+        { status: 404 },
+      );
     }
 
-    // Collect everything that hangs off this user before deleting anything, so
-    // a mid-way failure leaves a recoverable (and retryable) state rather than
-    // a half-wiped one.
+    // Collect all user-owned documents before deleting anything.
     const enrollments = await readEnrollments(uid);
+
     const { submissionRefs, gradeRefs } = await readUserOwnedClassDocs(
       uid,
-      enrollments.map((e) => e.classId)
+      enrollments.map((enrollment) => enrollment.classId),
     );
 
-    // History goes before its grade, so a failure part way leaves the grade
-    // for a retry to find again
+    // Collect both current submission files and all historical files.
+    const allFilePaths = await readUserSubmissionFilePaths(submissionRefs);
+
+    // Do not delete files referenced by another active submission record.
+    const filesToDelete = await findUnreferencedSubmissionFiles(
+      allFilePaths,
+      submissionRefs,
+    );
+
+    // Delete grade history before deleting the grade documents.
     for (const gradeRef of gradeRefs) {
       await db.recursiveDelete(gradeHistory(gradeRef));
     }
 
+    // Create a durable cleanup task before deleting Firestore records.
+    // It remains in the waiting state until Firestore deletion succeeds.
+    let cleanupTaskRef: DocumentReference | null = null;
+
+    if (filesToDelete.length > 0) {
+      cleanupTaskRef = db.collection("storageCleanupTasks").doc();
+
+      await cleanupTaskRef.set({
+        userId: uid,
+        bucket: SUBMISSION_BUCKET,
+        filePaths: filesToDelete,
+        status: "waiting_for_firestore_delete",
+        createdAt: new Date().toISOString(),
+      });
+    }
+
     const docsToDelete: DocumentReference[] = [
-      ...enrollments.map((e) => e.ref),
+      ...enrollments.map((enrollment) => enrollment.ref),
       ...submissionRefs,
       ...gradeRefs,
       userRef,
     ];
 
-    // Firestore batches cap at 500 writes; enrollments and submissions are far
-    // below that for any real account, but chunk so the route can't blow up on
-    // an outlier.
+    // Firestore batches have a 500-write limit.
     for (let i = 0; i < docsToDelete.length; i += 500) {
       const batch = db.batch();
+
       for (const ref of docsToDelete.slice(i, i + 500)) {
         batch.delete(ref);
       }
+
       await batch.commit();
     }
 
-    // The Auth account goes last: everything Firestore-side is already gone, so
-    // a failure here cannot leave an orphaned profile or enrollment doc.
+    let storageCleanupPending = false;
+
+    // Mark cleanup as pending only after all Firestore deletions succeed.
+    if (cleanupTaskRef) {
+      await cleanupTaskRef.update({
+        status: "pending",
+        updatedAt: new Date().toISOString(),
+      });
+
+      try {
+        const { error: storageError } = await getSupabaseAdmin()
+          .storage.from(SUBMISSION_BUCKET)
+          .remove(filesToDelete);
+
+        if (storageError) {
+          throw storageError;
+        }
+
+        // Remove the task after successful file cleanup.
+        await cleanupTaskRef.delete();
+      } catch (cleanupError) {
+        storageCleanupPending = true;
+
+        console.error(
+          "Supabase submission file cleanup failed:",
+          {
+            userId: uid,
+            filePaths: filesToDelete,
+            error: cleanupError,
+          },
+        );
+
+        // Keep the task so a background job can retry it.
+        try {
+          await cleanupTaskRef.set(
+            {
+              status: "failed",
+              lastError:
+                cleanupError instanceof Error
+                  ? cleanupError.message
+                  : String(cleanupError),
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true },
+          );
+        } catch (taskError) {
+          console.error(
+            "Could not update submission cleanup task:",
+            taskError,
+          );
+        }
+      }
+    }
+
+    // Delete Firebase Authentication account last.
     if (authAccountExists) {
       await getAdminAuth().deleteUser(uid);
     }
@@ -365,12 +520,17 @@ export async function DELETE(
       removedEnrollments: enrollments.length,
       removedSubmissions: submissionRefs.length,
       removedGrades: gradeRefs.length,
+      removedSubmissionFiles: storageCleanupPending
+        ? 0
+        : filesToDelete.length,
+      storageCleanupPending,
     });
   } catch (error) {
     console.error("DELETE /api/admin/users/[uid] failed:", error);
+
     return NextResponse.json(
       { error: "Failed to delete user." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
