@@ -1,0 +1,346 @@
+import { NextRequest, NextResponse } from "next/server";
+import type { DocumentReference, Firestore } from "firebase-admin/firestore";
+import { getAdminDb } from "@/lib/firebaseAdmin";
+import { getClosesAt, hasClosed } from "@/lib/assignmentDeadline";
+import { getClassAccess } from "@/lib/classAccess";
+import { enrollmentQuery } from "@/lib/classRoster";
+import { readFeedback, readJsonBody } from "@/lib/gradeInput";
+import { appendHistory, entryFromStoredGrade, hasHistory } from "@/lib/gradeHistory";
+import { isMissingWorkGrade } from "@/lib/gradingStatus";
+
+type RouteContext = {
+  params: Promise<{ classId: string; assignmentId: string; studentId: string }>;
+};
+
+type MissingGradeRequest = {
+  classId: string;
+  assignmentId: string;
+  studentId: string;
+  uid: string;
+  db: Firestore;
+  assignmentRef: DocumentReference;
+  body: Record<string, unknown>;
+  feedback: string;
+};
+
+/** The score every missing-work grade stores. */
+const MISSING_SCORE = 0;
+
+/**
+ * Checks that the caller is the class's professor or an admin, that the
+ * assignment exists, and that the body holds valid feedback and no score
+ * other than 0. Returns the parsed request, or an error response.
+ */
+async function readMissingGradeRequest(
+  request: NextRequest,
+  { params }: RouteContext
+): Promise<MissingGradeRequest | { error: NextResponse }> {
+  const { classId, assignmentId, studentId } = await params;
+  const access = await getClassAccess(request, classId);
+  if (access.error) return { error: access.error };
+
+  if (!access.isClassProfessor && !access.isAdmin) {
+    return {
+      error: NextResponse.json(
+        { error: "Only this class's professor or an admin can grade missing work." },
+        { status: 403 }
+      ),
+    };
+  }
+
+  const db = getAdminDb();
+  const assignmentRef = db
+    .collection("classes")
+    .doc(classId)
+    .collection("assignments")
+    .doc(assignmentId);
+  const assignmentDoc = await assignmentRef.get();
+
+  if (!assignmentDoc.exists) {
+    return {
+      error: NextResponse.json(
+        { error: "Assignment not found." },
+        { status: 404 }
+      ),
+    };
+  }
+
+  const body = await readJsonBody(request);
+
+  if (body === null) {
+    return {
+      error: NextResponse.json(
+        { error: "Invalid JSON request body." },
+        { status: 400 }
+      ),
+    };
+  }
+
+  if (body.score !== undefined && body.score !== MISSING_SCORE) {
+    return {
+      error: NextResponse.json(
+        { error: "A missing-work grade is always 0." },
+        { status: 400 }
+      ),
+    };
+  }
+
+  const feedback = readFeedback(body);
+
+  if ("error" in feedback) {
+    return {
+      error: NextResponse.json({ error: feedback.error }, { status: 400 }),
+    };
+  }
+
+  return {
+    classId,
+    assignmentId,
+    studentId,
+    uid: access.uid,
+    db,
+    assignmentRef,
+    body,
+    ...feedback,
+  };
+}
+
+/**
+ * Returns why missing work cannot be graded yet: 409 while submissions are
+ * open or when the assignment has no due date, and 500 for a malformed due
+ * date. Returns null once submissions have closed.
+ */
+function stillOpenError(dueDate: unknown): { error: string; status: number } | null {
+  let closesAt: string | null;
+
+  try {
+    closesAt = getClosesAt(dueDate);
+  } catch {
+    return { error: "This assignment has an invalid due date.", status: 500 };
+  }
+
+  if (!closesAt) {
+    return {
+      error:
+        "This assignment has no due date, so submissions never close. Set a due date to grade missing work.",
+      status: 409,
+    };
+  }
+
+  if (!hasClosed(closesAt)) {
+    return {
+      error:
+        "Submissions are still open. You can grade missing work once the due date passes.",
+      status: 409,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Grades an enrolled student who has not submitted with a score of 0 and
+ * optional feedback. Only allowed once submissions have closed. Saves the
+ * student's grade with a null submittedAt and never creates a submission. A
+ * 409 for a student who has submitted points to normal grading, and a 409 for
+ * a student who already has a grade includes it when it is a missing-work
+ * grade. Each save adds an entry to the grade's history subcollection.
+ */
+export async function POST(request: NextRequest, context: RouteContext) {
+  try {
+    const gradeRequest = await readMissingGradeRequest(request, context);
+    if ("error" in gradeRequest) return gradeRequest.error;
+
+    const {
+      classId,
+      assignmentId,
+      studentId,
+      uid,
+      db,
+      assignmentRef,
+      feedback,
+    } = gradeRequest;
+
+    const submissionRef = assignmentRef.collection("submissions").doc(studentId);
+    const gradeRef = assignmentRef.collection("grades").doc(studentId);
+
+    // Every eligibility check reads inside the transaction, so a due-date
+    // change, an unenrollment or a submission cannot land before the write
+    const result = await db.runTransaction(async (transaction) => {
+      const [assignmentDoc, submissionDoc, gradeDoc] = await transaction.getAll(
+        assignmentRef,
+        submissionRef,
+        gradeRef
+      );
+      const enrollment = await transaction.get(enrollmentQuery(classId, studentId));
+
+      if (!assignmentDoc.exists) {
+        return { error: "Assignment not found.", status: 404 };
+      }
+
+      const stillOpen = stillOpenError(assignmentDoc.data()?.dueDate);
+      if (stillOpen) return stillOpen;
+
+      if (enrollment.empty) {
+        return { error: "This student is not enrolled in this class.", status: 404 };
+      }
+
+      if (submissionDoc.exists) {
+        return {
+          error: "This student has submitted. Grade their submission instead.",
+          status: 409,
+        };
+      }
+
+      if (gradeDoc.exists) {
+        const stored = gradeDoc.data()!;
+
+        return isMissingWorkGrade(stored)
+          ? {
+              error: "This student's missing work has already been graded.",
+              status: 409,
+              grade: stored,
+            }
+          : { error: "This student already has a grade.", status: 409 };
+      }
+
+      const grade = {
+        studentId,
+        classId,
+        assignmentId,
+        score: MISSING_SCORE,
+        feedback,
+        submittedAt: null,
+        gradedBy: uid,
+        gradedAt: new Date().toISOString(),
+      };
+      transaction.create(gradeRef, grade);
+      appendHistory(transaction, gradeRef, {
+        score: MISSING_SCORE,
+        feedback,
+        savedBy: uid,
+        savedAt: grade.gradedAt,
+        action: "created",
+      });
+
+      return { grade };
+    });
+
+    if ("error" in result) {
+      return NextResponse.json(
+        { error: result.error, grade: "grade" in result ? result.grade : undefined },
+        { status: result.status }
+      );
+    }
+
+    return NextResponse.json({ grade: result.grade }, { status: 201 });
+  } catch (error) {
+    console.error(
+      "POST /api/classes/[classId]/assignments/[assignmentId]/missing-grades/[studentId] failed:",
+      error
+    );
+    return NextResponse.json(
+      { error: "Failed to save the missing-work grade." },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * Edits a missing-work grade's feedback, keeping its score of 0. Takes the
+ * same body as POST plus `lastSavedAt`, the grade's `updatedAt` (or
+ * `gradedAt` when never edited) as the professor saw it. A 409 for a grade
+ * saved since then includes the stored grade, and a 409 for a grade that
+ * belongs to a submission points to the grade route. `gradedAt` and
+ * `gradedBy` keep the original grading. Allowed while submissions are open,
+ * since the due date may have moved after grading.
+ */
+export async function PATCH(request: NextRequest, context: RouteContext) {
+  try {
+    const gradeRequest = await readMissingGradeRequest(request, context);
+    if ("error" in gradeRequest) return gradeRequest.error;
+
+    const { studentId, uid, db, assignmentRef, body, feedback } = gradeRequest;
+    const lastSavedAt = body.lastSavedAt;
+
+    if (typeof lastSavedAt !== "string" || lastSavedAt === "") {
+      return NextResponse.json(
+        { error: "lastSavedAt of the grade being edited is required." },
+        { status: 400 }
+      );
+    }
+
+    const gradeRef = assignmentRef.collection("grades").doc(studentId);
+
+    const result = await db.runTransaction(async (transaction) => {
+      const gradeDoc = await transaction.get(gradeRef);
+
+      if (!gradeDoc.exists) {
+        return {
+          error: "This student's missing work has not been graded yet.",
+          status: 404,
+        };
+      }
+
+      const stored = gradeDoc.data()!;
+
+      if (!isMissingWorkGrade(stored)) {
+        return {
+          error:
+            "This grade belongs to the student's submission. Edit it through the submission's grade.",
+          status: 409,
+        };
+      }
+
+      if ((stored.updatedAt ?? stored.gradedAt) !== lastSavedAt) {
+        return {
+          error: "This grade was changed after you opened it.",
+          status: 409,
+          grade: stored,
+        };
+      }
+
+      const recorded = await hasHistory(transaction, gradeRef);
+      const changes = {
+        score: MISSING_SCORE,
+        feedback,
+        updatedAt: new Date().toISOString(),
+        updatedBy: uid,
+      };
+      transaction.update(gradeRef, changes);
+
+      // A grade saved before history was kept gets its stored version first
+      if (!recorded) {
+        appendHistory(transaction, gradeRef, entryFromStoredGrade(stored));
+      }
+
+      appendHistory(transaction, gradeRef, {
+        score: MISSING_SCORE,
+        feedback,
+        savedBy: uid,
+        savedAt: changes.updatedAt,
+        action: "edited",
+      });
+
+      return { grade: { ...stored, ...changes } };
+    });
+
+    if ("error" in result) {
+      return NextResponse.json(
+        { error: result.error, grade: "grade" in result ? result.grade : undefined },
+        { status: result.status }
+      );
+    }
+
+    return NextResponse.json({ grade: result.grade });
+  } catch (error) {
+    console.error(
+      "PATCH /api/classes/[classId]/assignments/[assignmentId]/missing-grades/[studentId] failed:",
+      error
+    );
+    return NextResponse.json(
+      { error: "Failed to update the missing-work grade." },
+      { status: 500 }
+    );
+  }
+}

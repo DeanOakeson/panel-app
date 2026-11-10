@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
+import { useStoredFlag } from "@/lib/storedFlag";
 import {
   CourseIdentityProvider,
   type CourseIdentity,
@@ -17,6 +18,60 @@ const items = [
   { label: "Grades", path: "/grades" },
 ];
 
+/** Where the browser remembers whether the course navigation is collapsed. */
+const NAV_COLLAPSED_STORAGE = "panel-course-nav-collapsed";
+
+const NAV_ID = "course-navigation";
+
+/** Below this window width, the course navigation starts collapsed until someone chooses. */
+const COLLAPSE_BELOW = 1100;
+
+/**
+ * Tailwind's `lg` breakpoint. Below it the course navigation is a phone drawer
+ * (PANEL-88) rather than a collapsible rail, so the desktop collapse, its
+ * chevron and its widths stand down and a phone sees exactly one course-nav
+ * toggle.
+ */
+const DESKTOP_NAV_QUERY = "(min-width: 1024px)";
+
+/** Shows a chevron pointing left to collapse the navigation, or right to expand it. */
+function ChevronIcon({ pointsLeft }: { pointsLeft: boolean }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" className="h-5 w-5" fill="currentColor">
+      <path
+        d={
+          pointsLeft
+            ? "M12.7 4.3a1 1 0 0 1 0 1.4L8.4 10l4.3 4.3a1 1 0 0 1-1.4 1.4l-5-5a1 1 0 0 1 0-1.4l5-5a1 1 0 0 1 1.4 0Z"
+            : "M7.3 4.3a1 1 0 0 1 1.4 0l5 5a1 1 0 0 1 0 1.4l-5 5a1 1 0 0 1-1.4-1.4l4.3-4.3-4.3-4.3a1 1 0 0 1 0-1.4Z"
+        }
+      />
+    </svg>
+  );
+}
+
+/** True from the `lg` breakpoint up, where the course navigation sits inline. */
+function useHasDesktopNav(): boolean {
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      const query = window.matchMedia(DESKTOP_NAV_QUERY);
+      query.addEventListener("change", onStoreChange);
+
+      return () => query.removeEventListener("change", onStoreChange);
+    },
+    () => window.matchMedia(DESKTOP_NAV_QUERY).matches,
+    // A server render has no viewport, so it sees the desktop rail; the real
+    // breakpoint follows straight after hydration.
+    () => true
+  );
+}
+
+/**
+ * Wraps every course page with the course navigation and sends signed-out
+ * visitors to login. From `lg` up the navigation collapses to a narrow strip
+ * and remembers that choice (PANEL-36); below `lg` the same navigation slides
+ * off-canvas into a phone drawer behind the top bar's hamburger (PANEL-88).
+ * Either way it names the course it belongs to (PANEL-90).
+ */
 export default function ClassLayout({
   children,
 }: {
@@ -26,6 +81,24 @@ export default function ClassLayout({
   const pathname = usePathname();
   const router = useRouter();
   const basePath = `/classes/${classId}`;
+  const onGrades = pathname === `${basePath}/grades`;
+
+  // The navigation starts collapsed on Grades, which needs the width, and in narrow windows
+  const collapsedByDefault = useCallback(
+    () => onGrades || window.innerWidth < COLLAPSE_BELOW,
+    [onGrades]
+  );
+  const [collapsed, setCollapsed] = useStoredFlag(
+    NAV_COLLAPSED_STORAGE,
+    collapsedByDefault,
+    onGrades
+  );
+  const toggleLabel = collapsed ? "Show course navigation" : "Hide course navigation";
+
+  // Below `lg` the same aside is the phone drawer, so nothing may stay hidden
+  // there until the drawer itself is opened.
+  const hasDesktopNav = useHasDesktopNav();
+  const navHidden = collapsed && hasDesktopNav;
 
   const [course, setCourse] = useState<CourseIdentity | null>(null);
 
@@ -75,6 +148,12 @@ export default function ClassLayout({
     ? course.name || "Untitled Class"
     : "Loading course…";
 
+  // The identity block names the navigation it sits in, so it only goes where
+  // that navigation is on screen: the desktop rail when it is expanded, the
+  // phone drawer when it is open. A closed drawer keeps nothing — not even its
+  // own course name — parked off-canvas (PANEL-90).
+  const showIdentity = !navHidden && (hasDesktopNav || menuOpen);
+
   return (
     <CourseIdentityProvider value={course}>
       <div className="h-full min-w-0">
@@ -99,35 +178,60 @@ export default function ClassLayout({
           />
         )}
 
-        {/* Course sidebar; slides in as a drawer below the lg breakpoint (PANEL-88) */}
+        {/* Course sidebar: a phone drawer below lg, a collapsible rail above it */}
         <aside
-          className={`fixed bottom-0 left-0 top-12 z-55 w-64 overflow-y-auto bg-gray-200 px-4 py-6 transition-transform duration-200 dark:bg-gray-800 lg:top-0 lg:left-24 lg:z-40 lg:w-56 ${
+          className={`fixed bottom-0 left-0 top-12 z-55 w-64 overflow-y-auto bg-gray-200 px-4 py-6 transition-transform duration-200 dark:bg-gray-800 lg:top-0 lg:left-24 lg:z-40 ${
             menuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
-          }`}
+          } ${navHidden ? "lg:w-12 lg:px-1" : "lg:w-56 lg:px-4"}`}
         >
-          {/* Which course this is (PANEL-90) */}
-          <div className="mb-5 border-b border-gray-300 px-3 pb-4 dark:border-gray-700">
-            <p className="text-xs font-semibold tracking-wide text-blue-600 dark:text-blue-300">
-              {course?.courseCode || "COURSE"}
-            </p>
-
-            <h1 className="mt-1 break-words text-base font-bold text-gray-900 dark:text-white">
-              {courseTitle}
-            </h1>
-
-            {course && (course.term || course.section) && (
-              <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">
-                {course.term && course.year ? `${course.term} ${course.year}` : ""}
-                {course.section ? ` · Section ${course.section}` : ""}
+          {/* Which course this is (PANEL-90), only where the navigation it names is on screen */}
+          {showIdentity && (
+            <div className="mb-5 border-b border-gray-300 px-3 pb-4 dark:border-gray-700">
+              <p className="text-xs font-semibold tracking-wide text-blue-600 dark:text-blue-300">
+                {course?.courseCode || "COURSE"}
               </p>
+
+              <h1 className="mt-1 break-words text-base font-bold text-gray-900 dark:text-white">
+                {courseTitle}
+              </h1>
+
+              {course && (course.term || course.section) && (
+                <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">
+                  {course.term && course.year ? `${course.term} ${course.year}` : ""}
+                  {course.section ? ` · Section ${course.section}` : ""}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div
+            className={`mb-5 flex items-center ${
+              navHidden ? "justify-center" : "justify-between gap-2 pl-3"
+            }`}
+          >
+            {!navHidden && (
+              <h2 className="text-sm font-semibold text-gray-600 dark:text-gray-300">
+                Course Navigation
+              </h2>
+            )}
+
+            {/* The chevron belongs to the desktop rail; a phone has the hamburger */}
+            {hasDesktopNav && (
+              <button
+                type="button"
+                onClick={() => setCollapsed(!collapsed)}
+                aria-expanded={!collapsed}
+                aria-controls={NAV_ID}
+                aria-label={toggleLabel}
+                title={toggleLabel}
+                className="rounded-md p-1.5 text-gray-700 hover:bg-gray-300 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                <ChevronIcon pointsLeft={!collapsed} />
+              </button>
             )}
           </div>
 
-          <h2 className="mb-5 px-3 text-sm font-semibold text-gray-600 dark:text-gray-300">
-            Course Navigation
-          </h2>
-
-          <nav className="space-y-1">
+          <nav id={NAV_ID} hidden={navHidden} className="space-y-1">
             {items.map((item) => {
               const href = `${basePath}${item.path}`;
               const active =
@@ -152,8 +256,12 @@ export default function ClassLayout({
           </nav>
         </aside>
 
-        {/* Class content scrolls independently */}
-        <main className="h-full min-w-0 overflow-y-auto p-6 lg:ml-56">
+        {/* Class content scrolls independently, full width until the rail appears at lg */}
+        <main
+          className={`h-full min-w-0 overflow-y-auto p-6 ${
+            navHidden ? "lg:ml-12" : "lg:ml-56"
+          }`}
+        >
           {children}
         </main>
       </div>

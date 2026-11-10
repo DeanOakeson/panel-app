@@ -1,12 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { formatClosesAt, hasClosed, whenPassed } from "@/lib/assignmentDeadline";
-import { getGradingStatus } from "@/lib/gradingStatus";
+import { announceGradeSaved } from "@/lib/gradeEvents";
+import {
+    getGradingStatus,
+    isMissingRow,
+    isMissingWorkGrade,
+    summarizeMissingGrade,
+} from "@/lib/gradingStatus";
 
 import AssignmentInfo from "../../../../components/assignments/AssignmentInfo";
 import StudentSubmission from "../../../../components/assignments/StudentSubmission";
@@ -16,6 +22,7 @@ import SubmissionUploadForm from "../../../../components/assignments/SubmissionU
 import type {
     Assignment,
     Grade,
+    MissingGradeSummary,
     RosterStudent,
     Submission,
 } from "../../../../components/Types";
@@ -27,11 +34,16 @@ export default function AssignmentDetailPage() {
     }>();
 
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const focusStudentId = searchParams.get("student");
+    const fromGrades = searchParams.get("from") === "grades";
 
     const [assignment, setAssignment] = useState<Assignment | null>(null);
     const [submission, setSubmission] = useState<Submission | null>(null);
+    const [missingGrade, setMissingGrade] = useState<MissingGradeSummary | null>(null);
     const [students, setStudents] = useState<RosterStudent[]>([]);
     const [isProfessor, setIsProfessor] = useState(false);
+    const [viewsRoster, setViewsRoster] = useState(false);
 
     const [loading, setLoading] = useState(true);
     const [submissionLoading, setSubmissionLoading] = useState(false);
@@ -70,13 +82,19 @@ export default function AssignmentDetailPage() {
                     );
                 }
 
-                if (data.role === "professor") {
-                    setIsProfessor(true);
+                // An admin who opens the page sees the roster too, and can
+                // grade missing work but not submissions
+                if (data.role === "professor" || data.role === "admin") {
+                    setIsProfessor(data.role === "professor");
+                    setViewsRoster(true);
                     setStudents(data.students ?? []);
                     setSubmission(null);
+                    setMissingGrade(null);
                 } else {
                     setIsProfessor(false);
+                    setViewsRoster(false);
                     setSubmission(data.submission ?? null);
+                    setMissingGrade(data.missingGrade ?? null);
                     setStudents([]);
                 }
             } catch (err) {
@@ -156,20 +174,43 @@ export default function AssignmentDetailPage() {
     }
 
     // Updates only the graded student in place, so other students' grade
-    // forms stay mounted with their unsaved drafts and the list keeps its order
+    // forms stay mounted with their unsaved drafts and the list keeps its order.
+    // A missing-work grade, which another session can save first, leaves the
+    // submission ungraded.
     function handleGraded(studentId: string, grade: Grade) {
+        announceGradeSaved(classId);
+        const missing = isMissingWorkGrade(grade);
+
         setStudents((current) =>
             current.map((student) =>
-                student.studentId === studentId && student.gradingStatus !== "missing"
+                student.studentId === studentId && !isMissingRow(student)
                     ? {
                           ...student,
-                          grade: grade.score,
-                          feedback: grade.feedback,
-                          gradedAt: grade.gradedAt,
-                          gradeUpdatedAt: grade.updatedAt ?? null,
+                          grade: missing ? null : grade.score,
+                          feedback: missing ? "" : grade.feedback,
+                          gradedAt: missing ? null : grade.gradedAt,
+                          gradeUpdatedAt: missing ? null : grade.updatedAt ?? null,
                           resubmittedAfterGrading:
-                              grade.submittedAt !== student.submittedAt,
+                              !missing && grade.submittedAt !== student.submittedAt,
+                          submittedAfterMissingGrade: missing,
+                          missingGrade: summarizeMissingGrade(grade),
                           gradingStatus: getGradingStatus(student, grade),
+                      }
+                    : student
+            )
+        );
+    }
+
+    // Updates only the student whose missing work was graded, in place
+    function handleMissingGraded(studentId: string, grade: Grade) {
+        announceGradeSaved(classId);
+        setStudents((current) =>
+            current.map((student) =>
+                student.studentId === studentId && isMissingRow(student)
+                    ? {
+                          ...student,
+                          missingGrade: summarizeMissingGrade(grade),
+                          gradingStatus: "missing-graded",
                       }
                     : student
             )
@@ -241,12 +282,24 @@ export default function AssignmentDetailPage() {
 
     return (
         <div className="mx-auto w-full max-w-3xl">
-            <Link
-                href={`/classes/${classId}/assignments`}
-                className="text-sm text-blue-600 hover:text-blue-500 dark:text-blue-400"
-            >
-                ← Back to assignments
-            </Link>
+            {fromGrades ? (
+                // Stays in view while the professor scrolls to the card they came to grade
+                <div className="sticky -top-6 z-20 -mx-6 -mt-6 border-b border-gray-200 bg-gray-50/95 px-6 py-3 backdrop-blur dark:border-zinc-800 dark:bg-gray-900/95">
+                    <Link
+                        href={`/classes/${classId}/grades`}
+                        className="text-sm font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400"
+                    >
+                        ← Back to grades
+                    </Link>
+                </div>
+            ) : (
+                <Link
+                    href={`/classes/${classId}/assignments`}
+                    className="text-sm text-blue-600 hover:text-blue-500 dark:text-blue-400"
+                >
+                    ← Back to assignments
+                </Link>
+            )}
 
             {loading ? (
                 <p className="mt-6 text-gray-600 dark:text-gray-300">
@@ -256,9 +309,9 @@ export default function AssignmentDetailPage() {
                 <p className="mt-6 text-red-600">{error}</p>
             ) : assignment ? (
                 <>
-                    <AssignmentInfo assignment={assignment} showDueTime={isProfessor} />
+                    <AssignmentInfo assignment={assignment} showDueTime={viewsRoster} />
 
-                    {isProfessor ? (
+                    {viewsRoster ? (
                         <ProfessorSubmissions
                             classId={classId}
                             assignment={assignment}
@@ -266,13 +319,17 @@ export default function AssignmentDetailPage() {
                             loading={submissionLoading}
                             error={submissionError}
                             closed={submissionsClosed}
+                            canGradeSubmissions={isProfessor}
                             onGraded={handleGraded}
+                            onMissingGraded={handleMissingGraded}
+                            focusStudentId={focusStudentId}
                         />
                     ) : (
                         <>
                             <StudentSubmission
                                 assignment={assignment}
                                 submission={submission}
+                                missingGrade={missingGrade}
                                 loading={submissionLoading}
                                 error={submissionError}
                             />

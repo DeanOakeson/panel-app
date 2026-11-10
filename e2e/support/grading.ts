@@ -48,3 +48,17 @@ export async function saveGrade(card: Locator, score: string, feedback: string, 
 export function timestampLine(label: string): RegExp {
   return new RegExp(`^${label} [A-Z][a-z]{2} \\d{1,2}, \\d{1,2}:\\d{2} [AP]M MT$`);
 }
+
+/** Fills a card's missing-work feedback and presses its save button, "Mark missing" or "Save feedback". */
+export async function markMissing(card: Locator, feedback: string, button = "Mark missing") {
+  await card.getByLabel("Feedback").fill(feedback);
+  await card.getByRole("button", { name: button }).click();
+}
+
+/** Expects a score such as "0 / 100" with a Missing tag beside it. */
+export async function expectMissingScore(container: Locator, score: string) {
+  const scoreText = container.getByText(score, { exact: true });
+
+  await expect(scoreText).toBeVisible();
+  await expect(scoreText.locator("xpath=..").getByText("Missing", { exact: true })).toBeVisible();
+}

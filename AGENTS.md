@@ -11,7 +11,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 ## Project Context — Panel App
 
 A Next.js (App Router) app that is a Canvas-style interface.  
-Live demo: https://panel-app-ten.vercel.app/
+Live demo: https://panel-app-tawny.vercel.app/
 
 ### Stack
 - **Framework**: Next.js 16 (App Router) + React 19 + TypeScript
@@ -72,3 +72,7 @@ npm run emulators        # Auth :9099, Firestore :8080, UI :4000
 2. For auth or data changes, add or update tests under `__tests__/`.
 3. Confirm the change still builds (`npm run build` for non-trivial work).
 4. Summarize what you changed and why.
+
+### Pull Requests
+- Every pull request title MUST include the key of its Jira issue, for example `Professor gradebook (PANEL-36)`. The issues live in the PANEL project at https://panel-app.atlassian.net.
+- Reviewers and Jira find the issue through that key.

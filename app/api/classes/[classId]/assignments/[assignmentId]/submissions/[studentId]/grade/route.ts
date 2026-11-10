@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import type { DocumentReference, Firestore } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { getClassAccess } from "@/lib/classAccess";
+import { readJsonBody, readScoreAndFeedback } from "@/lib/gradeInput";
+import { appendHistory, entryFromStoredGrade, hasHistory } from "@/lib/gradeHistory";
 
 type RouteContext = {
   params: Promise<{ classId: string; assignmentId: string; studentId: string }>;
@@ -62,11 +64,9 @@ async function readGradeRequest(
     };
   }
 
-  let body: Record<string, unknown>;
+  const body = await readJsonBody(request);
 
-  try {
-    body = (await request.json()) ?? {};
-  } catch {
+  if (body === null) {
     return {
       error: NextResponse.json(
         { error: "Invalid JSON request body." },
@@ -76,33 +76,19 @@ async function readGradeRequest(
   }
 
   const points = assignmentDoc.data()?.points as number;
-  const score = body.score;
-  const feedback =
-    typeof body.feedback === "string" ? body.feedback.trim() : "";
+  const scoreAndFeedback = readScoreAndFeedback(body, points);
+
+  if ("error" in scoreAndFeedback) {
+    return {
+      error: NextResponse.json(
+        { error: scoreAndFeedback.error },
+        { status: 400 }
+      ),
+    };
+  }
+
+  const { score, feedback } = scoreAndFeedback;
   const submittedAt = body.submittedAt;
-
-  if (
-    typeof score !== "number" ||
-    !Number.isFinite(score) ||
-    score < 0 ||
-    score > points
-  ) {
-    return {
-      error: NextResponse.json(
-        { error: `Score must be a number from 0 to ${points}.` },
-        { status: 400 }
-      ),
-    };
-  }
-
-  if (feedback.length > 5000) {
-    return {
-      error: NextResponse.json(
-        { error: "Feedback must be 5000 characters or fewer." },
-        { status: 400 }
-      ),
-    };
-  }
 
   if (typeof submittedAt !== "string" || submittedAt === "") {
     return {
@@ -131,7 +117,8 @@ async function readGradeRequest(
  * Grades a student's submission with a score from 0 to the assignment's points
  * and optional feedback. Only the class's professor can grade, each submission
  * can be graded once, and `submittedAt` must match the version being graded.
- * A 409 for an already graded submission includes the stored grade.
+ * A 409 for an already graded submission includes the stored grade. Each save
+ * adds an entry to the grade's history subcollection.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
@@ -187,6 +174,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
         gradedAt: new Date().toISOString(),
       };
       transaction.create(gradeRef, grade);
+      appendHistory(transaction, gradeRef, {
+        score,
+        feedback,
+        submittedAt,
+        savedBy: uid,
+        savedAt: grade.gradedAt,
+        action: "created",
+      });
 
       return { grade };
     });
@@ -215,7 +210,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
  * Edits an existing grade's score and feedback. Takes the same body as POST
  * plus `lastSavedAt`, the grade's `updatedAt` (or `gradedAt` when never edited)
  * as the professor saw it. A 409 for a grade saved since then includes the
- * stored grade. `gradedAt` and `gradedBy` keep the original grading.
+ * stored grade. `gradedAt` and `gradedBy` keep the original grading, and the
+ * edit is added to the grade's history.
  */
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
@@ -275,6 +271,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         };
       }
 
+      const recorded = await hasHistory(transaction, gradeRef);
       const changes = {
         score,
         feedback,
@@ -283,6 +280,20 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         updatedBy: uid,
       };
       transaction.update(gradeRef, changes);
+
+      // A grade saved before history was kept gets its stored version first
+      if (!recorded) {
+        appendHistory(transaction, gradeRef, entryFromStoredGrade(stored));
+      }
+
+      appendHistory(transaction, gradeRef, {
+        score,
+        feedback,
+        submittedAt,
+        savedBy: uid,
+        savedAt: changes.updatedAt,
+        action: "edited",
+      });
 
       return { grade: { ...stored, ...changes } };
     });

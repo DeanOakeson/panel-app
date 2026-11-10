@@ -1,10 +1,16 @@
 
 import { NextRequest, NextResponse } from "next/server";
+import type { DocumentData } from "firebase-admin/firestore";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { getDeadline } from "@/lib/assignmentDeadline";
 import { loadEnrolledStudentIds } from "@/lib/classRoster";
-import { getGradingStatus, gradingStatusRank } from "@/lib/gradingStatus";
+import {
+  getGradingStatus,
+  gradingStatusRank,
+  isMissingWorkGrade,
+  summarizeMissingGrade,
+} from "@/lib/gradingStatus";
 
 type RouteContext = {
   params: Promise<{
@@ -15,6 +21,27 @@ type RouteContext = {
 
 const BUCKET = "assignment-submissions";
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+/**
+ * Returns the grade fields a submission row shows, which describe only a
+ * grade that belongs to a submission. A missing-work grade shows as ungraded.
+ */
+function submissionGradeFields(
+  submission: DocumentData,
+  stored: DocumentData | undefined
+) {
+  const grade = stored && !isMissingWorkGrade(stored) ? stored : undefined;
+
+  return {
+    grade: grade?.score ?? null,
+    feedback: grade?.feedback ?? "",
+    gradedAt: grade?.gradedAt ?? null,
+    gradeUpdatedAt: grade?.updatedAt ?? null,
+    resubmittedAfterGrading:
+      !!grade && submission.submittedAt !== grade.submittedAt,
+    submittedAfterMissingGrade: !!stored && isMissingWorkGrade(stored),
+  };
+}
 
 const ALLOWED_TYPES = [
   "application/pdf",
@@ -255,6 +282,10 @@ async function authorizeSubmissionAccess(
     return { uid, db, role };
   }
 
+  if (role === "admin") {
+    return { uid, db, role };
+  }
+
   if (role === "student") {
     const enrollment = await db
       .collection("users")
@@ -316,8 +347,9 @@ export async function GET(
     const submissionsRef = assignmentRef.collection("submissions");
     const gradesRef = assignmentRef.collection("grades");
 
-    // Professors see every enrolled student, and anyone else who submitted
-    if (role === "professor") {
+    // The professor and admins see every enrolled student, and anyone else
+    // who submitted or has a grade
+    if (role === "professor" || role === "admin") {
       const [snapshot, gradeSnapshot, enrolledIds] = await Promise.all([
         submissionsRef.get(),
         gradesRef.get(),
@@ -331,7 +363,11 @@ export async function GET(
         gradeSnapshot.docs.map((gradeDoc) => [gradeDoc.id, gradeDoc.data()])
       );
       const studentIds = [
-        ...new Set([...enrolledIds, ...submissionsById.keys()]),
+        ...new Set([
+          ...enrolledIds,
+          ...submissionsById.keys(),
+          ...grades.keys(),
+        ]),
       ];
 
       // getAll() rejects an empty argument list
@@ -354,6 +390,7 @@ export async function GET(
             studentName: (student?.name as string | undefined) ?? null,
             studentEmail: (student?.email as string | undefined) ?? null,
             gradingStatus: getGradingStatus(submission, grade),
+            missingGrade: summarizeMissingGrade(grade),
           };
 
           if (!submission) {
@@ -378,19 +415,15 @@ export async function GET(
             fileSize: submission.fileSize,
             submittedAt: submission.submittedAt,
             status: submission.status || "submitted",
-            grade: grade?.score ?? null,
-            feedback: grade?.feedback ?? "",
-            gradedAt: grade?.gradedAt ?? null,
-            gradeUpdatedAt: grade?.updatedAt ?? null,
-            resubmittedAfterGrading:
-              !!grade && submission.submittedAt !== grade.submittedAt,
+            ...submissionGradeFields(submission, grade),
             fileUrl: error ? null : data.signedUrl,
           };
         })
       );
 
-      // Work to grade first, then graded, then missing. Within a group, rows
-      // shown as "Unknown student" go after every named student.
+      // Work to grade first, then graded, then missing, then missing work
+      // with a grade. Within a group, rows shown as "Unknown student" go after
+      // every named student.
       rows.sort((first, second) => {
         const rankDifference =
           gradingStatusRank(first.gradingStatus) -
@@ -417,21 +450,23 @@ export async function GET(
       });
     }
 
-    // Students can access only their own submission.
+    // Students can access only their own submission and grades
     const [submissionDoc, gradeDoc] = await Promise.all([
       submissionsRef.doc(uid).get(),
       gradesRef.doc(uid).get(),
     ]);
+    const grade = gradeDoc.data();
+    const missingGrade = summarizeMissingGrade(grade);
 
     if (!submissionDoc.exists) {
       return NextResponse.json({
         role,
         submission: null,
+        missingGrade,
       });
     }
 
     const submission = submissionDoc.data()!;
-    const grade = gradeDoc.data();
 
     const { data, error } = await getSupabaseAdmin().storage
       .from(BUCKET)
@@ -455,14 +490,10 @@ export async function GET(
         fileSize: submission.fileSize,
         submittedAt: submission.submittedAt,
         status: submission.status || "submitted",
-        grade: grade?.score ?? null,
-        feedback: grade?.feedback ?? "",
-        gradedAt: grade?.gradedAt ?? null,
-        gradeUpdatedAt: grade?.updatedAt ?? null,
-        resubmittedAfterGrading:
-          !!grade && submission.submittedAt !== grade.submittedAt,
+        ...submissionGradeFields(submission, grade),
         fileUrl: data.signedUrl,
       },
+      missingGrade,
     });
   } catch (error) {
     console.error("Get assignment submission failed:", error);

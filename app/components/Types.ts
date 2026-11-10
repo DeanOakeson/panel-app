@@ -1,4 +1,4 @@
-import type { SubmittedStatus } from "@/lib/gradingStatus";
+import type { MissingStatus, SubmittedStatus } from "@/lib/gradingStatus";
 
 
 export type ClassItem = {
@@ -40,7 +40,19 @@ export type Submission = {
     gradeUpdatedAt: string | null;
     /** True when the graded file has been replaced. */
     resubmittedAfterGrading: boolean;
+    /** True while the student's grade is a missing-work grade given before this submission. */
+    submittedAfterMissingGrade: boolean;
     fileUrl: string | null;
+};
+
+/** A missing-work grade, one with no submittedAt, as the roster and the student see it. */
+export type MissingGradeSummary = {
+    score: number;
+    feedback: string;
+    /** ISO 8601 string. */
+    gradedAt: string;
+    /** ISO 8601 string. Null until the grade is edited. */
+    updatedAt: string | null;
 };
 
 /** A student on a professor's list for an assignment. */
@@ -50,10 +62,12 @@ type ListedStudent = {
     studentName: string | null;
     /** Null when the student has no profile. */
     studentEmail: string | null;
+    /** The student's missing-work grade. Null when their grade belongs to a submission, or they have none. */
+    missingGrade: MissingGradeSummary | null;
 };
 
 /** A student on the professor's list who has not submitted. */
-export type MissingStudent = ListedStudent & { gradingStatus: "missing" };
+export type MissingStudent = ListedStudent & { gradingStatus: MissingStatus };
 
 /** A student on the professor's list with their submission and grade. */
 export type SubmittedStudent = ListedStudent &
@@ -63,7 +77,7 @@ export type SubmittedStudent = ListedStudent &
 export type RosterStudent = MissingStudent | SubmittedStudent;
 
 /**
- * A professor's grade for one submission, stored at
+ * A grade for one student on an assignment, stored at
  * classes/{classId}/assignments/{assignmentId}/grades/{studentUid}.
  * The IDs repeat the path so a collection-group query on grades can filter by them.
  */
@@ -73,14 +87,17 @@ export type Grade = {
     assignmentId: string;
     score: number;
     feedback: string;
-    /** The graded submission's submittedAt, which identifies the file version. */
-    submittedAt: string;
-    /** The grading professor's uid. */
+    /**
+     * The graded submission's submittedAt, which identifies the file version.
+     * Null on a missing-work grade, given to a student without a submission.
+     */
+    submittedAt: string | null;
+    /** The uid of the professor or admin who graded. */
     gradedBy: string;
     /** ISO 8601 string. */
     gradedAt: string;
     /** ISO 8601 string of the latest edit. Absent until edited. */
     updatedAt?: string;
-    /** The uid of the professor who last edited the grade. Absent until edited. */
+    /** The uid of whoever last edited the grade. Absent until edited. */
     updatedBy?: string;
 };

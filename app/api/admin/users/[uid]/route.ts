@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { requireAdmin } from "@/lib/adminGuard";
+import { gradeHistory } from "@/lib/gradeHistory";
 import type { DocumentReference } from "firebase-admin/firestore";
 
 type RouteContext = { params: Promise<{ uid: string }> };
@@ -275,7 +276,7 @@ async function readUserOwnedClassDocs(uid: string, classIds: string[]) {
  *
  * Removes the Firebase Auth account, the `users/{uid}` profile, the user's
  * `users/{uid}/classes/*` enrollment mirrors, and their submission and grade
- * docs. Self-deletion is refused.
+ * docs, with each grade's history. Self-deletion is refused.
  *
  * Submissions/grades are found by uid rather than by current enrollment, so a
  * submission left behind by an earlier unenroll is still removed — see
@@ -327,6 +328,12 @@ export async function DELETE(
       uid,
       enrollments.map((e) => e.classId)
     );
+
+    // History goes before its grade, so a failure part way leaves the grade
+    // for a retry to find again
+    for (const gradeRef of gradeRefs) {
+      await db.recursiveDelete(gradeHistory(gradeRef));
+    }
 
     const docsToDelete: DocumentReference[] = [
       ...enrollments.map((e) => e.ref),

@@ -64,6 +64,20 @@ async function addWork(
   }
 }
 
+/** Stores a missing-work grade for a student. */
+async function addMissingGrade(assignmentId: string, studentUid: string) {
+  await assignmentDoc(assignmentId).collection("grades").doc(studentUid).set({
+    studentId: studentUid,
+    classId,
+    assignmentId,
+    score: 0,
+    feedback: "",
+    submittedAt: null,
+    gradedBy: "owner",
+    gradedAt: "2026-11-02T09:00:00.000Z",
+  });
+}
+
 const firstVersion = "2026-10-30T12:00:00.000Z";
 const secondVersion = "2026-10-31T12:00:00.000Z";
 
@@ -163,11 +177,29 @@ describe("GET /api/classes/[classId]/assignments grading counts", () => {
     ).toEqual([
       [
         "no-work",
-        { students: 4, submitted: 0, toGrade: 0, resubmitted: 0, graded: 0, missing: 4 },
+        {
+          students: 4,
+          submitted: 0,
+          toGrade: 0,
+          resubmitted: 0,
+          afterMissingGrade: 0,
+          graded: 0,
+          missing: 4,
+          missingGraded: 0,
+        },
       ],
       [
         "graded-work",
-        { students: 4, submitted: 3, toGrade: 2, resubmitted: 1, graded: 1, missing: 1 },
+        {
+          students: 4,
+          submitted: 3,
+          toGrade: 2,
+          resubmitted: 1,
+          afterMissingGrade: 0,
+          graded: 1,
+          missing: 1,
+          missingGraded: 0,
+        },
       ],
     ]);
   });
@@ -184,8 +216,44 @@ describe("GET /api/classes/[classId]/assignments grading counts", () => {
       submitted: 4,
       toGrade: 3,
       resubmitted: 1,
+      afterMissingGrade: 0,
       graded: 1,
       missing: 1,
+      missingGraded: 0,
+    });
+  });
+
+  it("counts missing-work grades and submissions that arrived after one", async () => {
+    await addMissingGrade("graded-work", "absent");
+    await addMissingGrade("graded-work", "ungraded");
+
+    const res = await listAssignments(ownerToken);
+
+    expect(res.status).toBe(200);
+    const { assignments } = await res.json();
+    expect(assignments[1].grading).toEqual({
+      students: 4,
+      submitted: 3,
+      toGrade: 2,
+      resubmitted: 1,
+      afterMissingGrade: 1,
+      graded: 1,
+      missing: 1,
+      missingGraded: 1,
+    });
+  });
+
+  it("counts a student with a missing-work grade who is no longer enrolled", async () => {
+    await addMissingGrade("graded-work", "dropped");
+
+    const res = await listAssignments(ownerToken);
+
+    expect(res.status).toBe(200);
+    const { assignments } = await res.json();
+    expect(assignments[1].grading).toMatchObject({
+      students: 5,
+      missing: 2,
+      missingGraded: 1,
     });
   });
 

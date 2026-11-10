@@ -4,10 +4,11 @@ import { useState, type FormEvent } from "react";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import type { Grade } from "../Types";
 
-/** The stored grade a form edits. */
+/** The stored grade a form saves over. */
 export type EditedGrade = {
-  score: number;
-  feedback: string;
+  /** The score the form starts with. Absent leaves the form empty, as when grading over a missing-work grade. */
+  score?: number;
+  feedback?: string;
   /** The grade's updatedAt, or its gradedAt when never edited. */
   lastSavedAt: string;
 };
@@ -20,7 +21,7 @@ type GradeFormProps = {
   /** The submittedAt of the submission the professor is looking at. */
   submittedAt: string;
   points: number;
-  /** The grade being edited. Without it the form creates a grade. */
+  /** The grade being saved over. Without it the form creates a grade. */
   editing?: EditedGrade;
   /**
    * Receives the student's uid, the stored grade, and whether another session
@@ -45,7 +46,10 @@ export default function GradeForm({
   onSaved,
   onCancel,
 }: GradeFormProps) {
-  const [score, setScore] = useState(editing ? String(editing.score) : "");
+  const prefilled = editing?.score !== undefined;
+  const [score, setScore] = useState(
+    editing?.score !== undefined ? String(editing.score) : ""
+  );
   const [feedback, setFeedback] = useState(editing?.feedback ?? "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -151,7 +155,7 @@ export default function GradeForm({
           disabled={busy}
           className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
         >
-          {busy ? "Saving..." : editing ? "Save changes" : "Save grade"}
+          {busy ? "Saving..." : prefilled ? "Save changes" : "Save grade"}
         </button>
 
         {onCancel && (

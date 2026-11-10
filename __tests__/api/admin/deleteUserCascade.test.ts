@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { DELETE } from "@/app/api/admin/users/[uid]/route";
+import type { CollectionReference, DocumentReference } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { clearEmulators, createSignedInUser } from "../../helpers/emulators";
 
@@ -36,6 +37,7 @@ let adminUid: string;
 
 beforeEach(async () => {
   await clearEmulators();
+  vi.restoreAllMocks();
 
   const admin = await createSignedInUser("admin@example.com", "admin");
   adminToken = admin.idToken;
@@ -93,6 +95,37 @@ async function seedGrade(uid: string, classId: string) {
       score: 9,
       feedback: "ok",
       submittedAt: "2026-01-01T00:00:00.000Z",
+      gradedBy: adminUid,
+      gradedAt: "2026-01-02T00:00:00.000Z",
+    });
+}
+
+/** Returns the user's grade on the seeded assignment of a class. */
+function gradeRefIn(classId: string, uid: string) {
+  return db()
+    .collection("classes")
+    .doc(classId)
+    .collection("assignments")
+    .doc("a1")
+    .collection("grades")
+    .doc(uid);
+}
+
+async function seedMissingGrade(uid: string, classId: string) {
+  await db()
+    .collection("classes")
+    .doc(classId)
+    .collection("assignments")
+    .doc("a1")
+    .collection("grades")
+    .doc(uid)
+    .set({
+      studentId: uid,
+      classId,
+      assignmentId: "a1",
+      score: 0,
+      feedback: "Missing",
+      submittedAt: null,
       gradedBy: adminUid,
       gradedAt: "2026-01-02T00:00:00.000Z",
     });
@@ -176,5 +209,105 @@ describe("DELETE /api/admin/users/[uid] cascade — orphan paths", () => {
       .get();
 
     expect(stragglers.empty).toBe(true);
+  });
+
+  it("removes the user's missing-work grades, enrolled or not, and reports them as grades", async () => {
+    const target = await createSignedInUser("student@example.com", "student");
+    await seedClassWithAssignment("class-1");
+    await seedClassWithAssignment("class-2");
+    await seedEnrollMirror(target.uid, "class-1");
+    await seedMissingGrade(target.uid, "class-1");
+    await seedMissingGrade(target.uid, "class-2"); // not enrolled in class-2
+
+    const res = await deleteUser(target.uid, adminToken);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ removedGrades: 2 });
+
+    const stragglers = await db()
+      .collectionGroup("grades")
+      .where("studentId", "==", target.uid)
+      .get();
+
+    expect(stragglers.empty).toBe(true);
+  });
+
+  it("removes the history under the user's grades and missing-work grades", async () => {
+    const target = await createSignedInUser("student@example.com", "student");
+    await seedClassWithAssignment("class-1");
+    await seedClassWithAssignment("class-2");
+    await seedEnrollMirror(target.uid, "class-1");
+    await seedSubmission(target.uid, "class-1", "done");
+    await seedGrade(target.uid, "class-1");
+    await seedMissingGrade(target.uid, "class-2");
+
+    const gradeRef = gradeRefIn("class-1", target.uid);
+    const missingGradeRef = gradeRefIn("class-2", target.uid);
+    const entry = { score: 0, feedback: "", savedBy: adminUid, savedAt: "2026-01-02T00:00:00.000Z", action: "created" };
+    await gradeRef.collection("history").add({ ...entry, submittedAt: "2026-01-01T00:00:00.000Z" });
+    await missingGradeRef.collection("history").add(entry);
+
+    const res = await deleteUser(target.uid, adminToken);
+
+    expect(res.status).toBe(200);
+    const [gradeHistory, missingGradeHistory] = await Promise.all([
+      gradeRef.collection("history").get(),
+      missingGradeRef.collection("history").get(),
+    ]);
+    expect(gradeHistory.empty).toBe(true);
+    expect(missingGradeHistory.empty).toBe(true);
+  });
+
+  it("finishes the cleanup on retry after deleting history fails part way", async () => {
+    // Not enrolled, so a retry can only find the grades by their studentId
+    const target = await createSignedInUser("student@example.com", "student");
+    await seedClassWithAssignment("class-1");
+    await seedClassWithAssignment("class-2");
+    await seedGrade(target.uid, "class-1");
+    await seedMissingGrade(target.uid, "class-2");
+
+    const gradeRef = gradeRefIn("class-1", target.uid);
+    const missingGradeRef = gradeRefIn("class-2", target.uid);
+    const entry = { score: 0, feedback: "", savedBy: adminUid, action: "created" };
+    for (const ref of [gradeRef, missingGradeRef]) {
+      await ref.collection("history").add({ ...entry, savedAt: "2026-01-02T00:00:00.000Z" });
+      await ref.collection("history").add({ ...entry, savedAt: "2026-01-03T00:00:00.000Z" });
+    }
+
+    // The first delete removes one document of its target, then fails
+    vi.spyOn(db(), "recursiveDelete").mockImplementationOnce((async (
+      ref: DocumentReference | CollectionReference
+    ) => {
+      if ("doc" in ref) {
+        await (await ref.limit(1).get()).docs[0]?.ref.delete();
+      } else {
+        await ref.delete();
+      }
+
+      throw new Error("Interrupted");
+    }) as ReturnType<typeof db>["recursiveDelete"]);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const interrupted = await deleteUser(target.uid, adminToken);
+
+    expect(interrupted.status).toBe(500);
+    expect((await gradeRef.get()).exists).toBe(true);
+    expect((await missingGradeRef.get()).exists).toBe(true);
+
+    const retried = await deleteUser(target.uid, adminToken);
+
+    expect(retried.status).toBe(200);
+    const remaining = await Promise.all([
+      gradeRef.get(),
+      missingGradeRef.get(),
+      gradeRef.collection("history").get(),
+      missingGradeRef.collection("history").get(),
+    ]);
+    expect(remaining.map((snapshot) => ("exists" in snapshot ? snapshot.exists : !snapshot.empty))).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
   });
 });

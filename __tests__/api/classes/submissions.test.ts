@@ -67,6 +67,7 @@ function submissionResponse(studentUid: string, submittedAt?: string) {
     gradedAt: null,
     gradeUpdatedAt: null,
     resubmittedAfterGrading: false,
+    submittedAfterMissingGrade: false,
     fileUrl: `https://files.example.com/${filePath}`,
   };
 }
@@ -133,6 +134,29 @@ async function enrollStudent(uid: string, name: string, toClass = classId) {
     .set({ class_id: toClass });
 
   return uid;
+}
+
+/** Stores a missing-work grade for a student who has not submitted. */
+async function addMissingGrade(
+  studentUid: string,
+  score: number,
+  feedback = "",
+  edit: { updatedAt: string; updatedBy: string } | null = null
+) {
+  const grade = {
+    studentId: studentUid,
+    classId,
+    assignmentId,
+    score,
+    feedback,
+    submittedAt: null,
+    gradedBy: "owner",
+    gradedAt: "2026-11-02T08:00:00.000Z",
+    ...edit,
+  };
+  await assignmentDoc().collection("grades").doc(studentUid).set(grade);
+
+  return grade;
 }
 
 type ListedStudent = { studentId: string; gradingStatus: string };
@@ -208,12 +232,22 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       expect(res.status).toBe(403);
     });
 
-    it("returns 403 for an admin", async () => {
+    it("gives an admin the class's roster", async () => {
       const { idToken } = await createSignedInUser("admin@example.com", "admin");
+      await enrollStudent("ada", "Ada Lovelace");
+      await addSubmission("zoe", "Zoe Zhang");
 
       const res = await getSubmissions(idToken);
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.role).toBe("admin");
+      expect(
+        body.students.map((student: ListedStudent) => [student.studentId, student.gradingStatus])
+      ).toEqual([
+        ["zoe", "needs-grading"],
+        ["ada", "missing"],
+      ]);
     });
   });
 
@@ -251,12 +285,14 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           studentName: "Zoe Zhang",
           studentEmail: "zoe@example.com",
           gradingStatus: "needs-grading",
+          missingGrade: null,
         },
         {
           studentId: "ada",
           studentName: "Ada Lovelace",
           studentEmail: "ada@example.com",
           gradingStatus: "missing",
+          missingGrade: null,
         },
       ]);
     });
@@ -345,12 +381,14 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           studentName: "Ada Lovelace",
           studentEmail: "ada@example.com",
           gradingStatus: "needs-grading",
+          missingGrade: null,
         },
         {
           ...submissionResponse("zoe", "2026-10-30T09:00:00.000Z"),
           studentName: "Zoe Zhang",
           studentEmail: "zoe@example.com",
           gradingStatus: "needs-grading",
+          missingGrade: null,
         },
       ]);
     });
@@ -370,24 +408,28 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           studentName: "Ada Lovelace",
           studentEmail: "ada@example.com",
           gradingStatus: "needs-grading",
+          missingGrade: null,
         },
         {
           ...submissionResponse("zoe"),
           studentName: "Zoe Zhang",
           studentEmail: "zoe@example.com",
           gradingStatus: "needs-grading",
+          missingGrade: null,
         },
         {
           ...submissionResponse("abe"),
           studentName: null,
           studentEmail: null,
           gradingStatus: "needs-grading",
+          missingGrade: null,
         },
         {
           ...submissionResponse("ghost"),
           studentName: null,
           studentEmail: null,
           gradingStatus: "needs-grading",
+          missingGrade: null,
         },
       ]);
     });
@@ -464,6 +506,118 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       });
     });
 
+    it("includes a missing-work grade on the row of a student without a submission", async () => {
+      await enrollStudent("ada", "Ada Lovelace");
+      const grade = await addMissingGrade("ada", 0, "Nothing turned in", {
+        updatedAt: "2026-11-03T08:00:00.000Z",
+        updatedBy: "owner",
+      });
+
+      const res = await getSubmissions(ownerToken);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).students).toEqual([
+        {
+          studentId: "ada",
+          studentName: "Ada Lovelace",
+          studentEmail: "ada@example.com",
+          gradingStatus: "missing-graded",
+          missingGrade: {
+            score: 0,
+            feedback: "Nothing turned in",
+            gradedAt: grade.gradedAt,
+            updatedAt: "2026-11-03T08:00:00.000Z",
+          },
+        },
+      ]);
+    });
+
+    it("orders missing work with a grade after missing work without one", async () => {
+      await enrollStudent("abe", "Abe Ames");
+      await enrollStudent("zoe", "Zoe Zhang");
+      await enrollStudent("ben", "Ben Brown");
+      await addSubmission("ben", "Ben Brown");
+      await addMissingGrade("abe", 0);
+
+      const res = await getSubmissions(ownerToken);
+
+      expect(res.status).toBe(200);
+      expect(
+        (await res.json()).students.map((student: ListedStudent) => [
+          student.studentId,
+          student.gradingStatus,
+        ])
+      ).toEqual([
+        ["ben", "needs-grading"],
+        ["zoe", "missing"],
+        ["abe", "missing-graded"],
+      ]);
+    });
+
+    it("flags a submission that arrived after a missing-work grade and keeps that grade on the row", async () => {
+      await enrollStudent("ada", "Ada Lovelace");
+      const missing = await addMissingGrade("ada", 0, "Missing");
+      await addSubmission("ada", "Ada Lovelace");
+
+      const res = await getSubmissions(ownerToken);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).students).toEqual([
+        {
+          ...submissionResponse("ada"),
+          studentName: "Ada Lovelace",
+          studentEmail: "ada@example.com",
+          gradingStatus: "submitted-after-missing",
+          submittedAfterMissingGrade: true,
+          missingGrade: {
+            score: 0,
+            feedback: "Missing",
+            gradedAt: missing.gradedAt,
+            updatedAt: null,
+          },
+        },
+      ]);
+    });
+
+    it("shows a later submission graded over a missing-work grade as a plain grade", async () => {
+      await enrollStudent("ada", "Ada Lovelace");
+      await addSubmission("ada", "Ada Lovelace");
+      const grade = await addGrade("ada", 72, "Late", undefined, {
+        updatedAt: "2026-11-04T09:00:00.000Z",
+        updatedBy: "owner",
+      });
+
+      const res = await getSubmissions(ownerToken);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).students).toEqual([
+        {
+          ...submissionResponse("ada"),
+          studentName: "Ada Lovelace",
+          studentEmail: "ada@example.com",
+          gradingStatus: "graded",
+          grade: 72,
+          feedback: "Late",
+          gradedAt: grade.gradedAt,
+          gradeUpdatedAt: "2026-11-04T09:00:00.000Z",
+          missingGrade: null,
+        },
+      ]);
+    });
+
+    it("lists a student with a missing-work grade who is no longer enrolled", async () => {
+      await enrollStudent("ada", "Ada Lovelace");
+      await enrollStudent("zoe", "Zoe Zhang", "class-2");
+      await addMissingGrade("zoe", 0);
+
+      const res = await getSubmissions(ownerToken);
+
+      expect(res.status).toBe(200);
+      const { students } = await res.json();
+      expect(rowFor(students, "zoe")?.gradingStatus).toBe("missing-graded");
+      expect(rowFor(students, "ada")?.gradingStatus).toBe("missing");
+    });
+
     it("lists a submission without a file link when the link cannot be made", async () => {
       await addSubmission("ada", "Ada Lovelace");
       storage.createSignedUrl.mockResolvedValue({
@@ -486,7 +640,11 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       const res = await getSubmissions(idToken);
 
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ role: "student", submission: null });
+      expect(await res.json()).toEqual({
+        role: "student",
+        submission: null,
+        missingGrade: null,
+      });
     });
 
     it("returns only the student's own submission", async () => {
@@ -500,6 +658,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       expect(await res.json()).toEqual({
         role: "student",
         submission: submissionResponse(uid),
+        missingGrade: null,
       });
     });
 
@@ -538,6 +697,56 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
         gradedAt: grade.gradedAt,
         gradeUpdatedAt: "2026-11-04T09:00:00.000Z",
         resubmittedAfterGrading: false,
+      });
+    });
+
+    it("returns the student's own missing-work grade when they have not submitted", async () => {
+      const { uid, idToken } = await createEnrolledStudent();
+      const grade = await addMissingGrade(uid, 0, "Nothing turned in");
+      await addMissingGrade("zoe", 0, "Someone else's");
+
+      const res = await getSubmissions(idToken);
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        role: "student",
+        submission: null,
+        missingGrade: {
+          score: 0,
+          feedback: "Nothing turned in",
+          gradedAt: grade.gradedAt,
+          updatedAt: null,
+        },
+      });
+    });
+
+    it("returns no missing-work grade when only another student has one", async () => {
+      const { idToken } = await createEnrolledStudent();
+      await addMissingGrade("zoe", 0, "Someone else's");
+
+      const res = await getSubmissions(idToken);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).missingGrade).toBeNull();
+    });
+
+    it("flags a submission the student made after a missing-work grade", async () => {
+      const { uid, idToken } = await createEnrolledStudent();
+      await addMissingGrade(uid, 0, "Missing");
+      await addSubmission(uid, null);
+
+      const res = await getSubmissions(idToken);
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        role: "student",
+        submission: { ...submissionResponse(uid), submittedAfterMissingGrade: true },
+        missingGrade: {
+          score: 0,
+          feedback: "Missing",
+          gradedAt: expect.any(String),
+          updatedAt: null,
+        },
       });
     });
 
