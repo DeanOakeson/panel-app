@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -62,7 +63,6 @@ export default function AssignmentsPage() {
         }
 
         const data = await assignmentsRes.json();
-        console.log(data)
         setAssignments(data.assignments ?? []);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -218,6 +218,7 @@ export default function AssignmentsPage() {
                 key={assignment.id}
                 classId={classId}
                 assignment={assignment}
+                href={`/classes/${classId}/assignments/${assignment.id}`}
                 canEdit={isProfessor}
                 onChanged={handleChanged}
               />

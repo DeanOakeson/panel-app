@@ -19,9 +19,11 @@ export type Assignment = {
     dueDate: string | null;
     /** When submissions close, as an ISO instant. Null when there is no due date. */
     closesAt?: string | null;
+    isLocked: boolean;
 };
 
 export type Submission = {
+    isLate: boolean;
     studentId?: string;
     /** Set on a professor's list. Null when the student has no profile. */
     studentName?: string | null;

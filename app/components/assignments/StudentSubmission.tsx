@@ -81,7 +81,6 @@ export default function StudentSubmission({
   missingGrade,
   loading,
   error,
-isLate,
 
 }: Props) {
   const latestSubmission = submissions[0] ?? submission;

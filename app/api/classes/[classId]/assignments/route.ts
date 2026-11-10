@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { closesAtOrNull } from "@/lib/assignmentDeadline";
+import { getEffectiveClosesAt } from "@/lib/assignmentDeadline";
 import { loadEnrolledStudentIds, loadGradingCounts } from "@/lib/classRoster";
 import { isMissingWorkGrade } from "@/lib/gradingStatus";
 
@@ -98,8 +98,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       typeof body.description === "string" ? body.description.trim() : "";
     const points = body.points;
     const dueDate = typeof body.dueDate === "string" ? body.dueDate : "";
-    const lateUntil =
-      typeof body.lateUntil === "string" ? body.lateUntil : "";
+    const lateUntil = typeof body.lateUntil === "string" ? body.lateUntil : "";
     const isLocked = body.isLocked === true;
 
     if (!name || name.length > 150) {
@@ -132,7 +131,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
     if (lateUntil && !dueDate) {
       return NextResponse.json(
-        { error: "A due date is required when setting a late submission deadline." },
+        {
+          error:
+            "A due date is required when setting a late submission deadline.",
+        },
         { status: 400 },
       );
     }
@@ -182,7 +184,6 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     );
   }
 }
-
 
 /**
  * Lists assignments for the class professor, admin, or enrolled students.
@@ -235,19 +236,31 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       .orderBy("createdAt", "desc")
       .get();
 
-    const assignments = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-      closesAt: closesAtOrNull(doc.data().dueDate),
-    }));
+    const assignments = snapshot.docs.map((doc) => {
+      const data = doc.data();
+
+      let closesAt: string | null = null;
+
+      try {
+        closesAt = getEffectiveClosesAt(data.dueDate, data.lateUntil);
+      } catch {
+        closesAt = null;
+      }
+
+      return {
+        id: doc.id,
+        ...data,
+        closesAt,
+      };
+    });
 
     if (isStudent) {
       const studentAssignments = await Promise.all(
         snapshot.docs.map(async (assignmentDoc, index) => {
-          const [submissionDoc, gradeDoc] = await Promise.all([
-            assignmentDoc.ref.collection("submissions").doc(auth.uid).get(),
-            assignmentDoc.ref.collection("grades").doc(auth.uid).get(),
-          ]);
+          const gradeDoc = await assignmentDoc.ref
+            .collection("grades")
+            .doc(auth.uid)
+            .get();
 
           const grade = gradeDoc.data();
 

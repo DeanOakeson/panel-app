@@ -31,14 +31,25 @@ function assignmentDoc(assignmentId: string, inClass = classId) {
 }
 
 /** Calls the gradebook route as the holder of `idToken`. */
-function getGradebook(idToken?: string, forClass = classId) {
+async function getGradebook(
+  idToken?: string,
+  forClass = classId,
+): Promise<Response> {
   const headers: Record<string, string> = {};
   if (idToken) headers.authorization = `Bearer ${idToken}`;
 
-  return GET(
-    new NextRequest(`http://localhost/api/classes/${forClass}/gradebook`, { headers }),
-    { params: Promise.resolve({ classId: forClass }) }
+  const res = await GET(
+    new NextRequest(`http://localhost/api/classes/${forClass}/gradebook`, {
+      headers,
+    }),
+    { params: Promise.resolve({ classId: forClass }) },
   );
+
+  if (!res) {
+    throw new Error("Gradebook GET route returned no response.");
+  }
+
+  return res;
 }
 
 /** Returns the gradebook for the holder of `idToken`, expecting a 200. */
@@ -52,7 +63,9 @@ async function loadGradebook(idToken: string): Promise<Gradebook> {
 /** Returns a student's cell for an assignment, or undefined when either is absent. */
 function cellOf(gradebook: Gradebook, studentId: string, assignmentId: string) {
   const student = gradebook.students.find((row) => row.id === studentId);
-  const index = gradebook.assignments.findIndex((assignment) => assignment.id === assignmentId);
+  const index = gradebook.assignments.findIndex(
+    (assignment) => assignment.id === assignmentId,
+  );
 
   return student?.cells[index];
 }
@@ -62,7 +75,11 @@ async function enrollStudent(uid: string, inClass = classId, profile = true) {
   const userRef = getAdminDb().collection("users").doc(uid);
 
   if (profile) {
-    await userRef.set({ name: `Student ${uid}`, email: `${uid}@example.com`, role: "student" });
+    await userRef.set({
+      name: `Student ${uid}`,
+      email: `${uid}@example.com`,
+      role: "student",
+    });
   }
 
   await userRef.collection("classes").doc(inClass).set({ class_id: inClass });
@@ -71,8 +88,13 @@ async function enrollStudent(uid: string, inClass = classId, profile = true) {
 /** Stores an assignment. */
 async function addAssignment(
   assignmentId: string,
-  fields: { name?: string; points?: number; dueDate?: string | null; createdAt?: string } = {},
-  inClass = classId
+  fields: {
+    name?: string;
+    points?: number;
+    dueDate?: string | null;
+    createdAt?: string;
+  } = {},
+  inClass = classId,
 ) {
   await assignmentDoc(assignmentId, inClass).set({
     name: fields.name ?? assignmentId,
@@ -87,17 +109,20 @@ async function addSubmission(
   assignmentId: string,
   studentId: string,
   submittedAt = firstVersion,
-  inClass = classId
+  inClass = classId,
 ) {
-  await assignmentDoc(assignmentId, inClass).collection("submissions").doc(studentId).set({
-    studentId,
-    filePath: `${inClass}/${assignmentId}/${studentId}/1-work.pdf`,
-    fileName: "work.pdf",
-    fileType: "application/pdf",
-    fileSize: 1024,
-    submittedAt,
-    status: "submitted",
-  });
+  await assignmentDoc(assignmentId, inClass)
+    .collection("submissions")
+    .doc(studentId)
+    .set({
+      studentId,
+      filePath: `${inClass}/${assignmentId}/${studentId}/1-work.pdf`,
+      fileName: "work.pdf",
+      fileType: "application/pdf",
+      fileSize: 1024,
+      submittedAt,
+      status: "submitted",
+    });
 }
 
 /** Stores a grade for the version submitted at `submittedAt`. */
@@ -107,22 +132,29 @@ async function addGrade(
   score: number,
   feedback = "",
   submittedAt = firstVersion,
-  inClass = classId
+  inClass = classId,
 ) {
-  await assignmentDoc(assignmentId, inClass).collection("grades").doc(studentId).set({
-    studentId,
-    classId: inClass,
-    assignmentId,
-    score,
-    feedback,
-    submittedAt,
-    gradedBy: "owner",
-    gradedAt,
-  });
+  await assignmentDoc(assignmentId, inClass)
+    .collection("grades")
+    .doc(studentId)
+    .set({
+      studentId,
+      classId: inClass,
+      assignmentId,
+      score,
+      feedback,
+      submittedAt,
+      gradedBy: "owner",
+      gradedAt,
+    });
 }
 
 /** Stores a missing-work grade: a grade of 0 with no submittedAt. */
-async function addMissingGrade(assignmentId: string, studentId: string, feedback = "") {
+async function addMissingGrade(
+  assignmentId: string,
+  studentId: string,
+  feedback = "",
+) {
   await assignmentDoc(assignmentId).collection("grades").doc(studentId).set({
     studentId,
     classId,
@@ -137,20 +169,26 @@ async function addMissingGrade(assignmentId: string, studentId: string, feedback
 
 /** Sends a JSON request to a grading route handler. */
 function send<Params>(
-  handler: (request: NextRequest, context: { params: Promise<Params> }) => Promise<Response>,
+  handler: (
+    request: NextRequest,
+    context: { params: Promise<Params> },
+  ) => Promise<Response>,
   method: "POST" | "PATCH",
   url: string,
   params: Params,
   idToken: string,
-  body: unknown
+  body: unknown,
 ) {
   return handler(
     new NextRequest(`http://localhost${url}`, {
       method,
-      headers: { authorization: `Bearer ${idToken}`, "content-type": "application/json" },
+      headers: {
+        authorization: `Bearer ${idToken}`,
+        "content-type": "application/json",
+      },
       body: JSON.stringify(body),
     }),
-    { params: Promise.resolve(params) }
+    { params: Promise.resolve(params) },
   );
 }
 
@@ -164,7 +202,7 @@ beforeEach(async () => {
 
   ({ uid: ownerUid, idToken: ownerToken } = await createSignedInUser(
     "owner@example.com",
-    "professor"
+    "professor",
   ));
 
   await classDoc().set({
@@ -175,7 +213,10 @@ beforeEach(async () => {
     section: "001",
     professor_id: ownerUid,
   });
-  await classDoc(otherClassId).set({ name: "Other course", professor_id: ownerUid });
+  await classDoc(otherClassId).set({
+    name: "Other course",
+    professor_id: ownerUid,
+  });
 });
 
 describe("GET /api/classes/[classId]/gradebook access", () => {
@@ -197,7 +238,10 @@ describe("GET /api/classes/[classId]/gradebook access", () => {
   });
 
   it("returns 403 to an enrolled student", async () => {
-    const { uid, idToken } = await createSignedInUser("student@example.com", "student");
+    const { uid, idToken } = await createSignedInUser(
+      "student@example.com",
+      "student",
+    );
     await enrollStudent(uid, classId, false);
 
     const res = await getGradebook(idToken);
@@ -209,13 +253,19 @@ describe("GET /api/classes/[classId]/gradebook access", () => {
   });
 
   it("returns 403 to a student who is not enrolled", async () => {
-    const { idToken } = await createSignedInUser("student@example.com", "student");
+    const { idToken } = await createSignedInUser(
+      "student@example.com",
+      "student",
+    );
 
     expect((await getGradebook(idToken)).status).toBe(403);
   });
 
   it("returns 403 to a professor who does not teach the class", async () => {
-    const { idToken } = await createSignedInUser("other@example.com", "professor");
+    const { idToken } = await createSignedInUser(
+      "other@example.com",
+      "professor",
+    );
 
     const res = await getGradebook(idToken);
 
@@ -251,13 +301,26 @@ describe("GET /api/classes/[classId]/gradebook access", () => {
 describe("GET /api/classes/[classId]/gradebook cells", () => {
   it("shows every status on a closed assignment, telling a graded 0 from missing work", async () => {
     await addAssignment("closed", { points: 100, dueDate: pastDueDate });
-    for (const uid of ["zero", "scored", "ungraded", "resubmitted", "absent", "marked", "late"]) {
+    for (const uid of [
+      "zero",
+      "scored",
+      "ungraded",
+      "resubmitted",
+      "absent",
+      "marked",
+      "late",
+    ]) {
       await enrollStudent(uid);
     }
     await addSubmission("closed", "zero");
     await addGrade("closed", "zero", 0);
     await addSubmission("closed", "scored");
-    await addGrade("closed", "scored", 90, "Clear requirements.\nAdd criteria.");
+    await addGrade(
+      "closed",
+      "scored",
+      90,
+      "Clear requirements.\nAdd criteria.",
+    );
     await addSubmission("closed", "ungraded");
     await addSubmission("closed", "resubmitted", secondVersion);
     await addGrade("closed", "resubmitted", 82, "Good start", firstVersion);
@@ -267,10 +330,14 @@ describe("GET /api/classes/[classId]/gradebook cells", () => {
 
     const gradebook = await loadGradebook(ownerToken);
     const cells = Object.fromEntries(
-      gradebook.students.map((student) => [student.id, student.cells[0]])
+      gradebook.students.map((student) => [student.id, student.cells[0]]),
     );
 
-    expect(gradebook.assignments[0]).toMatchObject({ id: "closed", closed: true, points: 100 });
+    expect(gradebook.assignments[0]).toMatchObject({
+      id: "closed",
+      closed: true,
+      points: 100,
+    });
     expect(cells.zero).toEqual({
       status: "graded",
       score: 0,
@@ -289,7 +356,11 @@ describe("GET /api/classes/[classId]/gradebook cells", () => {
       score: 90,
       grade: { feedback: "Clear requirements.\nAdd criteria." },
     });
-    expect(cells.ungraded).toMatchObject({ status: "needs-grading", score: null, grade: null });
+    expect(cells.ungraded).toMatchObject({
+      status: "needs-grading",
+      score: null,
+      grade: null,
+    });
     expect(cells.resubmitted).toMatchObject({
       status: "resubmitted",
       score: 82,
@@ -308,7 +379,12 @@ describe("GET /api/classes/[classId]/gradebook cells", () => {
       score: 0,
       submittedAt: null,
       grade: null,
-      missingGrade: { score: 0, feedback: "Nothing turned in", gradedAt, updatedAt: null },
+      missingGrade: {
+        score: 0,
+        feedback: "Nothing turned in",
+        gradedAt,
+        updatedAt: null,
+      },
     });
     expect(cells.late).toMatchObject({
       status: "submitted-after-missing",
@@ -331,7 +407,12 @@ describe("GET /api/classes/[classId]/gradebook cells", () => {
       `/api/classes/${classId}/assignments/closed/submissions/late/grade`,
       { classId, assignmentId: "closed", studentId: "late" },
       ownerToken,
-      { score: 60, feedback: "Late but done", submittedAt: secondVersion, lastSavedAt: gradedAt }
+      {
+        score: 60,
+        feedback: "Late but done",
+        submittedAt: secondVersion,
+        lastSavedAt: gradedAt,
+      },
     );
     expect(regraded.status).toBe(200);
 
@@ -354,8 +435,17 @@ describe("GET /api/classes/[classId]/gradebook cells", () => {
     const gradebook = await loadGradebook(ownerToken);
 
     expect(gradebook.assignments).toEqual([
-      expect.objectContaining({ id: "open", closed: false, closesAt: expect.any(String) }),
-      expect.objectContaining({ id: "undated", closed: false, closesAt: null, dueDate: null }),
+      expect.objectContaining({
+        id: "open",
+        closed: false,
+        closesAt: expect.any(String),
+      }),
+      expect.objectContaining({
+        id: "undated",
+        closed: false,
+        closesAt: null,
+        dueDate: null,
+      }),
     ]);
     expect(gradebook.students[0].cells.map((cell) => cell?.status)).toEqual([
       "missing",
@@ -377,9 +467,15 @@ describe("GET /api/classes/[classId]/gradebook cells", () => {
     const gradebook = await loadGradebook(ownerToken);
     const gone = gradebook.students.find((student) => student.id === "gone");
 
-    expect(gradebook.students.map((student) => student.id)).toEqual(["ava", "gone"]);
+    expect(gradebook.students.map((student) => student.id)).toEqual([
+      "ava",
+      "gone",
+    ]);
     expect(gone?.enrolled).toBe(false);
-    expect(gone?.cells.map((cell) => cell?.status ?? null)).toEqual(["needs-grading", null]);
+    expect(gone?.cells.map((cell) => cell?.status ?? null)).toEqual([
+      "needs-grading",
+      null,
+    ]);
   });
 
   it("lists a student without a profile with no name or email", async () => {
@@ -389,7 +485,12 @@ describe("GET /api/classes/[classId]/gradebook cells", () => {
     const gradebook = await loadGradebook(ownerToken);
 
     expect(gradebook.students).toEqual([
-      expect.objectContaining({ id: "ghost", name: null, email: null, enrolled: true }),
+      expect.objectContaining({
+        id: "ghost",
+        name: null,
+        email: null,
+        enrolled: true,
+      }),
     ]);
   });
 
@@ -403,7 +504,9 @@ describe("GET /api/classes/[classId]/gradebook cells", () => {
 
     const gradebook = await loadGradebook(ownerToken);
 
-    expect(gradebook.assignments.map((assignment) => assignment.id)).toEqual(["mine"]);
+    expect(gradebook.assignments.map((assignment) => assignment.id)).toEqual([
+      "mine",
+    ]);
     expect(gradebook.students.map((student) => student.id)).toEqual(["ava"]);
   });
 });
@@ -433,7 +536,10 @@ describe("GET /api/classes/[classId]/gradebook empty courses", () => {
     const gradebook = await loadGradebook(ownerToken);
 
     expect(gradebook.students).toEqual([]);
-    expect(gradebook.assignments[0].grading).toMatchObject({ students: 0, submitted: 0 });
+    expect(gradebook.assignments[0].grading).toMatchObject({
+      students: 0,
+      submitted: 0,
+    });
   });
 });
 
@@ -451,11 +557,18 @@ describe("GET /api/classes/[classId]/gradebook after grading", () => {
     expect(cellOf(gradebook, "ava", "closed")?.status).toBe("needs-grading");
     expect(gradebook.assignments[0].grading.toGrade).toBe(1);
 
-    const posted = await send(postGrade, "POST", gradeUrl, gradeParams, ownerToken, {
-      score: 70,
-      feedback: "First pass",
-      submittedAt: firstVersion,
-    });
+    const posted = await send(
+      postGrade,
+      "POST",
+      gradeUrl,
+      gradeParams,
+      ownerToken,
+      {
+        score: 70,
+        feedback: "First pass",
+        submittedAt: firstVersion,
+      },
+    );
     expect(posted.status).toBe(201);
     const { grade } = await posted.json();
 
@@ -467,12 +580,19 @@ describe("GET /api/classes/[classId]/gradebook after grading", () => {
     });
     expect(gradebook.assignments[0].grading.toGrade).toBe(0);
 
-    const patched = await send(patchGrade, "PATCH", gradeUrl, gradeParams, ownerToken, {
-      score: 75,
-      feedback: "Second look",
-      submittedAt: firstVersion,
-      lastSavedAt: grade.gradedAt,
-    });
+    const patched = await send(
+      patchGrade,
+      "PATCH",
+      gradeUrl,
+      gradeParams,
+      ownerToken,
+      {
+        score: 75,
+        feedback: "Second look",
+        submittedAt: firstVersion,
+        lastSavedAt: grade.gradedAt,
+      },
+    );
     expect(patched.status).toBe(200);
 
     gradebook = await loadGradebook(ownerToken);
@@ -487,7 +607,7 @@ describe("GET /api/classes/[classId]/gradebook after grading", () => {
       `/api/classes/${classId}/assignments/closed/missing-grades/ben`,
       { classId, assignmentId: "closed", studentId: "ben" },
       ownerToken,
-      { feedback: "Nothing turned in" }
+      { feedback: "Nothing turned in" },
     );
     expect(missing.status).toBe(201);
 
@@ -524,12 +644,19 @@ describe("GET /api/classes/[classId]/gradebook consistency", () => {
       new NextRequest(`http://localhost/api/classes/${classId}/assignments`, {
         headers: { authorization: `Bearer ${ownerToken}` },
       }),
-      { params: Promise.resolve({ classId }) }
+      { params: Promise.resolve({ classId }) },
     );
+
+    if (!listed) {
+      throw new Error("Assignments GET route returned no response.");
+    }
+
     const { assignments } = await listed.json();
 
     for (const assignment of gradebook.assignments) {
-      const match = assignments.find((listedOne: { id: string }) => listedOne.id === assignment.id);
+      const match = assignments.find(
+        (listedOne: { id: string }) => listedOne.id === assignment.id,
+      );
 
       expect(assignment.grading).toEqual(match.grading);
     }
@@ -537,99 +664,112 @@ describe("GET /api/classes/[classId]/gradebook consistency", () => {
     const closedCells = gradebook.students
       .map((student) => student.cells[0])
       .filter((cell): cell is GradebookCell => cell !== null);
-    expect(closedCells).toHaveLength(assignments.find((one: { id: string }) => one.id === "closed").grading.students);
+    expect(closedCells).toHaveLength(
+      assignments.find((one: { id: string }) => one.id === "closed").grading
+        .students,
+    );
   });
 });
 
 describe("GET /api/classes/[classId]/gradebook performance", () => {
-  it(
-    "answers in under 2 seconds for 40 students and 20 assignments",
-    async () => {
-      const db = getAdminDb();
-      const studentIds = Array.from({ length: 40 }, (_, index) => `student-${index}`);
-      const assignmentIds = Array.from({ length: 20 }, (_, index) => `assignment-${index}`);
-      const writes: ((batch: WriteBatch) => void)[] = [];
+  it("answers in under 2 seconds for 40 students and 20 assignments", async () => {
+    const db = getAdminDb();
+    const studentIds = Array.from(
+      { length: 40 },
+      (_, index) => `student-${index}`,
+    );
+    const assignmentIds = Array.from(
+      { length: 20 },
+      (_, index) => `assignment-${index}`,
+    );
+    const writes: ((batch: WriteBatch) => void)[] = [];
 
-      for (const studentId of studentIds) {
-        const userRef = db.collection("users").doc(studentId);
-        writes.push((batch) =>
-          batch.set(userRef, { name: studentId, email: `${studentId}@example.com`, role: "student" })
-        );
-        writes.push((batch) =>
-          batch.set(userRef.collection("classes").doc(classId), { class_id: classId })
-        );
-      }
+    for (const studentId of studentIds) {
+      const userRef = db.collection("users").doc(studentId);
+      writes.push((batch) =>
+        batch.set(userRef, {
+          name: studentId,
+          email: `${studentId}@example.com`,
+          role: "student",
+        }),
+      );
+      writes.push((batch) =>
+        batch.set(userRef.collection("classes").doc(classId), {
+          class_id: classId,
+        }),
+      );
+    }
 
-      for (const [assignmentIndex, assignmentId] of assignmentIds.entries()) {
-        const ref = assignmentDoc(assignmentId);
-        writes.push((batch) =>
-          batch.set(ref, {
-            name: `Assignment ${assignmentIndex}`,
-            points: 100,
-            dueDate: assignmentIndex < 14 ? pastDueDate : futureDueDate,
-            createdAt: `2026-09-${String(assignmentIndex + 1).padStart(2, "0")}T00:00:00.000Z`,
-          })
-        );
+    for (const [assignmentIndex, assignmentId] of assignmentIds.entries()) {
+      const ref = assignmentDoc(assignmentId);
+      writes.push((batch) =>
+        batch.set(ref, {
+          name: `Assignment ${assignmentIndex}`,
+          points: 100,
+          dueDate: assignmentIndex < 14 ? pastDueDate : futureDueDate,
+          createdAt: `2026-09-${String(assignmentIndex + 1).padStart(2, "0")}T00:00:00.000Z`,
+        }),
+      );
 
-        for (const [studentIndex, studentId] of studentIds.entries()) {
-          if (studentIndex % 10 === 9) {
-            writes.push((batch) =>
-              batch.set(ref.collection("grades").doc(studentId), {
-                studentId,
-                score: 0,
-                feedback: "Missing",
-                submittedAt: null,
-                gradedAt,
-              })
-            );
-            continue;
-          }
-
+      for (const [studentIndex, studentId] of studentIds.entries()) {
+        if (studentIndex % 10 === 9) {
           writes.push((batch) =>
-            batch.set(ref.collection("submissions").doc(studentId), {
+            batch.set(ref.collection("grades").doc(studentId), {
               studentId,
-              submittedAt: firstVersion,
-              status: "submitted",
-            })
+              score: 0,
+              feedback: "Missing",
+              submittedAt: null,
+              gradedAt,
+            }),
           );
+          continue;
+        }
 
-          if (studentIndex % 3 !== 0) {
-            writes.push((batch) =>
-              batch.set(ref.collection("grades").doc(studentId), {
-                studentId,
-                score: studentIndex,
-                feedback: `Feedback for ${studentId} on ${assignmentId}`,
-                submittedAt: firstVersion,
-                gradedAt,
-              })
-            );
-          }
+        writes.push((batch) =>
+          batch.set(ref.collection("submissions").doc(studentId), {
+            studentId,
+            submittedAt: firstVersion,
+            status: "submitted",
+          }),
+        );
+
+        if (studentIndex % 3 !== 0) {
+          writes.push((batch) =>
+            batch.set(ref.collection("grades").doc(studentId), {
+              studentId,
+              score: studentIndex,
+              feedback: `Feedback for ${studentId} on ${assignmentId}`,
+              submittedAt: firstVersion,
+              gradedAt,
+            }),
+          );
         }
       }
+    }
 
-      for (let start = 0; start < writes.length; start += 400) {
-        const batch = db.batch();
-        for (const write of writes.slice(start, start + 400)) write(batch);
-        await batch.commit();
-      }
+    for (let start = 0; start < writes.length; start += 400) {
+      const batch = db.batch();
+      for (const write of writes.slice(start, start + 400)) write(batch);
+      await batch.commit();
+    }
 
-      await loadGradebook(ownerToken);
+    await loadGradebook(ownerToken);
 
-      const timings: number[] = [];
-      for (let run = 0; run < 3; run += 1) {
-        const started = performance.now();
-        const gradebook = await loadGradebook(ownerToken);
-        timings.push(performance.now() - started);
+    const timings: number[] = [];
+    for (let run = 0; run < 3; run += 1) {
+      const started = performance.now();
+      const gradebook = await loadGradebook(ownerToken);
+      timings.push(performance.now() - started);
 
-        expect(gradebook.students).toHaveLength(40);
-        expect(gradebook.assignments).toHaveLength(20);
-      }
+      expect(gradebook.students).toHaveLength(40);
+      expect(gradebook.assignments).toHaveLength(20);
+    }
 
-      const median = timings.sort((first, second) => first - second)[1];
-      console.log(`Gradebook median for 40 students x 20 assignments: ${median.toFixed(0)} ms`);
+    const median = timings.sort((first, second) => first - second)[1];
+    console.log(
+      `Gradebook median for 40 students x 20 assignments: ${median.toFixed(0)} ms`,
+    );
 
-      expect(median).toBeLessThan(2000);
-    },
-    60_000
-  );
+    expect(median).toBeLessThan(2000);
+  }, 60_000);
 });

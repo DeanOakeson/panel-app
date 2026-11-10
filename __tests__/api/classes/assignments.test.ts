@@ -14,14 +14,22 @@ function assignmentDoc(assignmentId: string) {
     .doc(assignmentId);
 }
 
-function listAssignments(idToken?: string) {
+async function listAssignments(idToken?: string): Promise<Response> {
   const headers: Record<string, string> = {};
   if (idToken) headers.authorization = `Bearer ${idToken}`;
 
-  return GET(
-    new NextRequest(`http://localhost/api/classes/${classId}/assignments`, { headers }),
-    { params: Promise.resolve({ classId }) }
+  const res = await GET(
+    new NextRequest(`http://localhost/api/classes/${classId}/assignments`, {
+      headers,
+    }),
+    { params: Promise.resolve({ classId }) },
   );
+
+  if (!res) {
+    throw new Error("Assignments GET route returned no response.");
+  }
+
+  return res;
 }
 
 /** Stores a student's profile and enrolls them in a class. */
@@ -43,15 +51,18 @@ async function addWork(
   assignmentId: string,
   studentUid: string,
   submittedAt: string,
-  gradedVersion?: string
+  gradedVersion?: string,
 ) {
-  await assignmentDoc(assignmentId).collection("submissions").doc(studentUid).set({
-    studentId: studentUid,
-    filePath: `${classId}/${assignmentId}/${studentUid}/1-work.pdf`,
-    fileName: "work.pdf",
-    submittedAt,
-    status: "submitted",
-  });
+  await assignmentDoc(assignmentId)
+    .collection("submissions")
+    .doc(studentUid)
+    .set({
+      studentId: studentUid,
+      filePath: `${classId}/${assignmentId}/${studentUid}/1-work.pdf`,
+      fileName: "work.pdf",
+      submittedAt,
+      status: "submitted",
+    });
 
   if (gradedVersion) {
     await assignmentDoc(assignmentId).collection("grades").doc(studentUid).set({
@@ -127,7 +138,7 @@ describe("GET /api/classes/[classId]/assignments closing times", () => {
       assignments.map((assignment: { id: string; closesAt: unknown }) => [
         assignment.id,
         assignment.closesAt,
-      ])
+      ]),
     ).toEqual([
       ["no-work", "2026-12-01T06:59:59.999Z"],
       ["graded-work", "2026-11-01T05:59:59.999Z"],
@@ -135,7 +146,10 @@ describe("GET /api/classes/[classId]/assignments closing times", () => {
   });
 
   it("returns the closing time to an enrolled student", async () => {
-    const { uid, idToken } = await createSignedInUser("student@example.com", "student");
+    const { uid, idToken } = await createSignedInUser(
+      "student@example.com",
+      "student",
+    );
     await getAdminDb()
       .collection("users")
       .doc(uid)
@@ -145,7 +159,9 @@ describe("GET /api/classes/[classId]/assignments closing times", () => {
     const res = await listAssignments(idToken);
 
     expect(res.status).toBe(200);
-    expect((await res.json()).assignments[1].closesAt).toBe("2026-11-01T05:59:59.999Z");
+    expect((await res.json()).assignments[1].closesAt).toBe(
+      "2026-11-01T05:59:59.999Z",
+    );
   });
 
   it("returns a null closing time for a missing or malformed due date", async () => {
@@ -156,10 +172,11 @@ describe("GET /api/classes/[classId]/assignments closing times", () => {
 
     expect(res.status).toBe(200);
     const { assignments } = await res.json();
-    expect(assignments.map((assignment: { closesAt: unknown }) => assignment.closesAt)).toEqual([
-      null,
-      null,
-    ]);
+    expect(
+      assignments.map(
+        (assignment: { closesAt: unknown }) => assignment.closesAt,
+      ),
+    ).toEqual([null, null]);
   });
 });
 
@@ -173,7 +190,7 @@ describe("GET /api/classes/[classId]/assignments grading counts", () => {
       assignments.map((assignment: { id: string; grading: unknown }) => [
         assignment.id,
         assignment.grading,
-      ])
+      ]),
     ).toEqual([
       [
         "no-work",
@@ -268,7 +285,10 @@ describe("GET /api/classes/[classId]/assignments grading counts", () => {
   });
 
   it("lists assignments for an enrolled student without grading counts", async () => {
-    const { uid, idToken } = await createSignedInUser("student@example.com", "student");
+    const { uid, idToken } = await createSignedInUser(
+      "student@example.com",
+      "student",
+    );
     await getAdminDb()
       .collection("users")
       .doc(uid)
@@ -286,7 +306,10 @@ describe("GET /api/classes/[classId]/assignments grading counts", () => {
   });
 
   it("returns 403 to a professor who does not teach the class", async () => {
-    const { idToken } = await createSignedInUser("other@example.com", "professor");
+    const { idToken } = await createSignedInUser(
+      "other@example.com",
+      "professor",
+    );
 
     const res = await listAssignments(idToken);
 
@@ -295,7 +318,10 @@ describe("GET /api/classes/[classId]/assignments grading counts", () => {
   });
 
   it("returns 403 to a student who is not enrolled", async () => {
-    const { idToken } = await createSignedInUser("student@example.com", "student");
+    const { idToken } = await createSignedInUser(
+      "student@example.com",
+      "student",
+    );
 
     const res = await listAssignments(idToken);
 

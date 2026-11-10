@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -333,9 +334,24 @@ export default function AssignmentDetailPage() {
                 error={submissionError}
               />
 
-              {submissionsClosed && closesAt ? (
+              {assignment.isLocked ? (
+                <SubmissionUploadForm
+                  submission={!!submission}
+                  selectedFile={selectedFile}
+                  submitting={submitting}
+                  message={submitMessage}
+                  disabled
+                  disabledMessage="Your professor has closed submissions."
+                  onFileChange={setSelectedFile}
+                  onSubmit={handleSubmit}
+                />
+              ) : submissionsClosed && closesAt ? (
                 <p className="mt-6 rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-600 dark:border-zinc-800 dark:bg-gray-900 dark:text-zinc-300">
                   Submissions closed {formatClosesAt(closesAt)}
+                </p>
+              ) : submissionsClosed ? (
+                <p className="mt-6 rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-600 dark:border-zinc-800 dark:bg-gray-900 dark:text-zinc-300">
+                  Submissions are closed.
                 </p>
               ) : (
                 <SubmissionUploadForm
