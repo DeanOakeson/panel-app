@@ -17,6 +17,8 @@ export default function CreateAssignment({
   const [description, setDescription] = useState("");
   const [points, setPoints] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [lateUntil, setLateUntil] = useState("");
+  const [isLocked, setIsLocked] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -33,6 +35,16 @@ export default function CreateAssignment({
 
     if (!Number.isFinite(pointValue) || pointValue <= 0) {
       setError("Points must be a number greater than 0.");
+      return;
+    }
+
+    if (lateUntil && !dueDate) {
+      setError("Set a due date before setting a late submission deadline.");
+      return;
+    }
+
+    if (lateUntil && lateUntil <= dueDate) {
+      setError("The late submission deadline must be after the due date.");
       return;
     }
 
@@ -60,7 +72,9 @@ export default function CreateAssignment({
             name: name.trim(),
             description: description.trim(),
             points: pointValue,
-            dueDate,
+            dueDate: dueDate || null,
+            lateUntil: lateUntil || null,
+            isLocked,
           }),
         }
       );
@@ -75,6 +89,8 @@ export default function CreateAssignment({
       setDescription("");
       setPoints("");
       setDueDate("");
+      setLateUntil("");
+      setIsLocked(false);
 
       await onCreated();
     } catch (err) {
@@ -140,9 +156,40 @@ export default function CreateAssignment({
         <input
           type="date"
           value={dueDate}
-          onChange={(e) => setDueDate(e.target.value)}
+          onChange={(e) => {
+            setDueDate(e.target.value);
+
+            if (lateUntil && e.target.value && lateUntil <= e.target.value) {
+              setLateUntil("");
+            }
+          }}
           className="rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
         />
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
+        Late submission deadline (optional)
+        <input
+          type="date"
+          value={lateUntil}
+          min={dueDate ? dueDate : undefined}
+          disabled={!dueDate}
+          onChange={(e) => setLateUntil(e.target.value)}
+          className="rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
+        />
+        <span className="text-xs text-gray-500 dark:text-zinc-400">
+          Students can submit until 11:59 PM Mountain Time on this date.
+        </span>
+      </label>
+
+      <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+        <input
+          type="checkbox"
+          checked={isLocked}
+          onChange={(e) => setIsLocked(e.target.checked)}
+          className="h-4 w-4 rounded border-gray-300"
+        />
+        Lock submissions immediately
       </label>
 
       {error && (

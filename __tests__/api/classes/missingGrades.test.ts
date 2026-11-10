@@ -104,7 +104,10 @@ async function readHistory() {
 /** Sends the student's first or later file through the real submit route. */
 function submitFile(idToken: string, name = "late.pdf") {
   const body = new FormData();
-  body.append("file", new File([new Uint8Array(2048)], name, { type: "application/pdf" }));
+  const bytes = new Uint8Array(2048);
+  bytes.set(new TextEncoder().encode("%PDF-1.4\n"));
+
+  body.append("file", new File([bytes], name, { type: "application/pdf" }));
 
   return postSubmission(
     new NextRequest(
