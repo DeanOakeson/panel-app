@@ -1,6 +1,8 @@
+
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { getClosesAt } from "@/lib/assignmentDeadline";
+import { getEffectiveClosesAt } from "@/lib/assignmentDeadline";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 type RouteContext = {
   params: Promise<{ classId: string; assignmentId: string }>;
@@ -8,8 +10,7 @@ type RouteContext = {
 
 /**
  * Returns one assignment to the class's professor, an admin, or an enrolled
- * student, with `closesAt`: when submissions close as an ISO instant, or null
- * when there is no due date.
+ * student, with its effective submission closing instant.
  */
 export async function GET(
   request: NextRequest,
@@ -18,8 +19,6 @@ export async function GET(
   try {
     const { classId, assignmentId } = await params;
 
-    // Reuse the authentication and enrollment checks
-    // from the existing class assignments endpoint.
     const authHeader = request.headers.get("authorization");
 
     if (!authHeader?.startsWith("Bearer ")) {
@@ -103,13 +102,16 @@ export async function GET(
     }
 
     const assignment = assignmentDoc.data();
+
     let closesAt: string | null = null;
 
     try {
-      closesAt = getClosesAt(assignment?.dueDate);
+      closesAt = getEffectiveClosesAt(
+        assignment?.dueDate,
+        assignment?.lateUntil
+      );
     } catch (error) {
-      // The submit route rejects uploads for this assignment with a 500
-      console.error("Assignment has an invalid due date:", error);
+      console.error("Assignment has invalid deadline settings:", error);
     }
 
     return NextResponse.json(
@@ -117,6 +119,8 @@ export async function GET(
         assignment: {
           id: assignmentDoc.id,
           ...assignment,
+          isLocked: assignment?.isLocked === true,
+          lateUntil: assignment?.lateUntil ?? null,
           closesAt,
         },
       },
@@ -210,17 +214,27 @@ async function authorizeClassProfessor(
   return { assignmentRef, current: assignmentDoc.data() ?? {} };
 }
 
-/** Updates any of an assignment's name, description, points, or due date. */
+/** Updates an assignment's details and submission settings. */
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
   try {
     const { classId, assignmentId } = await params;
     const auth = await authorizeClassProfessor(request, classId, assignmentId);
+
     if (auth.error) return auth.error;
 
     let body: Record<string, unknown>;
 
     try {
-      body = await request.json();
+      const parsed = await request.json();
+
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return NextResponse.json(
+          { error: "Invalid JSON request body." },
+          { status: 400 }
+        );
+      }
+
+      body = parsed as Record<string, unknown>;
     } catch {
       return NextResponse.json(
         { error: "Invalid JSON request body." },
@@ -232,29 +246,34 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
     if ("name" in body) {
       const name = typeof body.name === "string" ? body.name.trim() : "";
+
       if (!name || name.length > 150) {
         return NextResponse.json(
           { error: "Assignment name is required (150 characters max)." },
           { status: 400 }
         );
       }
+
       updates.name = name;
     }
 
     if ("description" in body) {
       const description =
         typeof body.description === "string" ? body.description.trim() : "";
+
       if (description.length > 5000) {
         return NextResponse.json(
           { error: "Description must be 5000 characters or fewer." },
           { status: 400 }
         );
       }
+
       updates.description = description;
     }
 
     if ("points" in body) {
       const points = body.points;
+
       if (
         typeof points !== "number" ||
         !Number.isFinite(points) ||
@@ -265,18 +284,43 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
           { status: 400 }
         );
       }
+
       updates.points = points;
     }
 
     if ("dueDate" in body) {
       const dueDate = typeof body.dueDate === "string" ? body.dueDate : "";
-      if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+
+      updates.dueDate = dueDate || null;
+    }
+
+    if ("lateUntil" in body) {
+      if (
+        body.lateUntil !== null &&
+        body.lateUntil !== "" &&
+        typeof body.lateUntil !== "string"
+      ) {
         return NextResponse.json(
-          { error: "Due date must be in YYYY-MM-DD format." },
+          { error: "Late until must be a valid date or empty." },
           { status: 400 }
         );
       }
-      updates.dueDate = dueDate || null;
+
+      updates.lateUntil =
+        typeof body.lateUntil === "string" && body.lateUntil
+          ? body.lateUntil
+          : null;
+    }
+
+    if ("isLocked" in body) {
+      if (typeof body.isLocked !== "boolean") {
+        return NextResponse.json(
+          { error: "Lock submissions must be true or false." },
+          { status: 400 }
+        );
+      }
+
+      updates.isLocked = body.isLocked;
     }
 
     if (Object.keys(updates).length === 0) {
@@ -286,7 +330,32 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       );
     }
 
+    // Validate the final combined deadline settings, including any existing
+    // values that were not included in this PATCH request.
+    const finalDueDate =
+      "dueDate" in updates ? updates.dueDate : auth.current.dueDate;
+
+    const finalLateUntil =
+      "lateUntil" in updates ? updates.lateUntil : auth.current.lateUntil;
+
+    let closesAt: string | null;
+
+    try {
+      closesAt = getEffectiveClosesAt(finalDueDate, finalLateUntil);
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Invalid assignment deadline settings.",
+        },
+        { status: 400 }
+      );
+    }
+
     updates.updatedAt = new Date().toISOString();
+
     await auth.assignmentRef.update(updates);
 
     return NextResponse.json(
@@ -295,6 +364,12 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
           id: assignmentId,
           ...auth.current,
           ...updates,
+          isLocked:
+            "isLocked" in updates
+              ? updates.isLocked
+              : auth.current.isLocked === true,
+          lateUntil: finalLateUntil ?? null,
+          closesAt,
         },
       },
       { status: 200 }
@@ -304,28 +379,93 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       "PATCH /api/classes/[classId]/assignments/[assignmentId] failed:",
       error
     );
+
     return NextResponse.json(
       { error: "Failed to update assignment." },
       { status: 500 }
     );
   }
 }
+const SUBMISSION_BUCKET = "assignment-submissions";
 
-/** Deletes an assignment. */
+/** Finds all files inside a Supabase Storage folder and its subfolders. */
+async function listStorageFiles(
+  storage: ReturnType<typeof getSupabaseAdmin>,
+  folderPath: string
+): Promise<string[]> {
+  const filePaths: string[] = [];
+  const limit = 1000;
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await storage.storage
+      .from(SUBMISSION_BUCKET)
+      .list(folderPath, { limit, offset });
+
+    if (error) throw error;
+
+    for (const entry of data ?? []) {
+      const entryPath = `${folderPath}/${entry.name}`;
+
+      if (entry.id) {
+        filePaths.push(entryPath);
+      } else {
+        const nestedFiles = await listStorageFiles(storage, entryPath);
+        filePaths.push(...nestedFiles);
+      }
+    }
+
+    if (!data || data.length < limit) break;
+
+    offset += limit;
+  }
+
+  return filePaths;
+}
+/** Deletes an assignment, its Firestore records, and its submission files. */
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
   try {
     const { classId, assignmentId } = await params;
     const auth = await authorizeClassProfessor(request, classId, assignmentId);
+
     if (auth.error) return auth.error;
 
-    await auth.assignmentRef.delete();
+    const storage = getSupabaseAdmin();
 
-    return NextResponse.json({ deleted: true, id: assignmentId }, { status: 200 });
+    // Find every uploaded submission file for this assignment.
+    const assignmentFolder = `${classId}/${assignmentId}`;
+
+    const filePaths = await listStorageFiles(storage, assignmentFolder);
+
+    // Delete Supabase Storage files in batches.
+    for (let i = 0; i < filePaths.length; i += 1000) {
+      const batch = filePaths.slice(i, i + 1000);
+
+      const { error } = await storage.storage
+        .from(SUBMISSION_BUCKET)
+        .remove(batch);
+
+      if (error) throw error;
+    }
+
+    // Delete the assignment and all its Firestore subcollections.
+    const db = getAdminDb();
+    await db.recursiveDelete(auth.assignmentRef);
+
+    return NextResponse.json(
+      {
+        deleted: true,
+        id: assignmentId,
+        removedSubmissionFiles: filePaths.length,
+      },
+      { status: 200 }
+    );
   } catch (error) {
     console.error(
       "DELETE /api/classes/[classId]/assignments/[assignmentId] failed:",
       error
     );
+
     return NextResponse.json(
       { error: "Failed to delete assignment." },
       { status: 500 }

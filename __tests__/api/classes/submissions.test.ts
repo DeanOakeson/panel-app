@@ -37,14 +37,17 @@ function getSubmissions(idToken?: string, ids = { classId, assignmentId }) {
   return GET(
     new NextRequest(
       `http://localhost/api/classes/${ids.classId}/assignments/${ids.assignmentId}/submit`,
-      { headers }
+      { headers },
     ),
-    { params: Promise.resolve(ids) }
+    { params: Promise.resolve(ids) },
   );
 }
 
 /** Returns a stored submission document for a file the student uploaded. */
-function fileSubmission(studentUid: string, submittedAt = "2026-10-30T12:00:00.000Z") {
+function fileSubmission(
+  studentUid: string,
+  submittedAt = "2026-10-30T12:00:00.000Z",
+) {
   return {
     studentId: studentUid,
     filePath: `${classId}/${assignmentId}/${studentUid}/1-work.pdf`,
@@ -66,6 +69,7 @@ function submissionResponse(studentUid: string, submittedAt?: string) {
     feedback: "",
     gradedAt: null,
     gradeUpdatedAt: null,
+    isLate: false,
     resubmittedAfterGrading: false,
     submittedAfterMissingGrade: false,
     fileUrl: `https://files.example.com/${filePath}`,
@@ -77,7 +81,7 @@ async function addSubmission(
   studentUid: string,
   name: string | null,
   submittedAt?: string,
-  toAssignment = assignmentId
+  toAssignment = assignmentId,
 ) {
   if (name) {
     await getAdminDb()
@@ -102,7 +106,7 @@ async function addGrade(
   score: number,
   feedback = "",
   submittedAt = fileSubmission(studentUid).submittedAt,
-  edit: { updatedAt: string; updatedBy: string } | null = null
+  edit: { updatedAt: string; updatedBy: string } | null = null,
 ) {
   const grade = {
     score,
@@ -141,7 +145,7 @@ async function addMissingGrade(
   studentUid: string,
   score: number,
   feedback = "",
-  edit: { updatedAt: string; updatedBy: string } | null = null
+  edit: { updatedAt: string; updatedBy: string } | null = null,
 ) {
   const grade = {
     studentId: studentUid,
@@ -217,7 +221,10 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
 
   describe("authorization", () => {
     it("returns 403 for a professor who does not teach the class", async () => {
-      const { idToken } = await createSignedInUser("other@example.com", "professor");
+      const { idToken } = await createSignedInUser(
+        "other@example.com",
+        "professor",
+      );
 
       const res = await getSubmissions(idToken);
 
@@ -225,7 +232,10 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
     });
 
     it("returns 403 for a student who is not enrolled in the class", async () => {
-      const { idToken } = await createSignedInUser("student@example.com", "student");
+      const { idToken } = await createSignedInUser(
+        "student@example.com",
+        "student",
+      );
 
       const res = await getSubmissions(idToken);
 
@@ -233,7 +243,10 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
     });
 
     it("gives an admin the class's roster", async () => {
-      const { idToken } = await createSignedInUser("admin@example.com", "admin");
+      const { idToken } = await createSignedInUser(
+        "admin@example.com",
+        "admin",
+      );
       await enrollStudent("ada", "Ada Lovelace");
       await addSubmission("zoe", "Zoe Zhang");
 
@@ -243,7 +256,10 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       const body = await res.json();
       expect(body.role).toBe("admin");
       expect(
-        body.students.map((student: ListedStudent) => [student.studentId, student.gradingStatus])
+        body.students.map((student: ListedStudent) => [
+          student.studentId,
+          student.gradingStatus,
+        ]),
       ).toEqual([
         ["zoe", "needs-grading"],
         ["ada", "missing"],
@@ -253,13 +269,19 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
 
   describe("as the class's professor", () => {
     it("returns 404 for a class that does not exist", async () => {
-      const res = await getSubmissions(ownerToken, { classId: "missing", assignmentId });
+      const res = await getSubmissions(ownerToken, {
+        classId: "missing",
+        assignmentId,
+      });
 
       expect(res.status).toBe(404);
     });
 
     it("returns 404 for an assignment that does not exist", async () => {
-      const res = await getSubmissions(ownerToken, { classId, assignmentId: "missing" });
+      const res = await getSubmissions(ownerToken, {
+        classId,
+        assignmentId: "missing",
+      });
 
       expect(res.status).toBe(404);
     });
@@ -305,7 +327,9 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
 
       expect(res.status).toBe(200);
       expect(
-        (await res.json()).students.map((student: ListedStudent) => student.studentId)
+        (await res.json()).students.map(
+          (student: ListedStudent) => student.studentId,
+        ),
       ).toEqual(["ada"]);
     });
 
@@ -343,7 +367,11 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       await enrollStudent("graded-abe", "Abe Ames");
       await addSubmission("graded-ben", "Ben Brown");
       await addSubmission("graded-abe", "Abe Ames");
-      await addSubmission("resubmitted-cal", "Cal Cole", "2026-11-03T09:00:00.000Z");
+      await addSubmission(
+        "resubmitted-cal",
+        "Cal Cole",
+        "2026-11-03T09:00:00.000Z",
+      );
       await addSubmission("ungraded-dee", "Dee Dunn");
       await addGrade("graded-ben", 70);
       await addGrade("graded-abe", 90);
@@ -356,7 +384,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
         (await res.json()).students.map((student: ListedStudent) => [
           student.studentId,
           student.gradingStatus,
-        ])
+        ]),
       ).toEqual([
         ["resubmitted-cal", "resubmitted"],
         ["ungraded-dee", "needs-grading"],
@@ -369,7 +397,10 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
     it("lists the assignment's submissions by student name, with names and emails", async () => {
       await addSubmission("zoe", "Zoe Zhang", "2026-10-30T09:00:00.000Z");
       await addSubmission("ada", "Ada Lovelace", "2026-10-31T09:00:00.000Z");
-      await assignmentDoc("assignment-2").set({ ...assignment, name: "Project 2" });
+      await assignmentDoc("assignment-2").set({
+        ...assignment,
+        name: "Project 2",
+      });
       await addSubmission("bob", "Bob Brown", undefined, "assignment-2");
 
       const res = await getSubmissions(ownerToken);
@@ -546,7 +577,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
         (await res.json()).students.map((student: ListedStudent) => [
           student.studentId,
           student.gradingStatus,
-        ])
+        ]),
       ).toEqual([
         ["ben", "needs-grading"],
         ["zoe", "missing"],
@@ -643,6 +674,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       expect(await res.json()).toEqual({
         role: "student",
         submission: null,
+        submissions: [],
         missingGrade: null,
       });
     });
@@ -658,6 +690,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       expect(await res.json()).toEqual({
         role: "student",
         submission: submissionResponse(uid),
+        submissions: [submissionResponse(uid)],
         missingGrade: null,
       });
     });
@@ -711,6 +744,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       expect(await res.json()).toEqual({
         role: "student",
         submission: null,
+        submissions: [],
         missingGrade: {
           score: 0,
           feedback: "Nothing turned in",
@@ -740,7 +774,13 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({
         role: "student",
-        submission: { ...submissionResponse(uid), submittedAfterMissingGrade: true },
+        submission: {
+          ...submissionResponse(uid),
+          submittedAfterMissingGrade: true,
+        },
+        submissions: [
+          { ...submissionResponse(uid), submittedAfterMissingGrade: true },
+        ],
         missingGrade: {
           score: 0,
           feedback: "Missing",

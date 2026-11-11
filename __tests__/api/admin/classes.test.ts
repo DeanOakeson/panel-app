@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { GET, PATCH, DELETE } from "@/app/api/admin/classes/[classId]/route";
 import { POST } from "@/app/api/admin/classes/[classId]/enrollments/route";
@@ -8,6 +8,23 @@ import { clearEmulators, createSignedInUser } from "../../helpers/emulators";
 
 const classId = "class-1";
 const classParams = { params: Promise.resolve({ classId }) };
+
+vi.mock("@/lib/supabaseAdmin", () => ({
+  getSupabaseAdmin: vi.fn(() => ({
+    storage: {
+      from: vi.fn(() => ({
+        list: vi.fn().mockResolvedValue({
+          data: [],
+          error: null,
+        }),
+        remove: vi.fn().mockResolvedValue({
+          data: [],
+          error: null,
+        }),
+      })),
+    },
+  })),
+}));
 
 function paramsFor(studentId: string) {
   return { params: Promise.resolve({ classId, studentId }) };

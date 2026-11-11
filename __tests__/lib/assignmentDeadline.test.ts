@@ -4,7 +4,9 @@ import {
   formatTimestamp,
   getClosesAt,
   getDeadline,
+  getEffectiveClosesAt,
   hasClosed,
+  isLateSubmission,
   MAX_TIMEOUT,
   whenPassed,
 } from "@/lib/assignmentDeadline";
@@ -71,6 +73,129 @@ describe("getClosesAt", () => {
 
   it("throws for a malformed date", () => {
     expect(() => getClosesAt("2026-02-30")).toThrow("Invalid assignment due date.");
+  });
+});
+
+describe("isLateSubmission", () => {
+  it("returns false when submitted before the original deadline", () => {
+    expect(
+      isLateSubmission(
+        "2026-10-31T05:00:00.000Z",
+        "2026-10-30"
+      )
+    ).toBe(false);
+  });
+
+  it("returns false when submitted exactly at the original deadline", () => {
+    expect(
+      isLateSubmission(
+        "2026-10-31T05:59:59.999Z",
+        "2026-10-30"
+      )
+    ).toBe(false);
+  });
+
+  it("returns true when submitted after the original deadline", () => {
+    expect(
+      isLateSubmission(
+        "2026-10-31T06:00:00.000Z",
+        "2026-10-30"
+      )
+    ).toBe(true);
+  });
+
+  it("still marks a submission late when a lateUntil extension exists", () => {
+    // Late until does not change the original due-date calculation.
+    expect(
+      isLateSubmission(
+        "2026-11-02T12:00:00.000Z",
+        "2026-10-30"
+      )
+    ).toBe(true);
+  });
+
+  it("returns false when there is no due date", () => {
+    expect(
+      isLateSubmission("2026-11-02T12:00:00.000Z", null)
+    ).toBe(false);
+  });
+
+  it("accepts a Date object as the submission timestamp", () => {
+    expect(
+      isLateSubmission(
+        new Date("2026-10-31T06:00:00.000Z"),
+        "2026-10-30"
+      )
+    ).toBe(true);
+  });
+
+  it("accepts a numeric timestamp", () => {
+    expect(
+      isLateSubmission(
+        Date.parse("2026-10-31T06:00:00.000Z"),
+        "2026-10-30"
+      )
+    ).toBe(true);
+  });
+
+  it("returns false for an invalid submission timestamp", () => {
+    expect(
+      isLateSubmission("not a date", "2026-10-30")
+    ).toBe(false);
+  });
+});
+
+describe("getEffectiveClosesAt", () => {
+  it("uses the due date when there is no lateUntil date", () => {
+    expect(
+      getEffectiveClosesAt("2026-10-30", null)
+    ).toBe("2026-10-31T05:59:59.999Z");
+  });
+
+  it("uses the lateUntil date when provided", () => {
+    expect(
+      getEffectiveClosesAt("2026-10-30", "2026-11-05")
+    ).toBe("2026-11-06T06:59:59.999Z");
+  });
+
+  it("returns null when there is no due date", () => {
+    expect(getEffectiveClosesAt(null, null)).toBeNull();
+  });
+
+  it("throws when lateUntil is provided without a due date", () => {
+    expect(() =>
+      getEffectiveClosesAt(null, "2026-11-05")
+    ).toThrow("A due date is required when setting Late until.");
+  });
+
+  it("throws when lateUntil is the same as the due date", () => {
+    expect(() =>
+      getEffectiveClosesAt("2026-10-30", "2026-10-30")
+    ).toThrow("Late until date must be later than the due date.");
+  });
+
+  it("throws when lateUntil is before the due date", () => {
+    expect(() =>
+      getEffectiveClosesAt("2026-10-30", "2026-10-29")
+    ).toThrow("Late until date must be later than the due date.");
+  });
+
+  it("throws when lateUntil is an invalid date", () => {
+    expect(() =>
+      getEffectiveClosesAt("2026-10-30", "2026-02-30")
+    ).toThrow("Invalid assignment due date.");
+  });
+
+  it("throws when the due date is invalid", () => {
+    expect(() =>
+      getEffectiveClosesAt("2026-02-30", "2026-11-05")
+    ).toThrow("Invalid assignment due date.");
+  });
+
+  it("handles a lateUntil date across a DST transition", () => {
+    expect(
+      getEffectiveClosesAt("2026-10-30", "2026-11-01")
+    ).toBe("2026-11-02T06:59:59.999Z");
   });
 });
 

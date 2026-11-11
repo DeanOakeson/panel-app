@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, type FormEvent } from "react";
@@ -12,10 +13,14 @@ export type Assignment = {
   description?: string;
   points: number;
   dueDate: string | null;
-  /** When submissions close, as an ISO instant. Null without a valid due date. */
+  lateUntil?: string | null;
+  isLocked?: boolean;
+  /** Effective closing instant, as an ISO instant. */
   closesAt?: string | null;
   /** Sent to the class's professor and admins only. */
   grading?: GradingCounts;
+  /** The current student's earned grade, or null if not graded. */
+  studentGrade?: number | null;
 };
 
 type AssignmentItemProps = {
@@ -33,7 +38,7 @@ const inputClass =
 /** Returns the due line, like "Due Oct 16, 11:59 PM MT". */
 function describeDue(assignment: Assignment) {
   if (assignment.closesAt) {
-    return `Due ${formatClosesAt(assignment.closesAt)}`;
+    return `Closes ${formatClosesAt(assignment.closesAt)}`;
   }
 
   return assignment.dueDate ? `Due ${assignment.dueDate}` : "No due date";
@@ -85,6 +90,8 @@ export default function AssignmentItem({
   const [description, setDescription] = useState(a.description ?? "");
   const [points, setPoints] = useState(String(a.points));
   const [dueDate, setDueDate] = useState(a.dueDate ?? "");
+  const [lateUntil, setLateUntil] = useState(a.lateUntil ?? "");
+  const [isLocked, setIsLocked] = useState(a.isLocked ?? false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -116,6 +123,8 @@ export default function AssignmentItem({
     setDescription(a.description ?? "");
     setPoints(String(a.points));
     setDueDate(a.dueDate ?? "");
+    setLateUntil(a.lateUntil ?? "");
+    setIsLocked(a.isLocked ?? false);
     setError("");
     setMode("edit");
   }
@@ -128,19 +137,45 @@ export default function AssignmentItem({
       setError("Assignment name is required.");
       return;
     }
+
     if (!Number.isFinite(pointValue) || pointValue <= 0) {
       setError("Points must be a number greater than 0.");
       return;
     }
 
+    if (lateUntil && !dueDate) {
+      setError("A due date is required when setting Late until.");
+      return;
+    }
+
+    if (lateUntil && lateUntil <= dueDate) {
+      setError("Late until date must be later than the due date.");
+      return;
+    }
+
     // Send only the fields that changed, so two people editing different
     // fields of the same assignment don't overwrite each other's work.
-    const changes: Record<string, string | number> = {};
+    const changes: Record<string, string | number | boolean | null> = {};
+
     if (name.trim() !== a.name) changes.name = name.trim();
-    if (description.trim() !== (a.description ?? ""))
+
+    if (description.trim() !== (a.description ?? "")) {
       changes.description = description.trim();
+    }
+
     if (pointValue !== a.points) changes.points = pointValue;
-    if (dueDate !== (a.dueDate ?? "")) changes.dueDate = dueDate;
+
+    if (dueDate !== (a.dueDate ?? "")) {
+      changes.dueDate = dueDate;
+    }
+
+    if (lateUntil !== (a.lateUntil ?? "")) {
+      changes.lateUntil = lateUntil || null;
+    }
+
+    if (isLocked !== (a.isLocked ?? false)) {
+      changes.isLocked = isLocked;
+    }
 
     if (Object.keys(changes).length === 0) {
       setMode("view");
@@ -149,6 +184,7 @@ export default function AssignmentItem({
 
     setBusy(true);
     setError("");
+
     try {
       await send("PATCH", changes);
       setMode("view");
@@ -163,6 +199,7 @@ export default function AssignmentItem({
   async function handleDelete() {
     setBusy(true);
     setError("");
+
     try {
       await send("DELETE");
       await onChanged();
@@ -188,6 +225,7 @@ export default function AssignmentItem({
               required
             />
           </label>
+
           <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
             Description (optional)
             <textarea
@@ -198,6 +236,7 @@ export default function AssignmentItem({
               className={inputClass}
             />
           </label>
+
           <div className="flex flex-wrap gap-3">
             <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
               Points possible
@@ -211,6 +250,7 @@ export default function AssignmentItem({
                 required
               />
             </label>
+
             <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
               Due date (optional)
               <input
@@ -220,7 +260,40 @@ export default function AssignmentItem({
                 className={inputClass}
               />
             </label>
+
+            <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
+              Late until (optional)
+              <input
+                type="date"
+                value={lateUntil}
+                min={dueDate || undefined}
+                onChange={(e) => setLateUntil(e.target.value)}
+                disabled={!dueDate}
+                className={inputClass}
+              />
+            </label>
           </div>
+
+          <p className="text-xs text-gray-500 dark:text-zinc-400">
+            Submissions after the original due date will be marked late.
+            Late submissions are accepted until 11:59 PM Mountain Time on
+            the Late until date.
+          </p>
+
+          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <input
+              type="checkbox"
+              checked={isLocked}
+              onChange={(e) => setIsLocked(e.target.checked)}
+              className="h-4 w-4"
+            />
+            Lock submissions
+          </label>
+
+          <p className="text-xs text-gray-500 dark:text-zinc-400">
+            When locked, students cannot submit, even if the deadline has
+            not passed. You can unlock submissions later.
+          </p>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
 
@@ -232,6 +305,7 @@ export default function AssignmentItem({
             >
               {busy ? "Saving..." : "Save changes"}
             </button>
+
             <button
               type="button"
               onClick={() => setMode("view")}
@@ -261,9 +335,15 @@ export default function AssignmentItem({
             {a.name}
           </span>
         )}
-        <span className="text-sm text-gray-500 dark:text-zinc-400">
-          {a.points} pts · {describeDue(a)}
-        </span>
+
+        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500 dark:text-zinc-400">
+          <span>{a.points} pts · {describeDue(a)}</span>
+          {a.isLocked && (
+            <span className="rounded bg-red-100 px-2 py-1 font-semibold text-red-700 dark:bg-red-950 dark:text-red-300">
+              Locked
+            </span>
+          )}
+        </div>
       </div>
 
       {a.grading && <GradingProgress counts={a.grading} />}
@@ -285,6 +365,7 @@ export default function AssignmentItem({
           >
             Edit
           </button>
+
           <button
             type="button"
             onClick={() => setMode("confirm-delete")}
@@ -300,6 +381,7 @@ export default function AssignmentItem({
           <span className="text-gray-700 dark:text-gray-300">
             Delete &quot;{a.name}&quot;? This can&apos;t be undone.
           </span>
+
           <button
             type="button"
             onClick={handleDelete}
@@ -308,6 +390,7 @@ export default function AssignmentItem({
           >
             {busy ? "Deleting..." : "Yes, delete"}
           </button>
+
           <button
             type="button"
             onClick={() => setMode("view")}

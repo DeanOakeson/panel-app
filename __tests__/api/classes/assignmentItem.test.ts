@@ -8,6 +8,25 @@ import {
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { clearEmulators, createSignedInUser } from "../../helpers/emulators";
 
+
+// Only Supabase Storage is stubbed; Firebase runs against the emulators.
+vi.mock("@/lib/supabaseAdmin", () => ({
+  getSupabaseAdmin: vi.fn(() => ({
+    storage: {
+      from: vi.fn(() => ({
+        list: vi.fn().mockResolvedValue({
+          data: [],
+          error: null,
+        }),
+        remove: vi.fn().mockResolvedValue({
+          data: [],
+          error: null,
+        }),
+      })),
+    },
+  })),
+}));
+
 const classId = "class-1";
 const assignmentId = "assignment-1";
 
@@ -28,7 +47,7 @@ function assignmentDoc() {
 
 type Handler = (
   request: NextRequest,
-  context: { params: Promise<{ classId: string; assignmentId: string }> }
+  context: { params: Promise<{ classId: string; assignmentId: string }> },
 ) => Promise<Response>;
 
 function call(
@@ -36,9 +55,11 @@ function call(
   method: "GET" | "PATCH" | "DELETE",
   idToken?: string,
   body?: unknown,
-  ids = { classId, assignmentId }
+  ids = { classId, assignmentId },
 ) {
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
   if (idToken) headers.authorization = `Bearer ${idToken}`;
 
   return handler(
@@ -48,9 +69,9 @@ function call(
         method,
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
-      }
+      },
     ),
-    { params: Promise.resolve(ids) }
+    { params: Promise.resolve(ids) },
   );
 }
 
@@ -80,11 +101,16 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]", () => {
       id: assignmentId,
       ...original,
       closesAt: "2026-11-02T06:59:59.999Z",
+      lateUntil: null,
+      isLocked: false,
     });
   });
 
   it("returns the same closing instant to an enrolled student", async () => {
-    const { uid, idToken } = await createSignedInUser("student@example.com", "student");
+    const { uid, idToken } = await createSignedInUser(
+      "student@example.com",
+      "student",
+    );
     await getAdminDb()
       .collection("users")
       .doc(uid)
@@ -94,17 +120,22 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]", () => {
     const res = await call(GET, "GET", idToken);
 
     expect(res.status).toBe(200);
-    expect((await res.json()).assignment.closesAt).toBe("2026-11-02T06:59:59.999Z");
+    expect((await res.json()).assignment.closesAt).toBe(
+      "2026-11-02T06:59:59.999Z",
+    );
   });
 
-  it.each([null, ""])("returns a null closesAt for a due date of %j", async (dueDate) => {
-    await assignmentDoc().update({ dueDate });
+  it.each([null, ""])(
+    "returns a null closesAt for a due date of %j",
+    async (dueDate) => {
+      await assignmentDoc().update({ dueDate });
 
-    const res = await call(GET, "GET", ownerToken);
+      const res = await call(GET, "GET", ownerToken);
 
-    expect(res.status).toBe(200);
-    expect((await res.json()).assignment.closesAt).toBeNull();
-  });
+      expect(res.status).toBe(200);
+      expect((await res.json()).assignment.closesAt).toBeNull();
+    },
+  );
 
   it("returns a null closesAt for a malformed due date", async () => {
     await assignmentDoc().update({ dueDate: "2026-02-30" });
@@ -126,7 +157,10 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]", () => {
   });
 
   it("returns 403 for a professor who does not teach the class", async () => {
-    const { idToken } = await createSignedInUser("other@example.com", "professor");
+    const { idToken } = await createSignedInUser(
+      "other@example.com",
+      "professor",
+    );
 
     const res = await call(PATCH, "PATCH", idToken, { name: "Hijacked" });
 
@@ -135,7 +169,10 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]", () => {
   });
 
   it("returns 403 for a student", async () => {
-    const { idToken } = await createSignedInUser("student@example.com", "student");
+    const { idToken } = await createSignedInUser(
+      "student@example.com",
+      "student",
+    );
 
     const res = await call(PATCH, "PATCH", idToken, { points: 1 });
 
@@ -175,10 +212,16 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]", () => {
   });
 
   it("returns 404 for a class that does not exist", async () => {
-    const res = await call(PATCH, "PATCH", ownerToken, { name: "X" }, {
-      classId: "missing-class",
-      assignmentId,
-    });
+    const res = await call(
+      PATCH,
+      "PATCH",
+      ownerToken,
+      { name: "X" },
+      {
+        classId: "missing-class",
+        assignmentId,
+      },
+    );
 
     expect(res.status).toBe(404);
   });
@@ -194,12 +237,83 @@ describe("PATCH /api/classes/[classId]/assignments/[assignmentId]", () => {
   });
 
   it("returns 404 for an assignment that does not exist", async () => {
-    const res = await call(PATCH, "PATCH", ownerToken, { name: "X" }, {
-      classId,
-      assignmentId: "missing",
-    });
+    const res = await call(
+      PATCH,
+      "PATCH",
+      ownerToken,
+      { name: "X" },
+      {
+        classId,
+        assignmentId: "missing",
+      },
+    );
 
     expect(res.status).toBe(404);
+  });
+
+  it("lets the professor lock and unlock submissions", async () => {
+    const lockRes = await call(PATCH, "PATCH", ownerToken, {
+      isLocked: true,
+    });
+
+    expect(lockRes.status).toBe(200);
+    expect((await assignmentDoc().get()).data()?.isLocked).toBe(true);
+
+    const unlockRes = await call(PATCH, "PATCH", ownerToken, {
+      isLocked: false,
+    });
+
+    expect(unlockRes.status).toBe(200);
+    expect((await assignmentDoc().get()).data()?.isLocked).toBe(false);
+  });
+
+  it("lets the professor set a late-until date", async () => {
+    const res = await call(PATCH, "PATCH", ownerToken, {
+      lateUntil: "2026-11-10",
+    });
+
+    expect(res.status).toBe(200);
+    expect((await assignmentDoc().get()).data()).toMatchObject({
+      dueDate: "2026-11-01",
+      lateUntil: "2026-11-10",
+    });
+    expect((await res.json()).assignment.closesAt).toBe(
+      "2026-11-11T06:59:59.999Z",
+    );
+  });
+
+  it("lets the professor clear the late-until date", async () => {
+    await assignmentDoc().update({ lateUntil: "2026-11-10" });
+
+    const res = await call(PATCH, "PATCH", ownerToken, {
+      lateUntil: null,
+    });
+
+    expect(res.status).toBe(200);
+    expect((await assignmentDoc().get()).data()?.lateUntil).toBeNull();
+    expect((await res.json()).assignment.closesAt).toBe(
+      "2026-11-02T06:59:59.999Z",
+    );
+  });
+
+  it.each([
+    { label: "the same date as the due date", lateUntil: "2026-11-01" },
+    { label: "a date before the due date", lateUntil: "2026-10-31" },
+  ])("rejects Late until when it is $label", async ({ lateUntil }) => {
+    const res = await call(PATCH, "PATCH", ownerToken, { lateUntil });
+
+    expect(res.status).toBe(400);
+    expect((await assignmentDoc().get()).data()?.lateUntil).toBeUndefined();
+  });
+
+  it("requires a due date when setting Late until", async () => {
+    await assignmentDoc().update({ dueDate: null });
+
+    const res = await call(PATCH, "PATCH", ownerToken, {
+      lateUntil: "2026-11-10",
+    });
+
+    expect(res.status).toBe(400);
   });
 });
 
@@ -222,7 +336,10 @@ describe("DELETE /api/classes/[classId]/assignments/[assignmentId]", () => {
   });
 
   it("returns 403 for a professor who does not teach the class", async () => {
-    const { idToken } = await createSignedInUser("other@example.com", "professor");
+    const { idToken } = await createSignedInUser(
+      "other@example.com",
+      "professor",
+    );
 
     const res = await call(DELETE, "DELETE", idToken);
 
@@ -231,7 +348,10 @@ describe("DELETE /api/classes/[classId]/assignments/[assignmentId]", () => {
   });
 
   it("returns 403 for a student", async () => {
-    const { idToken } = await createSignedInUser("student@example.com", "student");
+    const { idToken } = await createSignedInUser(
+      "student@example.com",
+      "student",
+    );
 
     const res = await call(DELETE, "DELETE", idToken);
 

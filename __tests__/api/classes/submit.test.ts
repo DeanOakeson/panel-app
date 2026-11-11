@@ -35,7 +35,15 @@ function submissionDoc(studentUid: string) {
 }
 
 function pdf(name = "essay.pdf", size = 2048) {
-  return new File([new Uint8Array(size)], name, { type: "application/pdf" });
+  const bytes = new Uint8Array(size);
+
+  if (size >= 5) {
+    bytes.set(new TextEncoder().encode("%PDF-"));
+  }
+
+  return new File([bytes], name, {
+    type: "application/pdf",
+  });
 }
 
 function postSubmission(file: File | null, idToken?: string) {
@@ -48,9 +56,9 @@ function postSubmission(file: File | null, idToken?: string) {
   return POST(
     new NextRequest(
       `http://localhost/api/classes/${classId}/assignments/${assignmentId}/submit`,
-      { method: "POST", headers, body }
+      { method: "POST", headers, body },
     ),
-    { params: Promise.resolve({ classId, assignmentId }) }
+    { params: Promise.resolve({ classId, assignmentId }) },
   );
 }
 
@@ -88,7 +96,11 @@ beforeEach(async () => {
     .collection("classes")
     .doc(classId)
     .set({ name: "CS 6300", professor_id: owner.uid });
-  await assignmentDoc().set({ name: "Project 1", points: 100, dueDate: "2099-12-31" });
+  await assignmentDoc().set({
+    name: "Project 1",
+    points: 100,
+    dueDate: "2099-12-31",
+  });
 });
 
 describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
@@ -108,7 +120,10 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => 
   });
 
   it("returns 403 for a student who is not enrolled in the class", async () => {
-    const { uid, idToken } = await createSignedInUser("student@example.com", "student");
+    const { uid, idToken } = await createSignedInUser(
+      "student@example.com",
+      "student",
+    );
 
     const res = await postSubmission(pdf(), idToken);
 
@@ -118,14 +133,47 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => 
     expect((await submissionDoc(uid).get()).exists).toBe(false);
   });
 
-  it("returns 403 after the due date", async () => {
+  it("returns 403 when the professor has locked submissions", async () => {
     const { uid, idToken } = await createEnrolledStudent();
-    await assignmentDoc().update({ dueDate: "2020-01-01" });
+    await assignmentDoc().update({ isLocked: true });
 
     const res = await postSubmission(pdf(), idToken);
 
     expect(res.status).toBe(403);
-    expect((await res.json()).error).toMatch(/due date has passed/i);
+    expect((await res.json()).error).toMatch(
+      /professor has closed submissions/i,
+    );
+    expect(storage.upload).not.toHaveBeenCalled();
+    expect((await submissionDoc(uid).get()).exists).toBe(false);
+  });
+
+  it("accepts a late submission before the late-until deadline", async () => {
+    const { uid, idToken } = await createEnrolledStudent();
+    await assignmentDoc().update({
+      dueDate: "2020-01-01",
+      lateUntil: "2099-12-31",
+    });
+
+    const res = await postSubmission(pdf(), idToken);
+
+    expect(res.status).toBe(201);
+    expect((await submissionDoc(uid).get()).data()).toMatchObject({
+      isLate: true,
+      status: "submitted",
+      submissionHistory: [expect.objectContaining({ isLate: true })],
+    });
+  });
+
+  it("returns 403 after the late-until deadline", async () => {
+    const { uid, idToken } = await createEnrolledStudent();
+    await assignmentDoc().update({
+      dueDate: "2020-01-01",
+      lateUntil: "2021-01-01",
+    });
+
+    const res = await postSubmission(pdf(), idToken);
+
+    expect(res.status).toBe(403);
     expect(storage.upload).not.toHaveBeenCalled();
     expect((await submissionDoc(uid).get()).exists).toBe(false);
   });
@@ -155,13 +203,18 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => 
 
     expect(res.status).toBe(201);
     expect(storage.from).toHaveBeenCalledWith("assignment-submissions");
-    const [uploadedPath, uploadedBody, uploadOptions] = storage.upload.mock.calls[0];
+    const [uploadedPath, uploadedBody, uploadOptions] =
+      storage.upload.mock.calls[0];
     expect(uploadedPath).toMatch(
-      new RegExp(`^${classId}/${assignmentId}/${uid}/\\d+-my_essay\\.pdf$`)
+      new RegExp(
+        `^${classId}/${assignmentId}/${uid}/\\d+-[0-9a-f-]+-my_essay\\.pdf$`,
+      ),
     );
     expect(uploadedBody).toHaveLength(2048);
-    expect(uploadOptions).toEqual({ contentType: "application/pdf", upsert: false });
-
+    expect(uploadOptions).toEqual({
+      contentType: "application/pdf",
+      upsert: false,
+    });
     expect((await submissionDoc(uid).get()).data()).toEqual({
       studentId: uid,
       filePath: uploadedPath,
@@ -169,7 +222,20 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => 
       fileType: "application/pdf",
       fileSize: 2048,
       submittedAt: expect.any(String),
+      isLate: false,
       status: "submitted",
+      submissionHistory: [
+        {
+          studentId: uid,
+          filePath: uploadedPath,
+          fileName: "my essay.pdf",
+          fileType: "application/pdf",
+          fileSize: 2048,
+          submittedAt: expect.any(String),
+          isLate: false,
+          status: "submitted",
+        },
+      ],
     });
   });
 
@@ -190,9 +256,9 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => 
             feedback: "Good",
             submittedAt: (await submissionDoc(uid).get()).data()?.submittedAt,
           }),
-        }
+        },
       ),
-      { params: Promise.resolve({ classId, assignmentId, studentId: uid }) }
+      { params: Promise.resolve({ classId, assignmentId, studentId: uid }) },
     );
     const { grade } = await graded.json();
 
@@ -203,15 +269,19 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => 
     vi.useRealTimers();
 
     expect(res.status).toBe(201);
-    expect((await submissionDoc(uid).get()).data()).toMatchObject({ fileName: "second.pdf" });
-    expect((await assignmentDoc().collection("grades").doc(uid).get()).data()).toEqual(grade);
+    expect((await submissionDoc(uid).get()).data()).toMatchObject({
+      fileName: "second.pdf",
+    });
+    expect(
+      (await assignmentDoc().collection("grades").doc(uid).get()).data(),
+    ).toEqual(grade);
 
     const list = await getSubmissions(
       new NextRequest(
         `http://localhost/api/classes/${classId}/assignments/${assignmentId}/submit`,
-        { headers: { authorization: `Bearer ${ownerToken}` } }
+        { headers: { authorization: `Bearer ${ownerToken}` } },
       ),
-      { params: Promise.resolve({ classId, assignmentId }) }
+      { params: Promise.resolve({ classId, assignmentId }) },
     );
     expect((await list.json()).students).toEqual([
       expect.objectContaining({
@@ -228,12 +298,67 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => 
 
   it("returns 500 and saves nothing when the upload fails", async () => {
     const { uid, idToken } = await createEnrolledStudent();
-    storage.upload.mockResolvedValue({ data: null, error: new Error("Storage is down") });
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    storage.upload.mockResolvedValue({
+      data: null,
+      error: new Error("Storage is down"),
+    });
+    vi.spyOn(console, "error").mockImplementation(() => { });
 
     const res = await postSubmission(pdf(), idToken);
 
     expect(res.status).toBe(500);
     expect((await submissionDoc(uid).get()).exists).toBe(false);
   });
+
+
+  it("keeps only the latest three submissions and removes the oldest file", async () => {
+    const { uid, idToken } = await createEnrolledStudent();
+
+    await postSubmission(pdf("first.pdf"), idToken);
+    const firstSubmission = (await submissionDoc(uid).get()).data();
+    const oldestFilePath = firstSubmission?.filePath;
+
+    await postSubmission(pdf("second.pdf"), idToken);
+    await postSubmission(pdf("third.pdf"), idToken);
+    const res = await postSubmission(pdf("fourth.pdf"), idToken);
+
+    expect(res.status).toBe(201);
+
+    const submission = (await submissionDoc(uid).get()).data();
+
+    expect(submission?.submissionHistory).toHaveLength(3);
+    expect(submission?.submissionHistory.map(
+      (entry: { fileName: string }) => entry.fileName
+    )).toEqual(["second.pdf", "third.pdf", "fourth.pdf"]);
+
+    expect(storage.remove).toHaveBeenCalledWith([oldestFilePath]);
+  });
+
+  it("keeps the new submission when removing an old file fails", async () => {
+    const { uid, idToken } = await createEnrolledStudent();
+
+    await postSubmission(pdf("first.pdf"), idToken);
+    await postSubmission(pdf("second.pdf"), idToken);
+    await postSubmission(pdf("third.pdf"), idToken);
+
+    storage.remove.mockResolvedValue({
+      data: null,
+      error: new Error("Storage cleanup failed"),
+    });
+
+    const res = await postSubmission(pdf("fourth.pdf"), idToken);
+
+    expect(res.status).toBe(201);
+
+    const submission = (await submissionDoc(uid).get()).data();
+
+    expect(submission?.fileName).toBe("fourth.pdf");
+    expect(submission?.submissionHistory).toHaveLength(3);
+    expect(submission?.submissionHistory.map(
+      (entry: { fileName: string }) => entry.fileName
+    )).toEqual(["second.pdf", "third.pdf", "fourth.pdf"]);
+
+    expect(storage.remove).toHaveBeenCalled();
+  });
+
 });

@@ -18,7 +18,6 @@ type UserProfile = {
 export default function AssignmentsPage() {
   const { classId } = useParams<{ classId: string }>();
   const router = useRouter();
-
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -66,16 +65,12 @@ export default function AssignmentsPage() {
         const data = await assignmentsRes.json();
         setAssignments(data.assignments ?? []);
       } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Something went wrong."
-        );
+        setError(err instanceof Error ? err.message : "Something went wrong.");
       } finally {
         setLoading(false);
       }
     },
-    [classId]
+    [classId],
   );
 
   useEffect(() => {
@@ -106,8 +101,6 @@ export default function AssignmentsPage() {
     await reloadAssignments();
   }
 
-  // Editing or deleting only refreshes the list, so an open create form
-  // (and any draft in it) stays put.
   async function handleChanged() {
     await reloadAssignments();
   }
@@ -145,10 +138,7 @@ export default function AssignmentsPage() {
 
       {showForm && isProfessor && (
         <div className="mb-6">
-          <CreateAssignment
-            classId={classId}
-            onCreated={handleCreated}
-          />
+          <CreateAssignment classId={classId} onCreated={handleCreated} />
         </div>
       )}
 
@@ -158,9 +148,7 @@ export default function AssignmentsPage() {
         </p>
       ) : error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950">
-          <p className="text-sm text-red-600 dark:text-red-400">
-            {error}
-          </p>
+          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
 
           <button
             type="button"
@@ -192,16 +180,50 @@ export default function AssignmentsPage() {
         </div>
       ) : (
         <ul className="flex flex-col gap-3">
-          {assignments.map((assignment) => (
-            <AssignmentItem
-              key={assignment.id}
-              classId={classId}
-              assignment={assignment}
-              canEdit={isProfessor}
-              href={`/classes/${classId}/assignments/${assignment.id}`}
-              onChanged={handleChanged}
-            />
-          ))}
+          {assignments.map((assignment) =>
+            isStudent ? (
+              <li
+                key={assignment.id}
+                className="rounded-lg border border-gray-200 bg-white p-4 dark:border-zinc-800 dark:bg-gray-900"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Link
+                    href={`/classes/${classId}/assignments/${assignment.id}`}
+                    className="font-semibold text-blue-600 hover:text-blue-500 dark:text-blue-400"
+                  >
+                    {assignment.name}
+                  </Link>
+
+                  <span className="text-sm text-gray-500 dark:text-zinc-400">
+                    {assignment.points} pts
+                  </span>
+                </div>
+
+                <p className="mt-2 text-sm text-gray-700 dark:text-zinc-300">
+                  Grade:{" "}
+                  {assignment.studentGrade !== null &&
+                  assignment.studentGrade !== undefined ? (
+                    <span className="font-semibold text-green-700 dark:text-green-400">
+                      {assignment.studentGrade} / {assignment.points}
+                    </span>
+                  ) : (
+                    <span className="font-medium text-gray-500 dark:text-zinc-400">
+                      Not graded
+                    </span>
+                  )}
+                </p>
+              </li>
+            ) : (
+              <AssignmentItem
+                key={assignment.id}
+                classId={classId}
+                assignment={assignment}
+                href={`/classes/${classId}/assignments/${assignment.id}`}
+                canEdit={isProfessor}
+                onChanged={handleChanged}
+              />
+            ),
+          )}
         </ul>
       )}
     </div>

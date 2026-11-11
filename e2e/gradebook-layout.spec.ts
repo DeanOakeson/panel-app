@@ -206,9 +206,13 @@ test.describe("Gradebook layout", () => {
       .evaluate((scroller) => scroller.scrollTo({ left: scroller.scrollWidth }));
     await expect.poll(() => measureColumns(page)).toMatchObject({ underFrozen: 0 });
     expect((await measureColumns(page)).whole).toBeGreaterThanOrEqual(2);
-    expect(
-      await page.getByRole("table").locator("xpath=..").evaluate((scroller) => (scroller as HTMLElement).offsetWidth - scroller.clientWidth)
-    ).toBeGreaterThan(2);
+    await expect
+      .poll(() =>
+        page.locator("#gradebook-grid").evaluate(
+          (element) => element.scrollHeight > element.clientHeight
+        )
+      )
+      .toBe(true);
   });
 
   test("lines up the progress bars and keeps the page whole at every width", async ({ page, scenario }) => {
