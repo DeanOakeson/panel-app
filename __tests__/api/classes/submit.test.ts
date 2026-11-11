@@ -302,11 +302,63 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => 
       data: null,
       error: new Error("Storage is down"),
     });
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => { });
 
     const res = await postSubmission(pdf(), idToken);
 
     expect(res.status).toBe(500);
     expect((await submissionDoc(uid).get()).exists).toBe(false);
   });
+
+
+  it("keeps only the latest three submissions and removes the oldest file", async () => {
+    const { uid, idToken } = await createEnrolledStudent();
+
+    await postSubmission(pdf("first.pdf"), idToken);
+    const firstSubmission = (await submissionDoc(uid).get()).data();
+    const oldestFilePath = firstSubmission?.filePath;
+
+    await postSubmission(pdf("second.pdf"), idToken);
+    await postSubmission(pdf("third.pdf"), idToken);
+    const res = await postSubmission(pdf("fourth.pdf"), idToken);
+
+    expect(res.status).toBe(201);
+
+    const submission = (await submissionDoc(uid).get()).data();
+
+    expect(submission?.submissionHistory).toHaveLength(3);
+    expect(submission?.submissionHistory.map(
+      (entry: { fileName: string }) => entry.fileName
+    )).toEqual(["second.pdf", "third.pdf", "fourth.pdf"]);
+
+    expect(storage.remove).toHaveBeenCalledWith([oldestFilePath]);
+  });
+
+  it("keeps the new submission when removing an old file fails", async () => {
+    const { uid, idToken } = await createEnrolledStudent();
+
+    await postSubmission(pdf("first.pdf"), idToken);
+    await postSubmission(pdf("second.pdf"), idToken);
+    await postSubmission(pdf("third.pdf"), idToken);
+
+    storage.remove.mockResolvedValue({
+      data: null,
+      error: new Error("Storage cleanup failed"),
+    });
+
+    const res = await postSubmission(pdf("fourth.pdf"), idToken);
+
+    expect(res.status).toBe(201);
+
+    const submission = (await submissionDoc(uid).get()).data();
+
+    expect(submission?.fileName).toBe("fourth.pdf");
+    expect(submission?.submissionHistory).toHaveLength(3);
+    expect(submission?.submissionHistory.map(
+      (entry: { fileName: string }) => entry.fileName
+    )).toEqual(["second.pdf", "third.pdf", "fourth.pdf"]);
+
+    expect(storage.remove).toHaveBeenCalled();
+  });
+
 });

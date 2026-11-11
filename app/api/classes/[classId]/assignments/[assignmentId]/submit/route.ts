@@ -388,7 +388,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json(
-        { error: "The maximum file size is 10 MB." },
+        { error: "The maximum file size is 4 MB." },
         { status: 400 },
       );
     }
@@ -478,26 +478,26 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
       const history = Array.isArray(existing?.submissionHistory)
         ? existing.submissionHistory.filter(
-            (entry: DocumentData) => typeof entry?.filePath === "string",
-          )
+          (entry: DocumentData) => typeof entry?.filePath === "string",
+        )
         : existing?.filePath
           ? [
-              {
-                filePath: existing.filePath,
-                fileName: existing.fileName,
-                fileType: existing.fileType,
-                fileSize: existing.fileSize,
-                submittedAt: existing.submittedAt,
-                status: existing.status || "submitted",
-                isLate:
-                  typeof existing.isLate === "boolean"
-                    ? existing.isLate
-                    : getIsLate(
-                        existing.submittedAt,
-                        currentAssignment.dueDate,
-                      ),
-              },
-            ]
+            {
+              filePath: existing.filePath,
+              fileName: existing.fileName,
+              fileType: existing.fileType,
+              fileSize: existing.fileSize,
+              submittedAt: existing.submittedAt,
+              status: existing.status || "submitted",
+              isLate:
+                typeof existing.isLate === "boolean"
+                  ? existing.isLate
+                  : getIsLate(
+                    existing.submittedAt,
+                    currentAssignment.dueDate,
+                  ),
+            },
+          ]
           : [];
 
       history.push(newSubmission);
@@ -531,16 +531,62 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     submissionSaved = true;
 
     // Delete older files after the new submission has been saved.
-    if (rotation.removedFilePaths.length > 0) {
-      const { error: deleteError } = await getSupabaseAdmin()
-        .storage.from(BUCKET)
-        .remove(rotation.removedFilePaths);
 
-      if (deleteError) {
+    // Delete older files after the new submission has been saved.
+    if (rotation.removedFilePaths.length > 0) {
+      const cleanupTaskRef = db.collection("storageCleanupTasks").doc();
+      const createdAt = new Date();
+
+      try {
+        // Record the paths before attempting deletion so they can be retried.
+        await cleanupTaskRef.set({
+          userId: uid,
+          bucket: BUCKET,
+          filePaths: rotation.removedFilePaths,
+          status: "pending",
+          createdAt,
+          updatedAt: createdAt,
+        });
+
+        const { error: deleteError } = await getSupabaseAdmin()
+          .storage.from(BUCKET)
+          .remove(rotation.removedFilePaths);
+
+        if (deleteError) {
+          throw deleteError;
+        }
+
+        // Remove the task when all old files have been deleted.
+        await cleanupTaskRef.delete();
+      } catch (cleanupError) {
         console.error(
           "Could not remove old assignment submissions:",
-          deleteError,
+          cleanupError,
         );
+
+        // Keep a durable task so the cleanup worker can retry these paths.
+        try {
+          await cleanupTaskRef.set(
+            {
+              userId: uid,
+              bucket: BUCKET,
+              filePaths: rotation.removedFilePaths,
+              status: "failed",
+              createdAt,
+              updatedAt: new Date(),
+              lastError:
+                cleanupError instanceof Error
+                  ? cleanupError.message
+                  : String(cleanupError),
+            },
+            { merge: true },
+          );
+        } catch (taskError) {
+          console.error(
+            "Could not save assignment submission cleanup task:",
+            taskError,
+          );
+        }
       }
     }
 
@@ -722,10 +768,10 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         studentIds.length === 0
           ? []
           : await db.getAll(
-              ...studentIds.map((studentId) =>
-                db.collection("users").doc(studentId),
-              ),
-            );
+            ...studentIds.map((studentId) =>
+              db.collection("users").doc(studentId),
+            ),
+          );
 
       const students = new Map(
         studentDocs.map((studentDoc) => [studentDoc.id, studentDoc.data()]),
@@ -822,8 +868,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 
     const history = Array.isArray(submission.submissionHistory)
       ? submission.submissionHistory.filter(
-          (entry: DocumentData) => typeof entry?.filePath === "string",
-        )
+        (entry: DocumentData) => typeof entry?.filePath === "string",
+      )
       : [submission];
 
     // Show the latest three submissions, newest first.
