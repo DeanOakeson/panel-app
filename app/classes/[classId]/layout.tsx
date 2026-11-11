@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { onAuthStateChanged, type User } from "firebase/auth";
+import { createPortal } from "react-dom";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { useStoredFlag } from "@/lib/storedFlag";
+import { useTopbarActions } from "../../components/TopbarActions";
 import {
   CourseIdentityProvider,
   type CourseIdentity,
@@ -148,6 +150,9 @@ export default function ClassLayout({
     ? course.name || "Untitled Class"
     : "Loading course…";
 
+  // The right-hand end of the phone top bar, or `null` until that bar mounts.
+  const topbarActions = useTopbarActions();
+
   // The identity block names the navigation it sits in, so it only goes where
   // that navigation is on screen: the desktop rail when it is expanded, the
   // phone drawer when it is open. A closed drawer keeps nothing — not even its
@@ -157,16 +162,28 @@ export default function ClassLayout({
   return (
     <CourseIdentityProvider value={course}>
       <div className="h-full min-w-0">
-        {/* Course-menu toggle, parked inside the phone top bar (PANEL-88) */}
-        <button
-          type="button"
-          aria-label="Open course navigation"
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((open) => !open)}
-          className="fixed left-12 top-0 z-60 flex h-12 w-9 items-center justify-center rounded-md text-xl text-gray-700 hover:bg-gray-200 lg:hidden dark:text-gray-200 dark:hover:bg-gray-700"
-        >
-          ☰
-        </button>
+        {/*
+          Course-menu toggle (PANEL-88), portalled into the right-hand end of
+          the phone top bar instead of floating over it at `left-12`, where its
+          36x48 box landed on the "Panel" wordmark (END-179). The bar's own flex
+          row does the placing, so the two cannot collide at any width. Until
+          the bar mounts — the server render, and the commit after it — there is
+          nowhere to place it and the button is not rendered; at a desktop width
+          the bar is `lg:hidden`, which takes the toggle with it.
+        */}
+        {topbarActions &&
+          createPortal(
+            <button
+              type="button"
+              aria-label="Open course navigation"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((open) => !open)}
+              className="flex h-full w-9 items-center justify-center rounded-md text-xl text-gray-700 hover:bg-gray-200 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
+              ☰
+            </button>,
+            topbarActions
+          )}
 
         {/* Dimmed backdrop that closes the phone drawer when tapped */}
         {menuOpen && (
