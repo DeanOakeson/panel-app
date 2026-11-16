@@ -186,7 +186,7 @@ export default function AuthPage() {
                 maxLength={100}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full rounded border p-3 text-white"
+                className="w-full rounded border border-gray-300 bg-white p-3 text-gray-900 placeholder:text-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder:text-gray-400"
               />
             </div>
           )}
@@ -206,7 +206,7 @@ export default function AuthPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded border p-3 text-white"
+              className="w-full rounded border border-gray-300 bg-white p-3 text-gray-900 placeholder:text-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder:text-gray-400"
             />
           </div>
 
@@ -226,7 +226,7 @@ export default function AuthPage() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded border p-3 text-white"
+              className="w-full rounded border border-gray-300 bg-white p-3 text-gray-900 placeholder:text-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder:text-gray-400"
             />
           </div>
 
@@ -244,7 +244,7 @@ export default function AuthPage() {
                 onChange={(e) =>
                   setRole(e.target.value as "student" | "professor")
                 }
-                className="w-full rounded border p-3 text-white"
+                className="w-full rounded border border-gray-300 bg-white p-3 text-gray-900 placeholder:text-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder:text-gray-400"
               >
                 <option value="student">Student</option>
                 <option value="professor">Professor</option>
