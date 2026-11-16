@@ -13,10 +13,11 @@ import {
   type CourseIdentity,
 } from "../../components/classes/CourseIdentity";
 
+// Only link pages that exist. Modules has no page yet, so its link stays out
+// of the navigation until one ships rather than leading to a 404 (PANEL-89).
 const items = [
   { label: "Home", path: "" },
   { label: "Assignments", path: "/assignments" },
-  { label: "Modules", path: "/modules" },
   { label: "Grades", path: "/grades" },
 ];
 
