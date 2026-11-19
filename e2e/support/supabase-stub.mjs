@@ -4,6 +4,7 @@
 //   create signed URL POST  /storage/v1/object/sign/{bucket}/{path}   -> { signedURL }
 //   signed download  GET    /storage/v1/object/sign/{bucket}/{path}?token=...
 //   remove           DELETE /storage/v1/object/{bucket}  { prefixes } -> [objects]
+//   list             POST   /storage/v1/object/list/{bucket} { prefix, limit, offset } -> [entries]
 // Two endpoints exist only for the tests:
 //   GET  /health  answers once the stub is listening
 //   POST /reset   deletes every stored object
@@ -81,6 +82,32 @@ async function handleSigned(request, response, url, key) {
   return sendError(response, 405, "Method not allowed");
 }
 
+/**
+ * Answers POST /object/list/{bucket}: the files and folders directly inside a
+ * prefix, as Supabase lists them. A folder has a null id; a file has its id.
+ */
+async function handleList(request, response, bucket) {
+  const { prefix = "", limit = 100, offset = 0 } = await readJson(request);
+  const folder = prefix.replace(/\/$/, "");
+  const start = folder ? `${bucket}/${folder}/` : `${bucket}/`;
+  const entries = new Map();
+
+  for (const [key, stored] of objects) {
+    if (!key.startsWith(start)) continue;
+    const [name, ...rest] = key.slice(start.length).split("/");
+    if (entries.has(name)) continue;
+    entries.set(
+      name,
+      rest.length > 0
+        ? { name, id: null, metadata: null }
+        : { name, id: stored.id, metadata: { size: stored.body.length, mimetype: stored.contentType } }
+    );
+  }
+
+  const sorted = [...entries.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return sendJson(response, 200, sorted.slice(Number(offset), Number(offset) + Number(limit)));
+}
+
 /** Answers uploads and removals on /object/{bucket}/{path}. */
 async function handleObject(request, response, key) {
   if (request.method === "POST" || request.method === "PUT") {
@@ -132,6 +159,8 @@ const server = http.createServer(async (request, response) => {
     const key = decodeURIComponent(url.pathname.slice(`${PREFIX}/object/`.length));
 
     if (key.startsWith("sign/")) return await handleSigned(request, response, url, key.slice("sign/".length));
+
+    if (key.startsWith("list/") && request.method === "POST") return await handleList(request, response, key.slice("list/".length));
 
     return await handleObject(request, response, key);
   } catch (error) {
