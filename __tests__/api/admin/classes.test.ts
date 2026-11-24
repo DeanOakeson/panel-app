@@ -469,6 +469,10 @@ describe("DELETE /api/admin/classes/[classId]", () => {
       .collection("submissions")
       .doc(student.uid)
       .set({ submittedAt: Date.now() });
+    await assignmentRef
+      .collection("exceptions")
+      .doc(student.uid)
+      .set({ studentId: student.uid, dueDate: "2099-12-31" });
     const materialRef = getAdminDb()
       .collection("classes")
       .doc(classId)
@@ -500,6 +504,10 @@ describe("DELETE /api/admin/classes/[classId]", () => {
     expect((await assignmentRef.get()).exists).toBe(false);
     expect(
       (await assignmentRef.collection("submissions").doc(student.uid).get())
+        .exists
+    ).toBe(false);
+    expect(
+      (await assignmentRef.collection("exceptions").doc(student.uid).get())
         .exists
     ).toBe(false);
     expect((await materialRef.get()).exists).toBe(false);
@@ -648,6 +656,42 @@ describe("DELETE /api/admin/classes/[classId]/enrollments/[studentId]", () => {
       paramsFor(student.uid)
     );
     expect(res.status).toBe(404);
+  });
+
+  it("keeps the student's submission and exception, as it keeps their grades", async () => {
+    await seedClass();
+    const admin = await createSignedInUser("admin@example.com", "admin");
+    const student = await seedStudent();
+    await seedEnrollment(student.uid);
+    const assignmentRef = getAdminDb()
+      .collection("classes")
+      .doc(classId)
+      .collection("assignments")
+      .doc("a1");
+    await assignmentRef.set({ title: "Project 1" });
+    await assignmentRef
+      .collection("submissions")
+      .doc(student.uid)
+      .set({ studentId: student.uid });
+    await assignmentRef
+      .collection("exceptions")
+      .doc(student.uid)
+      .set({ studentId: student.uid, dueDate: "2099-12-31" });
+
+    const res = await UNENROLL(
+      unenrollRequest(admin.idToken, student.uid),
+      paramsFor(student.uid)
+    );
+
+    expect(res.status).toBe(200);
+    expect(
+      (await assignmentRef.collection("submissions").doc(student.uid).get())
+        .exists
+    ).toBe(true);
+    expect(
+      (await assignmentRef.collection("exceptions").doc(student.uid).get())
+        .exists
+    ).toBe(true);
   });
 
   it("removes the enrollment", async () => {

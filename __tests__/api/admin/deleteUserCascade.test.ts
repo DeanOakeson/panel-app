@@ -131,6 +131,31 @@ async function seedMissingGrade(uid: string, classId: string) {
     });
 }
 
+async function seedException(uid: string, classId: string) {
+  await exceptionRefIn(classId, uid).set({
+    studentId: uid,
+    classId,
+    assignmentId: "a1",
+    dueDate: "2099-12-31",
+    lateUntil: null,
+    allowResubmit: false,
+    reason: "",
+    grantedBy: adminUid,
+    grantedAt: "2026-01-02T00:00:00.000Z",
+  });
+}
+
+/** Returns the user's submission exception on the seeded assignment of a class. */
+function exceptionRefIn(classId: string, uid: string) {
+  return db()
+    .collection("classes")
+    .doc(classId)
+    .collection("assignments")
+    .doc("a1")
+    .collection("exceptions")
+    .doc(uid);
+}
+
 describe("DELETE /api/admin/users/[uid] cascade — orphan paths", () => {
   it("removes a submission left behind by an earlier unenroll", async () => {
     // enroll -> submit -> unenroll -> delete user
@@ -256,6 +281,37 @@ describe("DELETE /api/admin/users/[uid] cascade — orphan paths", () => {
     ]);
     expect(gradeHistory.empty).toBe(true);
     expect(missingGradeHistory.empty).toBe(true);
+  });
+
+  it("removes the user's submission exceptions, enrolled or not, and reports them", async () => {
+    const target = await createSignedInUser("student@example.com", "student");
+    await seedClassWithAssignment("class-1");
+    await seedClassWithAssignment("class-2");
+    await seedEnrollMirror(target.uid, "class-1");
+    await seedException(target.uid, "class-1");
+    await seedException(target.uid, "class-2"); // not enrolled in class-2
+
+    const res = await deleteUser(target.uid, adminToken);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ removedExceptions: 2 });
+    expect((await exceptionRefIn("class-1", target.uid).get()).exists).toBe(false);
+    expect((await exceptionRefIn("class-2", target.uid).get()).exists).toBe(false);
+  });
+
+  it("leaves other students' exceptions alone", async () => {
+    const target = await createSignedInUser("student@example.com", "student");
+    const other = await createSignedInUser("other@example.com", "student");
+    await seedClassWithAssignment("class-1");
+    await seedEnrollMirror(target.uid, "class-1");
+    await seedEnrollMirror(other.uid, "class-1");
+    await seedException(target.uid, "class-1");
+    await seedException(other.uid, "class-1");
+
+    const res = await deleteUser(target.uid, adminToken);
+
+    expect(res.status).toBe(200);
+    expect((await exceptionRefIn("class-1", other.uid).get()).exists).toBe(true);
   });
 
   it("finishes the cleanup on retry after deleting history fails part way", async () => {
