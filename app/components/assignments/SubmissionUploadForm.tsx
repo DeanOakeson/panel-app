@@ -6,6 +6,8 @@ type Props = {
     message: string;
     disabled?: boolean;
     disabledMessage?: string;
+    /** A line shown above the file picker while the form is enabled. */
+    notice?: string;
     onFileChange: (file: File | null) => void;
     onSubmit: () => void;
 };
@@ -17,6 +19,7 @@ export default function SubmissionUploadForm({
     message,
     disabled = false,
     disabledMessage,
+    notice,
     onFileChange,
     onSubmit,
 }: Props) {
@@ -32,6 +35,12 @@ export default function SubmissionUploadForm({
                         ? "Submit a new version"
                         : "Submit your assignment"}
                 </h2>
+
+                {!disabled && notice && (
+                    <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800 dark:bg-blue-900/30 dark:text-blue-200">
+                        {notice}
+                    </p>
+                )}
 
                 {disabled && disabledMessage && (
                     <p className="rounded-lg bg-gray-100 p-3 text-sm text-gray-600 dark:bg-zinc-800 dark:text-zinc-300">
