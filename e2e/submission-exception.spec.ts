@@ -5,6 +5,17 @@ import { api, dateFromToday } from "./support/scenario";
 
 const REASON = "Hospital stay, note from the clinic on file.";
 
+/** Formats a YYYY-MM-DD date as the student sees its cutoff, like "Dec 1, 11:59 PM MT". */
+function cutoff(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  const monthName = new Date(Date.UTC(year, month - 1, 15)).toLocaleString("en-US", {
+    month: "short",
+    timeZone: "UTC",
+  });
+
+  return `${monthName} ${day}, 11:59 PM MT`;
+}
+
 test.describe("Professor grants one student a submission exception", () => {
   test("reopens the closed assignment for one student only, then removes it", async ({
     page,
@@ -33,7 +44,9 @@ test.describe("Professor grants one student a submission exception", () => {
 
     const devPage = await pageAs(students.dev);
     await devPage.goto(closed.path);
-    await expect(devPage.getByText(/^You have an extension until [A-Z][a-z]{2} \d{1,2}, 11:59 PM MT\.$/)).toBeVisible();
+    await expect(
+      devPage.getByText(/^You have an extension\. Your due date is [A-Z][a-z]{2} \d{1,2}, 11:59 PM MT\.$/)
+    ).toBeVisible();
     await expect(devPage.getByText(REASON)).toHaveCount(0);
     await devPage.locator("#assignment-file").setInputFiles({
       name: "Patel_Project1.pdf",
@@ -108,7 +121,7 @@ test.describe("Professor grants one student a submission exception", () => {
     await expect(ava).toContainText("Resubmission allowed");
 
     await avaPage.reload();
-    await expect(avaPage.getByText(/^You have an extension until /)).toBeVisible();
+    await expect(avaPage.getByText(/^You have an extension\. Your due date is /)).toBeVisible();
     await avaPage.locator("#assignment-file").setInputFiles({
       name: "Martin_Homework2_v2.pdf",
       mimeType: "application/pdf",
@@ -123,5 +136,33 @@ test.describe("Professor grants one student a submission exception", () => {
     await caraPage.goto(open.path);
     await expect(caraPage.getByText("Your professor has closed submissions.")).toBeVisible();
     await expect(caraPage.getByRole("button", { name: "Submit assignment" })).toBeDisabled();
+  });
+
+  test("tells the student their own due date and how long late work is accepted", async ({
+    page,
+    scenario,
+    pageAs,
+  }) => {
+    const { closed, professor, students } = scenario;
+    const dueDate = dateFromToday(2);
+    const lateUntil = dateFromToday(6);
+
+    await signIn(page, professor);
+    await page.goto(closed.path);
+    const dev = studentCard(page, "Dev Patel");
+    await dev.getByRole("button", { name: "Grant exception" }).click();
+    await dev.getByLabel("Due date").fill(dueDate);
+    await dev.getByLabel("Late until (optional)").fill(lateUntil);
+    await dev.getByRole("button", { name: "Save exception" }).click();
+    await expect(submissionList(page).getByRole("status")).toHaveText("Exception granted for Dev Patel.");
+
+    const devPage = await pageAs(students.dev);
+    await devPage.goto(closed.path);
+    await expect(
+      devPage.getByText(
+        `You have an extension. Your due date is ${cutoff(dueDate)}. Late submissions are accepted until ${cutoff(lateUntil)}.`,
+        { exact: true }
+      )
+    ).toBeVisible();
   });
 });

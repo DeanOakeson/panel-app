@@ -7,6 +7,7 @@ import Link from "next/link";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import {
+  closesAtOrNull,
   formatClosesAt,
   hasClosed,
   whenPassed,
@@ -389,13 +390,13 @@ export default function AssignmentDetailPage() {
                 error={submissionError}
               />
 
-              {openedByException && exceptionClosesAt ? (
+              {openedByException && exception ? (
                 <SubmissionUploadForm
                   submission={!!submission}
                   selectedFile={selectedFile}
                   submitting={submitting}
                   message={submitMessage}
-                  notice={`You have an extension until ${formatClosesAt(exceptionClosesAt)}.`}
+                  notice={describeExtension(exception)}
                   onFileChange={setSelectedFile}
                   onSubmit={handleSubmit}
                 />
@@ -434,6 +435,28 @@ export default function AssignmentDetailPage() {
       ) : null}
     </div>
   );
+}
+
+/**
+ * Returns the line telling a student about their extension: their own due
+ * date, and how long late submissions are accepted when they have a late window.
+ */
+function describeExtension(exception: OwnSubmissionException): string {
+  const dueAt = closesAtOrNull(exception.dueDate);
+  const lateUntilAt = exception.lateUntil
+    ? closesAtOrNull(exception.lateUntil)
+    : null;
+  const parts = ["You have an extension."];
+
+  if (dueAt) {
+    parts.push(`Your due date is ${formatClosesAt(dueAt)}.`);
+  }
+
+  if (lateUntilAt) {
+    parts.push(`Late submissions are accepted until ${formatClosesAt(lateUntilAt)}.`);
+  }
+
+  return parts.join(" ");
 }
 
 /**
