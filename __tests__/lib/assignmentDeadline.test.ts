@@ -223,6 +223,21 @@ describe("hasClosed", () => {
   it.each(["2099-01-02T06:59:59.999Z", null, undefined])("returns false for %j", (closesAt) => {
     expect(hasClosed(closesAt)).toBe(false);
   });
+
+  it("stays open through the closing instant and closes 1 ms later", () => {
+    const closesAt = "2026-10-31T05:59:59.999Z";
+
+    vi.useFakeTimers({ now: Date.parse(closesAt) });
+
+    try {
+      expect(hasClosed(closesAt)).toBe(false);
+
+      vi.advanceTimersByTime(1);
+      expect(hasClosed(closesAt)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("whenPassed", () => {
