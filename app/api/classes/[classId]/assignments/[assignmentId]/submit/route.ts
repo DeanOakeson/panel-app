@@ -54,15 +54,15 @@ class SubmissionRuleError extends Error {
 
 /**
  * Checks the assignment's lock and deadline, and the student's exception,
- * before accepting a submission. Throws a SubmissionRuleError when the
- * student may not submit.
+ * before accepting a submission. Returns whether only the exception let the
+ * student in. Throws a SubmissionRuleError when the student may not submit.
  */
 function checkSubmissionRules(
   assignment: DocumentData,
   exception: DocumentData | undefined,
   hasSubmission: boolean,
   now = Date.now(),
-): void {
+): { byException: boolean } {
   const isLocked = assignment.isLocked === true;
   let closesAt: string | null = null;
 
@@ -92,18 +92,22 @@ function checkSubmissionRules(
   if (!check.allowed) {
     throw new SubmissionRuleError(check.error, 403);
   }
+
+  return { byException: check.byException };
 }
 
 /**
  * Returns whether a submission is late for its student, measured against the
  * class due date and the student's exception, when they have one.
+ * `byException` is true when only the exception let the submission in.
  */
 function getIsLate(
   submittedAt: string | number | Date,
   dueDate: unknown,
   exception?: DocumentData,
+  byException = false,
 ): boolean {
-  return isLateForStudent(submittedAt, dueDate, exception?.dueDate);
+  return isLateForStudent(submittedAt, dueDate, exception?.dueDate, byException);
 }
 
 /**
@@ -466,7 +470,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       const currentAssignment = currentAssignmentDoc.data() ?? {};
       const currentException = currentExceptionDoc.data();
 
-      checkSubmissionRules(
+      const { byException } = checkSubmissionRules(
         currentAssignment,
         currentException,
         submissionDoc.exists,
@@ -486,6 +490,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
           submittedAt,
           currentAssignment.dueDate,
           currentException,
+          byException,
         ),
       };
 

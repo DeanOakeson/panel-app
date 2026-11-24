@@ -522,10 +522,9 @@ describe("submitting with an exception", () => {
     expect((await submissionDoc(studentUid).get()).data()).toMatchObject({ isLate: true });
   });
 
-  it("measures lateness against the class due date when it is later than the exception's", async () => {
-    // The professor extended the class past the exception's due date
-    await assignmentDoc().update({ dueDate: futureDate });
-    await exceptionDoc(studentUid).set({
+  /** Stores an exception due on a past date whose late window is still open. */
+  function storeExceptionInLateWindow() {
+    return exceptionDoc(studentUid).set({
       studentId: studentUid,
       classId,
       assignmentId,
@@ -536,6 +535,41 @@ describe("submitting with an exception", () => {
       grantedBy: ownerUid,
       grantedAt: "2026-11-01T10:00:00.000Z",
     });
+  }
+
+  it("marks a submission late after the exception's due date on a locked assignment with no due date", async () => {
+    await assignmentDoc().update({ dueDate: null, isLocked: true });
+    await storeExceptionInLateWindow();
+
+    const res = await submitFile(studentToken);
+
+    expect(res.status).toBe(201);
+    expect((await submissionDoc(studentUid).get()).data()).toMatchObject({ isLate: true });
+  });
+
+  it("marks a submission late after the exception's due date on a locked assignment due later", async () => {
+    await assignmentDoc().update({ dueDate: futureDate, isLocked: true });
+    await storeExceptionInLateWindow();
+
+    const res = await submitFile(studentToken);
+
+    expect(res.status).toBe(201);
+    expect((await submissionDoc(studentUid).get()).data()).toMatchObject({ isLate: true });
+  });
+
+  it("keeps a submission on time when the reopened class is not yet due, though the exception's due date has passed", async () => {
+    await assignmentDoc().update({ dueDate: futureDate });
+    await storeExceptionInLateWindow();
+
+    const res = await submitFile(studentToken);
+
+    expect(res.status).toBe(201);
+    expect((await submissionDoc(studentUid).get()).data()).toMatchObject({ isLate: false });
+  });
+
+  it("keeps a submission on time in the class late window when the exception is not yet due", async () => {
+    await assignmentDoc().update({ dueDate: pastDueDate, lateUntil: futureDate });
+    await grant({ dueDate: "2099-06-01" });
 
     const res = await submitFile(studentToken);
 

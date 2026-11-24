@@ -62,11 +62,19 @@ describe("checkSubmission", () => {
     });
   });
 
-  it("refuses at the exact closing instant of the exception", () => {
+  it("accepts at the exception's closing instant and refuses a millisecond later", () => {
     const closesAt = "2026-11-15T12:00:00.000Z";
 
-    expect(checkSubmission(pastDue, { closesAt, allowResubmit: true }, false, now).allowed).toBe(false);
-    expect(checkSubmission(pastDue, { closesAt, allowResubmit: true }, false, now - 1).allowed).toBe(true);
+    expect(checkSubmission(pastDue, { closesAt, allowResubmit: true }, false, now).allowed).toBe(true);
+    expect(checkSubmission(pastDue, { closesAt, allowResubmit: true }, false, now + 1).allowed).toBe(false);
+  });
+
+  it("accepts at the class's closing instant and refuses a millisecond later", () => {
+    const closesAt = "2026-11-15T12:00:00.000Z";
+    const assignment = { isLocked: false, closesAt };
+
+    expect(checkSubmission(assignment, null, false, now)).toEqual({ allowed: true, byException: false });
+    expect(checkSubmission(assignment, null, false, now + 1)).toEqual({ allowed: false, error: CLOSED_MESSAGE });
   });
 
   it("refuses an exception with malformed dates", () => {
@@ -94,30 +102,93 @@ describe("checkSubmission", () => {
 });
 
 describe("isLateForStudent", () => {
-  const submittedAt = "2026-11-12T12:00:00.000Z";
+  const submittedAt = "2026-11-23T12:00:00.000Z";
 
   it("measures a student without an exception against the class due date", () => {
-    expect(isLateForStudent(submittedAt, "2026-11-10")).toBe(true);
-    expect(isLateForStudent(submittedAt, "2026-11-14")).toBe(false);
-    expect(isLateForStudent(submittedAt, "2026-11-10", null)).toBe(true);
-  });
-
-  it("is on time under the exception though late for the class", () => {
-    expect(isLateForStudent(submittedAt, "2026-11-10", "2026-11-14")).toBe(false);
-  });
-
-  it("is late under the exception during its late window", () => {
-    expect(isLateForStudent(submittedAt, "2026-11-10", "2026-11-11")).toBe(true);
-  });
-
-  it("is on time when the class due date is later than the exception's", () => {
-    expect(isLateForStudent(submittedAt, "2026-11-14", "2026-11-11")).toBe(false);
-  });
-
-  it("is never late for a class with no due date or a malformed one", () => {
-    expect(isLateForStudent(submittedAt, null, "2026-11-11")).toBe(false);
-    expect(isLateForStudent(submittedAt, "soon", "2026-11-11")).toBe(false);
+    expect(isLateForStudent(submittedAt, "2026-11-20")).toBe(true);
+    expect(isLateForStudent(submittedAt, "2026-11-25")).toBe(false);
+    expect(isLateForStudent(submittedAt, "2026-11-20", null, true)).toBe(true);
     expect(isLateForStudent(submittedAt, "soon")).toBe(false);
+  });
+
+  describe("a submission only the exception let in", () => {
+    it("is on time before the exception's due date, though late for the class", () => {
+      expect(isLateForStudent(submittedAt, "2026-11-20", "2026-11-25", true)).toBe(false);
+    });
+
+    it("is late during the exception's late window", () => {
+      expect(isLateForStudent(submittedAt, "2026-11-20", "2026-11-22", true)).toBe(true);
+    });
+
+    it("is late after the exception's due date on a class with no due date", () => {
+      expect(isLateForStudent(submittedAt, null, "2026-11-22", true)).toBe(true);
+    });
+
+    it("is late after the exception's due date though the class due date is later", () => {
+      expect(isLateForStudent(submittedAt, "2026-11-30", "2026-11-22", true)).toBe(true);
+    });
+  });
+
+  describe("a submission the class rules allowed, by a student with an exception", () => {
+    it("is on time when the class due date has not passed, though the exception's has", () => {
+      expect(isLateForStudent(submittedAt, "2026-11-30", "2026-11-22")).toBe(false);
+    });
+
+    it("is on time in the class late window before the exception's due date", () => {
+      expect(isLateForStudent(submittedAt, "2026-11-20", "2026-11-25")).toBe(false);
+    });
+
+    it("is late when late against both due dates", () => {
+      expect(isLateForStudent(submittedAt, "2026-11-20", "2026-11-22")).toBe(true);
+    });
+
+    it("is on time for a class with no due date or a malformed one", () => {
+      expect(isLateForStudent(submittedAt, null, "2026-11-22")).toBe(false);
+      expect(isLateForStudent(submittedAt, "soon", "2026-11-22")).toBe(false);
+    });
+  });
+});
+
+describe("an exception's deadline at its boundary instants", () => {
+  // Locked, so only the exception decides whether a submission is accepted
+  const lockedClass = { isLocked: true, closesAt: null };
+
+  describe.each([
+    {
+      label: "across the March change to daylight time",
+      dueDate: "2026-03-07",
+      lastOnTime: "2026-03-08T06:59:59.999Z",
+      firstLate: "2026-03-08T07:00:00.000Z",
+      lateUntil: "2026-03-08",
+      lastAccepted: "2026-03-09T05:59:59.999Z",
+      firstRefused: "2026-03-09T06:00:00.000Z",
+    },
+    {
+      label: "across the November change to standard time",
+      dueDate: "2026-10-31",
+      lastOnTime: "2026-11-01T05:59:59.999Z",
+      firstLate: "2026-11-01T06:00:00.000Z",
+      lateUntil: "2026-11-01",
+      lastAccepted: "2026-11-02T06:59:59.999Z",
+      firstRefused: "2026-11-02T07:00:00.000Z",
+    },
+  ])("$label", ({ dueDate, lastOnTime, firstLate, lateUntil, lastAccepted, firstRefused }) => {
+    it(`is on time at 11:59:59.999 PM MT on the due date (${dueDate}) and late at midnight`, () => {
+      expect(isLateForStudent(lastOnTime, null, dueDate, true)).toBe(false);
+      expect(isLateForStudent(firstLate, null, dueDate, true)).toBe(true);
+    });
+
+    it(`accepts at 11:59:59.999 PM MT on the late-until date (${lateUntil}) and refuses at midnight`, () => {
+      const exception = readExceptionWindow({ dueDate, lateUntil });
+
+      expect(checkSubmission(lockedClass, exception, false, Date.parse(lastAccepted))).toEqual({
+        allowed: true,
+        byException: true,
+      });
+      expect(checkSubmission(lockedClass, exception, false, Date.parse(firstRefused)).allowed).toBe(
+        false
+      );
+    });
   });
 });
 

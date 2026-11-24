@@ -43,11 +43,14 @@ export type SubmissionCheck =
     }
   | { allowed: false; error: string };
 
-/** Returns whether an ISO instant has passed at `now`. A malformed instant counts as passed. */
+/**
+ * Returns whether `now` is after a closing instant, which is the last
+ * millisecond a window accepts. A malformed instant counts as passed.
+ */
 function hasPassed(instant: string, now: number): boolean {
   const time = Date.parse(instant);
 
-  return !Number.isFinite(time) || now >= time;
+  return !Number.isFinite(time) || now > time;
 }
 
 /** Returns the message for a student whose exception window has ended. */
@@ -167,14 +170,17 @@ function lateAgainst(submittedAt: string | number | Date, dueDate: unknown): boo
 
 /**
  * Returns whether a submission is late. Without an exception it is measured
- * against the class due date. With one it is measured against the later of
- * the class due date and the exception's, so it is late only when both call
- * it late. A class with no due date never calls a submission late.
+ * against the class due date. A submission that only the exception let in
+ * (`byException`) is measured against the exception's due date alone. One the
+ * class rules allowed is late only when it is late against both the class due
+ * date and the exception's, so an exception never marks late what the class
+ * calls on time.
  */
 export function isLateForStudent(
   submittedAt: string | number | Date,
   classDueDate: unknown,
-  exceptionDueDate?: unknown
+  exceptionDueDate?: unknown,
+  byException = false
 ): boolean {
   const classLate = lateAgainst(submittedAt, classDueDate);
 
@@ -182,5 +188,7 @@ export function isLateForStudent(
     return classLate;
   }
 
-  return classLate && lateAgainst(submittedAt, exceptionDueDate);
+  const exceptionLate = lateAgainst(submittedAt, exceptionDueDate);
+
+  return byException ? exceptionLate : classLate && exceptionLate;
 }
