@@ -57,6 +57,51 @@ export type MissingGradeSummary = {
     updatedAt: string | null;
 };
 
+/**
+ * One student's own deadline on an assignment, stored at
+ * classes/{classId}/assignments/{assignmentId}/exceptions/{studentUid}.
+ * The IDs repeat the path, as on a grade.
+ */
+export type SubmissionException = {
+    studentId: string;
+    classId: string;
+    assignmentId: string;
+    /** The student's own due date, YYYY-MM-DD. */
+    dueDate: string;
+    /** YYYY-MM-DD, later than dueDate. Null when the student has no late window. */
+    lateUntil: string | null;
+    /** Whether the exception lets a student who has submitted replace their submission. */
+    allowResubmit: boolean;
+    /** The professor's note. Empty when none was given. */
+    reason: string;
+    /** The uid of the professor or admin who granted the exception. */
+    grantedBy: string;
+    /** ISO 8601 string. */
+    grantedAt: string;
+    /** The uid of whoever last replaced the exception. Absent until replaced. */
+    updatedBy?: string;
+    /** ISO 8601 string of the latest replace. Absent until replaced. */
+    updatedAt?: string;
+};
+
+/** A student's exception as the student sees it, without the professor's note. */
+export type OwnSubmissionException = {
+    dueDate: string;
+    lateUntil: string | null;
+    /** When the exception's window closes, as an ISO instant. Null for a malformed stored date. */
+    closesAt: string | null;
+    allowResubmit: boolean;
+};
+
+/** A student's exception as the professor's list shows it. */
+export type SubmissionExceptionSummary = OwnSubmissionException & {
+    reason: string;
+    grantedBy: string;
+    grantedAt: string;
+    /** Null until the exception is replaced. */
+    updatedAt: string | null;
+};
+
 /** A student on a professor's list for an assignment. */
 type ListedStudent = {
     studentId: string;
@@ -66,6 +111,8 @@ type ListedStudent = {
     studentEmail: string | null;
     /** The student's missing-work grade. Null when their grade belongs to a submission, or they have none. */
     missingGrade: MissingGradeSummary | null;
+    /** The student's submission exception. Null when they have none. */
+    exception: SubmissionExceptionSummary | null;
 };
 
 /** A student on the professor's list who has not submitted. */
