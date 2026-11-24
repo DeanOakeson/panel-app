@@ -308,6 +308,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           studentEmail: "zoe@example.com",
           gradingStatus: "needs-grading",
           missingGrade: null,
+          exception: null,
         },
         {
           studentId: "ada",
@@ -315,6 +316,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           studentEmail: "ada@example.com",
           gradingStatus: "missing",
           missingGrade: null,
+          exception: null,
         },
       ]);
     });
@@ -413,6 +415,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           studentEmail: "ada@example.com",
           gradingStatus: "needs-grading",
           missingGrade: null,
+          exception: null,
         },
         {
           ...submissionResponse("zoe", "2026-10-30T09:00:00.000Z"),
@@ -420,6 +423,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           studentEmail: "zoe@example.com",
           gradingStatus: "needs-grading",
           missingGrade: null,
+          exception: null,
         },
       ]);
     });
@@ -440,6 +444,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           studentEmail: "ada@example.com",
           gradingStatus: "needs-grading",
           missingGrade: null,
+          exception: null,
         },
         {
           ...submissionResponse("zoe"),
@@ -447,6 +452,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           studentEmail: "zoe@example.com",
           gradingStatus: "needs-grading",
           missingGrade: null,
+          exception: null,
         },
         {
           ...submissionResponse("abe"),
@@ -454,6 +460,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           studentEmail: null,
           gradingStatus: "needs-grading",
           missingGrade: null,
+          exception: null,
         },
         {
           ...submissionResponse("ghost"),
@@ -461,6 +468,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           studentEmail: null,
           gradingStatus: "needs-grading",
           missingGrade: null,
+          exception: null,
         },
       ]);
     });
@@ -559,6 +567,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
             gradedAt: grade.gradedAt,
             updatedAt: "2026-11-03T08:00:00.000Z",
           },
+          exception: null,
         },
       ]);
     });
@@ -606,6 +615,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
             gradedAt: missing.gradedAt,
             updatedAt: null,
           },
+          exception: null,
         },
       ]);
     });
@@ -632,6 +642,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           gradedAt: grade.gradedAt,
           gradeUpdatedAt: "2026-11-04T09:00:00.000Z",
           missingGrade: null,
+          exception: null,
         },
       ]);
     });
@@ -676,6 +687,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
         submission: null,
         submissions: [],
         missingGrade: null,
+        exception: null,
       });
     });
 
@@ -692,6 +704,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
         submission: submissionResponse(uid),
         submissions: [submissionResponse(uid)],
         missingGrade: null,
+        exception: null,
       });
     });
 
@@ -751,6 +764,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           gradedAt: grade.gradedAt,
           updatedAt: null,
         },
+        exception: null,
       });
     });
 
@@ -787,6 +801,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           gradedAt: expect.any(String),
           updatedAt: null,
         },
+        exception: null,
       });
     });
 
