@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { requireAdmin } from "@/lib/adminGuard";
+import { deleteStudentExceptions } from "@/lib/classRoster";
 
 type RouteContext = { params: Promise<{ classId: string; studentId: string }> };
 
-/** Removes a student's enrollment from the class. */
+/**
+ * Removes a student's enrollment from the class, then their submission
+ * exceptions on its assignments. Their submissions and grades stay.
+ */
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
   try {
     const { error } = await requireAdmin(request);
@@ -29,13 +33,19 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
       .doc(classId);
     const enrollment = await enrollmentRef.get();
     if (!enrollment.exists) {
+      // Finishes the cleanup of an earlier unenroll that failed part way
+      await deleteStudentExceptions(classId, studentId);
+
       return NextResponse.json(
         { error: "Student is not enrolled in this class" },
         { status: 404 }
       );
     }
 
+    // The enrollment goes first, so a grant that starts after it is refused
+    // by its own enrollment check and one that committed before it is swept
     await enrollmentRef.delete();
+    await deleteStudentExceptions(classId, studentId);
 
     return NextResponse.json(
       { unenrolled: true, classId, studentId },
