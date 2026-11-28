@@ -1,4 +1,4 @@
-import { formatClosesAt } from "@/lib/assignmentDeadline";
+import { formatClosesAt, formatTimestamp } from "@/lib/assignmentDeadline";
 import type { Assignment } from "../Types";
 
 type Props = {
@@ -35,6 +35,12 @@ export default function AssignmentInfo({ assignment, showDueTime = false }: Prop
                 <p className="whitespace-pre-line text-gray-700 dark:text-zinc-300">
                     {assignment.description || "No instructions provided."}
                 </p>
+
+                {assignment.instructionsUpdatedAt && (
+                    <p className="mt-3 text-sm text-gray-500 dark:text-zinc-400">
+                        Instructions updated {formatTimestamp(assignment.instructionsUpdatedAt)}
+                    </p>
+                )}
             </div>
         </article>
     );

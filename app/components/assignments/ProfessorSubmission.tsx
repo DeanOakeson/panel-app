@@ -22,6 +22,7 @@ import {
 } from "@/lib/gradingStatus";
 import ExceptionForm from "./ExceptionForm";
 import GradeForm from "./GradeForm";
+import LateStatus from "./LateStatus";
 import GradeHistory from "./GradeHistory";
 import MissingTag from "./MissingTag";
 import MissingWorkForm from "./MissingWorkForm";
@@ -606,13 +607,18 @@ function SubmissionCard({
             {formatFileSize(student.fileSize)} · Submitted{" "}
             {formatTimestamp(student.submittedAt)}
           </span>
-
-          {student.isLate === true && (
-            <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-              Late
-            </span>
-          )}
         </p>
+
+        <LateStatus
+          key={student.submittedAt}
+          classId={classId}
+          assignmentId={assignment.id}
+          studentId={student.studentId}
+          submittedAt={student.submittedAt}
+          lateness={student.lateness}
+          isLate={student.isLate}
+          canExcuse={canGrade}
+        />
       </div>
 
       <div className="mt-3">

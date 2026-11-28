@@ -1,8 +1,11 @@
 
 import { NextRequest, NextResponse } from "next/server";
+import { FieldValue } from "firebase-admin/firestore";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { getEffectiveClosesAt } from "@/lib/assignmentDeadline";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { parseResubmissionSettings } from "@/lib/resubmission";
+import { readInstructionsRevision } from "@/lib/lateness";
 
 type RouteContext = {
   params: Promise<{ classId: string; assignmentId: string }>;
@@ -269,6 +272,13 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       }
 
       updates.description = description;
+
+      // PANEL-115: count instruction changes apart from deadline changes, so
+      // each submission records which instructions it answered
+      if (description !== (auth.current.description ?? "")) {
+        updates.instructionsRevision = FieldValue.increment(1);
+        updates.instructionsUpdatedAt = new Date().toISOString();
+      }
     }
 
     if ("points" in body) {
@@ -323,6 +333,16 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       updates.isLocked = body.isLocked;
     }
 
+    // PANEL-113: turning resubmission off or setting an attempt limit takes
+    // effect on the next submission, even while the assignment is open.
+    const resubmission = parseResubmissionSettings(body);
+
+    if (!resubmission.ok) {
+      return NextResponse.json({ error: resubmission.error }, { status: 400 });
+    }
+
+    Object.assign(updates, resubmission.settings);
+
     if (Object.keys(updates).length === 0) {
       return NextResponse.json(
         { error: "Nothing to update." },
@@ -364,6 +384,10 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
           id: assignmentId,
           ...auth.current,
           ...updates,
+          // The stored value, not the increment sent to Firestore
+          instructionsRevision:
+            readInstructionsRevision(auth.current.instructionsRevision) +
+            ("instructionsRevision" in updates ? 1 : 0),
           isLocked:
             "isLocked" in updates
               ? updates.isLocked

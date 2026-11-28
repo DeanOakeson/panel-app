@@ -224,6 +224,9 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => 
       submittedAt: expect.any(String),
       isLate: false,
       status: "submitted",
+      // PANEL-115: the instructions and due date this version answered
+      instructionsRevision: 0,
+      dueDateAtSubmit: "2099-12-31",
       submissionHistory: [
         {
           studentId: uid,
@@ -234,8 +237,11 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => 
           submittedAt: expect.any(String),
           isLate: false,
           status: "submitted",
+          instructionsRevision: 0,
+          dueDateAtSubmit: "2099-12-31",
         },
       ],
+      attemptCount: 1,
     });
   });
 
