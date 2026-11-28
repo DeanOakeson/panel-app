@@ -59,6 +59,15 @@ function fileSubmission(
   };
 }
 
+/** The lateness of work turned in on time, its only version (PANEL-115). */
+const ON_TIME = {
+  late: false,
+  excused: null,
+  newerInstructions: false,
+  firstOnTime: null,
+  penalty: false,
+};
+
 /** Returns what the route sends back for `fileSubmission(studentUid)`. */
 function submissionResponse(studentUid: string, submittedAt?: string) {
   const { filePath, ...submission } = fileSubmission(studentUid, submittedAt);
@@ -70,10 +79,18 @@ function submissionResponse(studentUid: string, submittedAt?: string) {
     gradedAt: null,
     gradeUpdatedAt: null,
     isLate: false,
+    lateness: ON_TIME,
     resubmittedAfterGrading: false,
     submittedAfterMissingGrade: false,
     fileUrl: `https://files.example.com/${filePath}`,
   };
+}
+
+/** Returns what a student sees for their own `fileSubmission`, which has no lateness summary. */
+function ownSubmissionResponse(studentUid: string, submittedAt?: string) {
+  const { lateness: _lateness, ...own } = submissionResponse(studentUid, submittedAt);
+  void _lateness;
+  return own;
 }
 
 /** Stores a student's submission, and their users profile when `name` is given. */
@@ -702,8 +719,8 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({
         role: "student",
-        submission: submissionResponse(uid),
-        submissions: [submissionResponse(uid)],
+        submission: ownSubmissionResponse(uid),
+        submissions: [ownSubmissionResponse(uid)],
         missingGrade: null,
         exception: null,
         attemptCount: 1,
@@ -720,7 +737,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
 
       expect(res.status).toBe(200);
       expect((await res.json()).submission).toEqual({
-        ...submissionResponse(uid),
+        ...ownSubmissionResponse(uid),
         grade: 0,
         feedback: "Missing the second half",
         gradedAt: grade.gradedAt,
@@ -739,7 +756,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
 
       expect(res.status).toBe(200);
       expect((await res.json()).submission).toEqual({
-        ...submissionResponse(uid),
+        ...ownSubmissionResponse(uid),
         grade: 95,
         feedback: "Regraded part 2",
         gradedAt: grade.gradedAt,
@@ -792,11 +809,11 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
       expect(await res.json()).toEqual({
         role: "student",
         submission: {
-          ...submissionResponse(uid),
+          ...ownSubmissionResponse(uid),
           submittedAfterMissingGrade: true,
         },
         submissions: [
-          { ...submissionResponse(uid), submittedAfterMissingGrade: true },
+          { ...ownSubmissionResponse(uid), submittedAfterMissingGrade: true },
         ],
         missingGrade: {
           score: 0,

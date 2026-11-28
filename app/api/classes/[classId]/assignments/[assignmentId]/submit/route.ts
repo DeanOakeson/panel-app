@@ -6,6 +6,7 @@ import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { getEffectiveClosesAt } from "@/lib/assignmentDeadline";
 import { loadEnrolledStudentIds } from "@/lib/classRoster";
 import { countAttempts, resubmissionBlockedReason } from "@/lib/resubmission";
+import { describeLateness, readInstructionsRevision } from "@/lib/lateness";
 import {
   getGradingStatus,
   gradingStatusRank,
@@ -107,6 +108,28 @@ function exceptionAllowsResubmit(
   exception: DocumentData | undefined,
 ): boolean {
   return byException && exception?.allowResubmit === true;
+}
+
+/**
+ * Returns the due date a submission's lateness is measured against, as
+ * isLateForStudent measures it: the exception's when only the exception let
+ * the submission in, the later of the two when the student has an exception
+ * the class rules didn't need, and the class's otherwise. Null without one.
+ */
+function dueDateMeasuredAgainst(
+  classDueDate: unknown,
+  exception: DocumentData | undefined,
+  byException: boolean,
+): string | null {
+  const classDue = typeof classDueDate === "string" ? classDueDate : null;
+  const exceptionDue =
+    typeof exception?.dueDate === "string" ? exception.dueDate : null;
+
+  if (!exceptionDue) return classDue;
+  if (byException || !classDue) return exceptionDue;
+
+  // YYYY-MM-DD dates sort as text
+  return exceptionDue > classDue ? exceptionDue : classDue;
 }
 
 /**
@@ -532,6 +555,16 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
           currentException,
           byException,
         ),
+        // PANEL-115: the instructions this version answered, and the due
+        // date its lateness was measured against
+        instructionsRevision: readInstructionsRevision(
+          currentAssignment.instructionsRevision,
+        ),
+        dueDateAtSubmit: dueDateMeasuredAgainst(
+          currentAssignment.dueDate,
+          currentException,
+          byException,
+        ),
       };
 
       const history = Array.isArray(existing?.submissionHistory)
@@ -884,6 +917,9 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
               typeof submission.isLate === "boolean"
                 ? submission.isLate
                 : getIsLate(submission.submittedAt, dueDate),
+            // PANEL-115: whether the lateness is excused or answered updated
+            // instructions, and so whether a late penalty applies
+            lateness: describeLateness(submission, submission, dueDate),
             status: submission.status || "submitted",
             ...submissionGradeFields(submission, grade),
             fileUrl: error ? null : data.signedUrl,

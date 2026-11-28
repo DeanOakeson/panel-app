@@ -4,7 +4,7 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
-import { formatClosesAt } from "@/lib/assignmentDeadline";
+import { formatClosesAt, formatTimestamp } from "@/lib/assignmentDeadline";
 import { describeToGradeDetail, type GradingCounts } from "@/lib/gradingStatus";
 import {
   MAX_MAX_ATTEMPTS,
@@ -24,6 +24,10 @@ export type Assignment = {
   allowResubmission?: boolean;
   /** Most submissions per student, counting the first. Null or missing: no limit. */
   maxAttempts?: number | null;
+  /** Increases each time the description changes (PANEL-115). */
+  instructionsRevision?: number;
+  /** When the description last changed, as an ISO instant. Missing until it changes. */
+  instructionsUpdatedAt?: string;
   /** Effective closing instant, as an ISO instant. */
   closesAt?: string | null;
   /** Sent to the class's professor and admins only. */
@@ -438,6 +442,12 @@ export default function AssignmentItem({
       {a.description && (
         <p className="whitespace-pre-line text-sm text-gray-600 dark:text-zinc-300">
           {a.description}
+        </p>
+      )}
+
+      {a.instructionsUpdatedAt && (
+        <p className="text-xs text-gray-500 dark:text-zinc-400">
+          Instructions updated {formatTimestamp(a.instructionsUpdatedAt)}
         </p>
       )}
 

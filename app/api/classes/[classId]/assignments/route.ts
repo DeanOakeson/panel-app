@@ -176,6 +176,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       isLocked,
       allowResubmission: resubmission.settings.allowResubmission ?? true,
       maxAttempts: resubmission.settings.maxAttempts ?? null,
+      // PANEL-115: increases each time the description changes
+      instructionsRevision: 0,
       createdBy: auth.uid,
       createdAt: new Date().toISOString(),
     };

@@ -1,4 +1,5 @@
 import type { MissingStatus, SubmittedStatus } from "@/lib/gradingStatus";
+import type { Lateness } from "@/lib/lateness";
 
 
 export type ClassItem = {
@@ -24,10 +25,20 @@ export type Assignment = {
     allowResubmission?: boolean;
     /** Most submissions per student, counting the first. Null or missing: no limit. */
     maxAttempts?: number | null;
+    /** Increases each time the description changes (PANEL-115). */
+    instructionsRevision?: number;
+    /** When the description last changed, as an ISO instant. Missing until it changes. */
+    instructionsUpdatedAt?: string;
 };
 
 export type Submission = {
     isLate: boolean;
+    /**
+     * Set on a professor's list: the current version's lateness, whether it
+     * is excused or answered updated instructions, and whether a late
+     * penalty applies (PANEL-115).
+     */
+    lateness?: Lateness;
     studentId?: string;
     /** Set on a professor's list. Null when the student has no profile. */
     studentName?: string | null;
