@@ -20,6 +20,10 @@ export type Assignment = {
     /** When submissions close, as an ISO instant. Null when there is no due date. */
     closesAt?: string | null;
     isLocked: boolean;
+    /** Missing on assignments made before PANEL-113, which allow resubmission. */
+    allowResubmission?: boolean;
+    /** Most submissions per student, counting the first. Null or missing: no limit. */
+    maxAttempts?: number | null;
 };
 
 export type Submission = {

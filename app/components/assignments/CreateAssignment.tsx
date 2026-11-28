@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
+import { MAX_MAX_ATTEMPTS, MIN_MAX_ATTEMPTS } from "@/lib/resubmission";
 
 type CreateAssignmentProps = {
   classId: string;
@@ -19,6 +20,8 @@ export default function CreateAssignment({
   const [dueDate, setDueDate] = useState("");
   const [lateUntil, setLateUntil] = useState("");
   const [isLocked, setIsLocked] = useState(false);
+  const [allowResubmission, setAllowResubmission] = useState(true);
+  const [maxAttempts, setMaxAttempts] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -45,6 +48,21 @@ export default function CreateAssignment({
 
     if (lateUntil && lateUntil <= dueDate) {
       setError("The late submission deadline must be after the due date.");
+      return;
+    }
+
+    const attemptLimit = maxAttempts.trim() ? Number(maxAttempts) : null;
+
+    if (
+      allowResubmission &&
+      attemptLimit !== null &&
+      (!Number.isInteger(attemptLimit) ||
+        attemptLimit < MIN_MAX_ATTEMPTS ||
+        attemptLimit > MAX_MAX_ATTEMPTS)
+    ) {
+      setError(
+        `Maximum attempts must be a whole number from ${MIN_MAX_ATTEMPTS} to ${MAX_MAX_ATTEMPTS}, or empty for no limit.`
+      );
       return;
     }
 
@@ -75,6 +93,8 @@ export default function CreateAssignment({
             dueDate: dueDate || null,
             lateUntil: lateUntil || null,
             isLocked,
+            allowResubmission,
+            maxAttempts: allowResubmission ? attemptLimit : null,
           }),
         }
       );
@@ -91,6 +111,8 @@ export default function CreateAssignment({
       setDueDate("");
       setLateUntil("");
       setIsLocked(false);
+      setAllowResubmission(true);
+      setMaxAttempts("");
 
       await onCreated();
     } catch (err) {
@@ -190,6 +212,36 @@ export default function CreateAssignment({
           className="h-4 w-4 rounded border-gray-300"
         />
         Lock submissions immediately
+      </label>
+
+      <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+        <input
+          type="checkbox"
+          checked={allowResubmission}
+          onChange={(e) => setAllowResubmission(e.target.checked)}
+          className="h-4 w-4 rounded border-gray-300"
+        />
+        Allow resubmission
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
+        Maximum attempts (optional)
+        <input
+          type="number"
+          min={MIN_MAX_ATTEMPTS}
+          max={MAX_MAX_ATTEMPTS}
+          step="1"
+          value={allowResubmission ? maxAttempts : ""}
+          disabled={!allowResubmission}
+          onChange={(e) => setMaxAttempts(e.target.value)}
+          placeholder="No limit"
+          className="rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
+        />
+        <span className="text-xs text-gray-500 dark:text-zinc-400">
+          {allowResubmission
+            ? "Counts the first submission. Leave empty for no limit."
+            : "Students can submit once."}
+        </span>
       </label>
 
       {error && (

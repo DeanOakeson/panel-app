@@ -6,6 +6,11 @@ import Link from "next/link";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { formatClosesAt } from "@/lib/assignmentDeadline";
 import { describeToGradeDetail, type GradingCounts } from "@/lib/gradingStatus";
+import {
+  MAX_MAX_ATTEMPTS,
+  MIN_MAX_ATTEMPTS,
+  readResubmissionSettings,
+} from "@/lib/resubmission";
 
 export type Assignment = {
   id: string;
@@ -15,6 +20,10 @@ export type Assignment = {
   dueDate: string | null;
   lateUntil?: string | null;
   isLocked?: boolean;
+  /** Missing on assignments made before PANEL-113, which allow resubmission. */
+  allowResubmission?: boolean;
+  /** Most submissions per student, counting the first. Null or missing: no limit. */
+  maxAttempts?: number | null;
   /** Effective closing instant, as an ISO instant. */
   closesAt?: string | null;
   /** Sent to the class's professor and admins only. */
@@ -42,6 +51,14 @@ function describeDue(assignment: Assignment) {
   }
 
   return assignment.dueDate ? `Due ${assignment.dueDate}` : "No due date";
+}
+
+/** Returns a short label for a resubmission rule, or null for the default (unlimited). */
+function describeResubmission(assignment: Assignment) {
+  const { allowResubmission, maxAttempts } = readResubmissionSettings(assignment);
+  if (!allowResubmission) return "One submission only";
+  if (maxAttempts !== null) return `Up to ${maxAttempts} attempts`;
+  return null;
 }
 
 /** Shows how many students submitted and how much is left to grade. */
@@ -92,6 +109,11 @@ export default function AssignmentItem({
   const [dueDate, setDueDate] = useState(a.dueDate ?? "");
   const [lateUntil, setLateUntil] = useState(a.lateUntil ?? "");
   const [isLocked, setIsLocked] = useState(a.isLocked ?? false);
+  const saved = readResubmissionSettings(a);
+  const [allowResubmission, setAllowResubmission] = useState(saved.allowResubmission);
+  const [maxAttempts, setMaxAttempts] = useState(
+    saved.maxAttempts === null ? "" : String(saved.maxAttempts)
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -125,6 +147,8 @@ export default function AssignmentItem({
     setDueDate(a.dueDate ?? "");
     setLateUntil(a.lateUntil ?? "");
     setIsLocked(a.isLocked ?? false);
+    setAllowResubmission(saved.allowResubmission);
+    setMaxAttempts(saved.maxAttempts === null ? "" : String(saved.maxAttempts));
     setError("");
     setMode("edit");
   }
@@ -153,6 +177,21 @@ export default function AssignmentItem({
       return;
     }
 
+    const attemptLimit = maxAttempts.trim() ? Number(maxAttempts) : null;
+
+    if (
+      allowResubmission &&
+      attemptLimit !== null &&
+      (!Number.isInteger(attemptLimit) ||
+        attemptLimit < MIN_MAX_ATTEMPTS ||
+        attemptLimit > MAX_MAX_ATTEMPTS)
+    ) {
+      setError(
+        `Maximum attempts must be a whole number from ${MIN_MAX_ATTEMPTS} to ${MAX_MAX_ATTEMPTS}, or empty for no limit.`
+      );
+      return;
+    }
+
     // Send only the fields that changed, so two people editing different
     // fields of the same assignment don't overwrite each other's work.
     const changes: Record<string, string | number | boolean | null> = {};
@@ -175,6 +214,16 @@ export default function AssignmentItem({
 
     if (isLocked !== (a.isLocked ?? false)) {
       changes.isLocked = isLocked;
+    }
+
+    if (allowResubmission !== saved.allowResubmission) {
+      changes.allowResubmission = allowResubmission;
+    }
+
+    const nextMaxAttempts = allowResubmission ? attemptLimit : null;
+
+    if (nextMaxAttempts !== saved.maxAttempts) {
+      changes.maxAttempts = nextMaxAttempts;
     }
 
     if (Object.keys(changes).length === 0) {
@@ -295,6 +344,39 @@ export default function AssignmentItem({
             not passed. You can unlock submissions later.
           </p>
 
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                type="checkbox"
+                checked={allowResubmission}
+                onChange={(e) => setAllowResubmission(e.target.checked)}
+                className="h-4 w-4"
+              />
+              Allow resubmission
+            </label>
+
+            <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
+              Maximum attempts (optional)
+              <input
+                type="number"
+                min={MIN_MAX_ATTEMPTS}
+                max={MAX_MAX_ATTEMPTS}
+                step="1"
+                value={allowResubmission ? maxAttempts : ""}
+                disabled={!allowResubmission}
+                onChange={(e) => setMaxAttempts(e.target.value)}
+                placeholder="No limit"
+                className={inputClass}
+              />
+            </label>
+          </div>
+
+          <p className="text-xs text-gray-500 dark:text-zinc-400">
+            Attempts count the first submission. A change applies to the next
+            submission, so a student who already used their attempts can&apos;t
+            submit again.
+          </p>
+
           {error && <p className="text-sm text-red-600">{error}</p>}
 
           <div className="flex gap-2">
@@ -338,6 +420,11 @@ export default function AssignmentItem({
 
         <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500 dark:text-zinc-400">
           <span>{a.points} pts · {describeDue(a)}</span>
+          {describeResubmission(a) && (
+            <span className="rounded bg-gray-100 px-2 py-1 font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-300">
+              {describeResubmission(a)}
+            </span>
+          )}
           {a.isLocked && (
             <span className="rounded bg-red-100 px-2 py-1 font-semibold text-red-700 dark:bg-red-950 dark:text-red-300">
               Locked

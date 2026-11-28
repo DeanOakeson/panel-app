@@ -14,6 +14,10 @@ import {
 } from "@/lib/assignmentDeadline";
 import { announceGradeSaved } from "@/lib/gradeEvents";
 import {
+  getAttemptLimit,
+  readResubmissionSettings,
+} from "@/lib/resubmission";
+import {
   getGradingStatus,
   isMissingRow,
   isMissingWorkGrade,
@@ -72,6 +76,7 @@ export default function AssignmentDetailPage() {
   const [submissionsClosed, setSubmissionsClosed] = useState(false);
   // When the student's submission rules were last checked
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
+  const [attemptCount, setAttemptCount] = useState(0);
 
   const loadSubmission = useCallback(
     async (user: User) => {
@@ -119,6 +124,11 @@ export default function AssignmentDetailPage() {
           setSubmission(data.submission ?? history[0] ?? null);
           setMissingGrade(data.missingGrade ?? null);
           setException(data.exception ?? null);
+          setAttemptCount(
+            typeof data.attemptCount === "number"
+              ? data.attemptCount
+              : history.length,
+          );
           setStudents([]);
         }
 
@@ -299,6 +309,25 @@ export default function AssignmentDetailPage() {
 
   const closesAt = assignment?.closesAt;
 
+  // PANEL-113: the server refuses a resubmission past the professor's rule;
+  // this only explains it before the student picks a file.
+  const attemptLimit = assignment ? getAttemptLimit(assignment) : null;
+  const resubmissionOff =
+    !!assignment && !readResubmissionSettings(assignment).allowResubmission;
+  const attemptsUsedUp =
+    attemptLimit !== null && attemptCount > 0 && attemptCount >= attemptLimit;
+  const attemptsMessage = !attemptsUsedUp
+    ? ""
+    : resubmissionOff
+      ? "Your professor doesn't allow resubmissions for this assignment, and you have already submitted it."
+      : `You have used all ${attemptLimit} attempts for this assignment.`;
+  const attemptsNote =
+    attemptLimit !== null && !resubmissionOff && !attemptsUsedUp
+      ? `${attemptCount} of ${attemptLimit} attempts used.`
+      : resubmissionOff && attemptCount === 0
+        ? "You can submit this assignment once."
+        : "";
+
   useEffect(() => {
     if (!closesAt) {
       return;
@@ -420,14 +449,23 @@ export default function AssignmentDetailPage() {
                   Submissions are closed.
                 </ClosedNotice>
               ) : (
-                <SubmissionUploadForm
-                  submission={!!submission}
-                  selectedFile={selectedFile}
-                  submitting={submitting}
-                  message={submitMessage}
-                  onFileChange={setSelectedFile}
-                  onSubmit={handleSubmit}
-                />
+                <>
+                  <SubmissionUploadForm
+                    submission={!!submission}
+                    selectedFile={selectedFile}
+                    submitting={submitting}
+                    message={submitMessage}
+                    disabled={attemptsUsedUp}
+                    disabledMessage={attemptsMessage}
+                    onFileChange={setSelectedFile}
+                    onSubmit={handleSubmit}
+                  />
+                  {attemptsNote && (
+                    <p className="mt-2 text-sm text-gray-600 dark:text-zinc-300">
+                      {attemptsNote}
+                    </p>
+                  )}
+                </>
               )}
             </>
           )}

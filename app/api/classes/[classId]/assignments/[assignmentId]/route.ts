@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { getEffectiveClosesAt } from "@/lib/assignmentDeadline";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { parseResubmissionSettings } from "@/lib/resubmission";
 
 type RouteContext = {
   params: Promise<{ classId: string; assignmentId: string }>;
@@ -322,6 +323,16 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
       updates.isLocked = body.isLocked;
     }
+
+    // PANEL-113: turning resubmission off or setting an attempt limit takes
+    // effect on the next submission, even while the assignment is open.
+    const resubmission = parseResubmissionSettings(body);
+
+    if (!resubmission.ok) {
+      return NextResponse.json({ error: resubmission.error }, { status: 400 });
+    }
+
+    Object.assign(updates, resubmission.settings);
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json(
