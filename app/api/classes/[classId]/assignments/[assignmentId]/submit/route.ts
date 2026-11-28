@@ -3,10 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { DocumentData } from "firebase-admin/firestore";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
-import {
-  getEffectiveClosesAt,
-  isLateSubmission,
-} from "@/lib/assignmentDeadline";
+import { getEffectiveClosesAt } from "@/lib/assignmentDeadline";
 import { loadEnrolledStudentIds } from "@/lib/classRoster";
 import {
   getGradingStatus,
@@ -14,6 +11,13 @@ import {
   isMissingWorkGrade,
   summarizeMissingGrade,
 } from "@/lib/gradingStatus";
+import {
+  checkSubmission,
+  isLateForStudent,
+  readExceptionWindow,
+  summarizeException,
+  summarizeOwnException,
+} from "@/lib/submissionException";
 
 export const runtime = "nodejs";
 
@@ -49,62 +53,61 @@ class SubmissionRuleError extends Error {
 }
 
 /**
- * Checks the current assignment settings before accepting a submission.
+ * Checks the assignment's lock and deadline, and the student's exception,
+ * before accepting a submission. Returns whether only the exception let the
+ * student in. Throws a SubmissionRuleError when the student may not submit.
  */
 function checkSubmissionRules(
   assignment: DocumentData,
+  exception: DocumentData | undefined,
+  hasSubmission: boolean,
   now = Date.now(),
-): void {
-  if (assignment.isLocked === true) {
-    throw new SubmissionRuleError(
-      "The professor has closed submissions for this assignment.",
-      403,
-    );
-  }
-
-  let closesAt: string | null;
+): { byException: boolean } {
+  const isLocked = assignment.isLocked === true;
+  let closesAt: string | null = null;
 
   try {
     closesAt = getEffectiveClosesAt(assignment.dueDate, assignment.lateUntil);
+
+    if (closesAt && !Number.isFinite(Date.parse(closesAt))) {
+      throw new Error("Invalid closing instant.");
+    }
   } catch {
-    throw new SubmissionRuleError(
-      "This assignment has invalid deadline settings.",
-      500,
-    );
-  }
-
-  if (closesAt) {
-    const deadline = Date.parse(closesAt);
-
-    if (!Number.isFinite(deadline)) {
+    // A locked assignment refuses whatever its deadline says
+    if (!isLocked) {
       throw new SubmissionRuleError(
         "This assignment has invalid deadline settings.",
         500,
       );
     }
-
-    if (now >= deadline) {
-      throw new SubmissionRuleError(
-        "The due date has passed or the late submission deadline has passed. You can no longer submit this assignment.",
-        403,
-      );
-    }
   }
+
+  const check = checkSubmission(
+    { isLocked, closesAt },
+    readExceptionWindow(exception),
+    hasSubmission,
+    now,
+  );
+
+  if (!check.allowed) {
+    throw new SubmissionRuleError(check.error, 403);
+  }
+
+  return { byException: check.byException };
 }
 
 /**
- * Safely determines whether a submission was received after the original
- * due-date cutoff.
+ * Returns whether a submission is late for its student, measured against the
+ * class due date and the student's exception, when they have one.
+ * `byException` is true when only the exception let the submission in.
  */
 function getIsLate(
   submittedAt: string | number | Date,
   dueDate: unknown,
+  exception?: DocumentData,
+  byException = false,
 ): boolean {
-  try {
-    return isLateSubmission(submittedAt, dueDate);
-  } catch {
-    return false;
-  }
+  return isLateForStudent(submittedAt, dueDate, exception?.dueDate, byException);
 }
 
 /**
@@ -338,11 +341,17 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       .collection("assignments")
       .doc(assignmentId);
 
-    const [userDoc, classDoc, assignmentDoc] = await Promise.all([
-      db.collection("users").doc(uid).get(),
-      db.collection("classes").doc(classId).get(),
-      assignmentRef.get(),
-    ]);
+    const submissionRef = assignmentRef.collection("submissions").doc(uid);
+    const exceptionRef = assignmentRef.collection("exceptions").doc(uid);
+
+    const [userDoc, classDoc, assignmentDoc, submissionDoc, exceptionDoc] =
+      await Promise.all([
+        db.collection("users").doc(uid).get(),
+        db.collection("classes").doc(classId).get(),
+        assignmentRef.get(),
+        submissionRef.get(),
+        exceptionRef.get(),
+      ]);
 
     if (!userDoc.exists || !classDoc.exists || !assignmentDoc.exists) {
       return NextResponse.json(
@@ -373,8 +382,11 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       );
     }
 
-    // Check the current lock and effective deadline before accepting the file.
-    checkSubmissionRules(assignmentDoc.data() ?? {});
+    checkSubmissionRules(
+      assignmentDoc.data() ?? {},
+      exceptionDoc.data(),
+      submissionDoc.exists,
+    );
 
     const formData = await request.formData();
     const file = formData.get("file");
@@ -445,21 +457,24 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const submissionRef = assignmentRef.collection("submissions").doc(uid);
-
-    // Recheck the assignment settings inside the transaction. This prevents
-    // a student from uploading while a professor locks or closes the assignment.
+    // Recheck inside the transaction, so a lock, a closed deadline, a removed
+    // exception or a submission from a parallel request is honoured
     const rotation = await db.runTransaction(async (transaction) => {
-      const currentAssignmentDoc = await transaction.get(assignmentRef);
-      const submissionDoc = await transaction.get(submissionRef);
+      const [currentAssignmentDoc, submissionDoc, currentExceptionDoc] =
+        await transaction.getAll(assignmentRef, submissionRef, exceptionRef);
 
       if (!currentAssignmentDoc.exists) {
         throw new SubmissionRuleError("This assignment no longer exists.", 404);
       }
 
       const currentAssignment = currentAssignmentDoc.data() ?? {};
+      const currentException = currentExceptionDoc.data();
 
-      checkSubmissionRules(currentAssignment);
+      const { byException } = checkSubmissionRules(
+        currentAssignment,
+        currentException,
+        submissionDoc.exists,
+      );
 
       const submittedAt = new Date().toISOString();
 
@@ -471,7 +486,12 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         fileSize: file.size,
         submittedAt,
         status: "submitted",
-        isLate: getIsLate(submittedAt, currentAssignment.dueDate),
+        isLate: getIsLate(
+          submittedAt,
+          currentAssignment.dueDate,
+          currentException,
+          byException,
+        ),
       };
 
       const existing = submissionDoc.data();
@@ -739,14 +759,17 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 
     const submissionsRef = assignmentRef.collection("submissions");
     const gradesRef = assignmentRef.collection("grades");
+    const exceptionsRef = assignmentRef.collection("exceptions");
 
     // Professors and admins see every enrolled student.
     if (role === "professor" || role === "admin") {
-      const [snapshot, gradeSnapshot, enrolledIds] = await Promise.all([
-        submissionsRef.get(),
-        gradesRef.get(),
-        loadEnrolledStudentIds(classId),
-      ]);
+      const [snapshot, gradeSnapshot, exceptionSnapshot, enrolledIds] =
+        await Promise.all([
+          submissionsRef.get(),
+          gradesRef.get(),
+          exceptionsRef.get(),
+          loadEnrolledStudentIds(classId),
+        ]);
 
       const submissionsById = new Map(
         snapshot.docs.map((doc) => [doc.id, doc.data()]),
@@ -754,6 +777,13 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 
       const grades = new Map(
         gradeSnapshot.docs.map((gradeDoc) => [gradeDoc.id, gradeDoc.data()]),
+      );
+
+      const exceptions = new Map(
+        exceptionSnapshot.docs.map((exceptionDoc) => [
+          exceptionDoc.id,
+          exceptionDoc.data(),
+        ]),
       );
 
       const studentIds = [
@@ -789,6 +819,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
             studentEmail: (student?.email as string | undefined) ?? null,
             gradingStatus: getGradingStatus(submission, grade),
             missingGrade: summarizeMissingGrade(grade),
+            exception: summarizeException(exceptions.get(studentId)),
           };
 
           if (!submission) {
@@ -847,13 +878,15 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     }
 
     // Students can access only their own submission and grades.
-    const [submissionDoc, gradeDoc] = await Promise.all([
+    const [submissionDoc, gradeDoc, exceptionDoc] = await Promise.all([
       submissionsRef.doc(uid).get(),
       gradesRef.doc(uid).get(),
+      exceptionsRef.doc(uid).get(),
     ]);
 
     const grade = gradeDoc.data();
     const missingGrade = summarizeMissingGrade(grade);
+    const exception = summarizeOwnException(exceptionDoc.data());
 
     if (!submissionDoc.exists) {
       return NextResponse.json({
@@ -861,6 +894,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         submission: null,
         submissions: [],
         missingGrade,
+        exception,
       });
     }
 
@@ -910,6 +944,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       submission: latestSubmission,
       submissions,
       missingGrade,
+      exception,
     });
   } catch (error) {
     console.error("Get assignment submission failed:", error);

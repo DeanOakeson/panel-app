@@ -162,7 +162,10 @@ export function formatTimestamp(instant: string): string {
   return `${formatted} MT`;
 }
 
-/** Returns whether a closing instant from the server has passed. */
+/**
+ * Returns whether a closing instant from the server has passed. The closing
+ * instant is the last millisecond that is still open.
+ */
 export function hasClosed(closesAt: string | null | undefined): boolean {
   if (!closesAt) {
     return false;
@@ -170,7 +173,7 @@ export function hasClosed(closesAt: string | null | undefined): boolean {
 
   const deadline = Date.parse(closesAt);
 
-  return !Number.isFinite(deadline) || Date.now() >= deadline;
+  return !Number.isFinite(deadline) || Date.now() > deadline;
 }
 
 /**

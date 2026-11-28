@@ -213,8 +213,8 @@ async function readEnrollments(uid: string) {
 }
 
 /**
- * Submissions and grades belonging to this user, by *uid*, everywhere they can
- * exist. Two walks, deliberately overlapping:
+ * Submissions, grades and submission exceptions belonging to this user, by
+ * *uid*, everywhere they can exist. Two walks, deliberately overlapping:
  *
  * 1. the enrollment-based walk: every assignment inside every class the user is
  *    currently enrolled in contributes `.../submissions/{uid}` and
@@ -253,17 +253,20 @@ async function readUserOwnedClassDocs(uid: string, classIds: string[]) {
     for (const assignment of assignments.docs) {
       add(assignment.ref.collection("submissions").doc(uid));
       add(assignment.ref.collection("grades").doc(uid));
+      add(assignment.ref.collection("exceptions").doc(uid));
     }
   }
 
   // Walk 2: uid-scoped sweep across every class, catches unenrolled leftovers.
-  const [submissions, grades] = await Promise.all([
+  const [submissions, grades, exceptions] = await Promise.all([
     db.collectionGroup("submissions").where("studentId", "==", uid).get(),
     db.collectionGroup("grades").where("studentId", "==", uid).get(),
+    db.collectionGroup("exceptions").where("studentId", "==", uid).get(),
   ]);
 
   for (const doc of submissions.docs) add(doc.ref);
   for (const doc of grades.docs) add(doc.ref);
+  for (const doc of exceptions.docs) add(doc.ref);
 
   const refs = [...byPath.values()];
   return {
@@ -271,6 +274,9 @@ async function readUserOwnedClassDocs(uid: string, classIds: string[]) {
       ref.path.endsWith("/submissions/" + uid)
     ),
     gradeRefs: refs.filter((ref) => ref.path.endsWith("/grades/" + uid)),
+    exceptionRefs: refs.filter((ref) =>
+      ref.path.endsWith("/exceptions/" + uid)
+    ),
   };
 }
 
@@ -347,10 +353,11 @@ async function findUnreferencedSubmissionFiles(
  * DELETE /api/admin/users/[uid] — ADMIN-ONLY.
  *
  * Removes the Firebase Auth account, the `users/{uid}` profile, the user's
- * `users/{uid}/classes/*` enrollment mirrors, and their submission and grade
- * docs, with each grade's history. Self-deletion is refused.
+ * `users/{uid}/classes/*` enrollment mirrors, and their submission, grade
+ * and submission exception docs, with each grade's history. Self-deletion is
+ * refused.
  *
- * Submissions/grades are found by uid rather than by current enrollment, so a
+ * Submissions, grades and exceptions are found by uid rather than by current enrollment, so a
  * submission left behind by an earlier unenroll is still removed — see
  * readUserOwnedClassDocs.
  *
@@ -402,10 +409,11 @@ export async function DELETE(
     // Collect all user-owned documents before deleting anything.
     const enrollments = await readEnrollments(uid);
 
-    const { submissionRefs, gradeRefs } = await readUserOwnedClassDocs(
-      uid,
-      enrollments.map((enrollment) => enrollment.classId),
-    );
+    const { submissionRefs, gradeRefs, exceptionRefs } =
+      await readUserOwnedClassDocs(
+        uid,
+        enrollments.map((enrollment) => enrollment.classId),
+      );
 
     // Collect both current submission files and all historical files.
     const allFilePaths = await readUserSubmissionFilePaths(submissionRefs);
@@ -441,6 +449,7 @@ export async function DELETE(
       ...enrollments.map((enrollment) => enrollment.ref),
       ...submissionRefs,
       ...gradeRefs,
+      ...exceptionRefs,
       userRef,
     ];
 
@@ -520,6 +529,7 @@ export async function DELETE(
       removedEnrollments: enrollments.length,
       removedSubmissions: submissionRefs.length,
       removedGrades: gradeRefs.length,
+      removedExceptions: exceptionRefs.length,
       removedSubmissionFiles: storageCleanupPending
         ? 0
         : filesToDelete.length,

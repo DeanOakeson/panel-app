@@ -50,6 +50,38 @@ export function enrollmentQuery(classId: string, studentId: string): Query {
 }
 
 /**
+ * Deletes a student's submission exception on every assignment in a class.
+ * Called after their enrollment is removed, since an exception is a
+ * permission that ends with the enrollment. Submissions and grades stay.
+ */
+export async function deleteStudentExceptions(
+  classId: string,
+  studentId: string
+): Promise<void> {
+  const db = getAdminDb();
+  const assignments = await db
+    .collection("classes")
+    .doc(classId)
+    .collection("assignments")
+    .select()
+    .get();
+  const exceptionRefs = assignments.docs.map((assignment) =>
+    assignment.ref.collection("exceptions").doc(studentId)
+  );
+
+  // Firestore batches have a 500-write limit
+  for (let start = 0; start < exceptionRefs.length; start += 500) {
+    const batch = db.batch();
+
+    for (const ref of exceptionRefs.slice(start, start + 500)) {
+      batch.delete(ref);
+    }
+
+    await batch.commit();
+  }
+}
+
+/**
  * Counts an assignment's grading states. Every enrolled student counts, and
  * so does anyone else who submitted or has a grade.
  */

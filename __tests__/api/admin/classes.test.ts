@@ -3,6 +3,8 @@ import { NextRequest } from "next/server";
 import { GET, PATCH, DELETE } from "@/app/api/admin/classes/[classId]/route";
 import { POST } from "@/app/api/admin/classes/[classId]/enrollments/route";
 import { DELETE as UNENROLL } from "@/app/api/admin/classes/[classId]/enrollments/[studentId]/route";
+import { POST as SUBMIT } from "@/app/api/classes/[classId]/assignments/[assignmentId]/submit/route";
+import { CLOSED_MESSAGE } from "@/lib/submissionException";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { clearEmulators, createSignedInUser } from "../../helpers/emulators";
 
@@ -469,6 +471,10 @@ describe("DELETE /api/admin/classes/[classId]", () => {
       .collection("submissions")
       .doc(student.uid)
       .set({ submittedAt: Date.now() });
+    await assignmentRef
+      .collection("exceptions")
+      .doc(student.uid)
+      .set({ studentId: student.uid, dueDate: "2099-12-31" });
     const materialRef = getAdminDb()
       .collection("classes")
       .doc(classId)
@@ -500,6 +506,10 @@ describe("DELETE /api/admin/classes/[classId]", () => {
     expect((await assignmentRef.get()).exists).toBe(false);
     expect(
       (await assignmentRef.collection("submissions").doc(student.uid).get())
+        .exists
+    ).toBe(false);
+    expect(
+      (await assignmentRef.collection("exceptions").doc(student.uid).get())
         .exists
     ).toBe(false);
     expect((await materialRef.get()).exists).toBe(false);
@@ -648,6 +658,134 @@ describe("DELETE /api/admin/classes/[classId]/enrollments/[studentId]", () => {
       paramsFor(student.uid)
     );
     expect(res.status).toBe(404);
+  });
+
+  describe("with submission exceptions", () => {
+    /** Returns an assignment of a class by id. */
+    function assignmentRef(assignmentId: string, inClass = classId) {
+      return getAdminDb()
+        .collection("classes")
+        .doc(inClass)
+        .collection("assignments")
+        .doc(assignmentId);
+    }
+
+    /** Stores a student's exception on an assignment, open until far in the future. */
+    function storeException(ref: ReturnType<typeof assignmentRef>, uid: string) {
+      return ref.collection("exceptions").doc(uid).set({
+        studentId: uid,
+        dueDate: "2099-12-31",
+        lateUntil: null,
+        allowResubmit: true,
+      });
+    }
+
+    async function exceptionExists(ref: ReturnType<typeof assignmentRef>, uid: string) {
+      return (await ref.collection("exceptions").doc(uid).get()).exists;
+    }
+
+    it("removes the student's exception on every assignment and keeps their submission and grade", async () => {
+      await seedClass();
+      const admin = await createSignedInUser("admin@example.com", "admin");
+      const student = await seedStudent();
+      await seedEnrollment(student.uid);
+      const first = assignmentRef("a1");
+      const second = assignmentRef("a2");
+      await first.set({ title: "Project 1", dueDate: "2020-01-15" });
+      await second.set({ title: "Project 2", dueDate: "2020-01-15" });
+      await storeException(first, student.uid);
+      await storeException(second, student.uid);
+      await first.collection("submissions").doc(student.uid).set({ studentId: student.uid });
+      await first.collection("grades").doc(student.uid).set({ studentId: student.uid, score: 9 });
+
+      const res = await UNENROLL(
+        unenrollRequest(admin.idToken, student.uid),
+        paramsFor(student.uid)
+      );
+
+      expect(res.status).toBe(200);
+      expect(await exceptionExists(first, student.uid)).toBe(false);
+      expect(await exceptionExists(second, student.uid)).toBe(false);
+      expect((await first.collection("submissions").doc(student.uid).get()).exists).toBe(true);
+      expect((await first.collection("grades").doc(student.uid).get()).exists).toBe(true);
+    });
+
+    it("leaves other students' exceptions and the student's exceptions in other classes", async () => {
+      await seedClass();
+      const admin = await createSignedInUser("admin@example.com", "admin");
+      const student = await seedStudent();
+      const other = await createSignedInUser("olive@example.com", "student");
+      await seedEnrollment(student.uid);
+      await seedEnrollment(other.uid);
+      const here = assignmentRef("a1");
+      const elsewhere = assignmentRef("a1", "class-2");
+      await here.set({ title: "Project 1" });
+      await getAdminDb().collection("classes").doc("class-2").set({ name: "Other" });
+      await elsewhere.set({ title: "Project 1" });
+      await storeException(here, student.uid);
+      await storeException(here, other.uid);
+      await storeException(elsewhere, student.uid);
+
+      const res = await UNENROLL(
+        unenrollRequest(admin.idToken, student.uid),
+        paramsFor(student.uid)
+      );
+
+      expect(res.status).toBe(200);
+      expect(await exceptionExists(here, student.uid)).toBe(false);
+      expect(await exceptionExists(here, other.uid)).toBe(true);
+      expect(await exceptionExists(elsewhere, student.uid)).toBe(true);
+    });
+
+    it("finishes removing the exceptions when asked again after the enrollment is gone", async () => {
+      await seedClass();
+      const admin = await createSignedInUser("admin@example.com", "admin");
+      const student = await seedStudent();
+      const ref = assignmentRef("a1");
+      await ref.set({ title: "Project 1" });
+      await storeException(ref, student.uid);
+
+      const res = await UNENROLL(
+        unenrollRequest(admin.idToken, student.uid),
+        paramsFor(student.uid)
+      );
+
+      expect(res.status).toBe(404);
+      expect(await exceptionExists(ref, student.uid)).toBe(false);
+    });
+
+    it("does not reopen a closed assignment when the student is enrolled again", async () => {
+      await seedClass();
+      const admin = await createSignedInUser("admin@example.com", "admin");
+      const student = await seedStudent();
+      await seedEnrollment(student.uid);
+      const ref = assignmentRef("a1");
+      await ref.set({ name: "Project 1", points: 100, dueDate: "2020-01-15" });
+      await storeException(ref, student.uid);
+
+      await UNENROLL(unenrollRequest(admin.idToken, student.uid), paramsFor(student.uid));
+      const enrolled = await POST(
+        enrollRequest(admin.idToken, { studentId: student.uid }),
+        classParams
+      );
+      expect(enrolled.status).toBe(201);
+
+      const body = new FormData();
+      const bytes = new Uint8Array(2048);
+      bytes.set(new TextEncoder().encode("%PDF-1.4\n"));
+      body.append("file", new File([bytes], "essay.pdf", { type: "application/pdf" }));
+      const submitted = await SUBMIT(
+        new NextRequest(
+          `http://localhost/api/classes/${classId}/assignments/a1/submit`,
+          { method: "POST", headers: { authorization: `Bearer ${student.idToken}` }, body }
+        ),
+        { params: Promise.resolve({ classId, assignmentId: "a1" }) }
+      );
+
+      expect(submitted.status).toBe(403);
+      expect(await submitted.json()).toEqual({ error: CLOSED_MESSAGE });
+      expect((await ref.collection("submissions").doc(student.uid).get()).exists).toBe(false);
+    });
   });
 
   it("removes the enrollment", async () => {

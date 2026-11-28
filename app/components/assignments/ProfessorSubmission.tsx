@@ -2,7 +2,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { formatTimestamp } from "@/lib/assignmentDeadline";
+import {
+  closesAtOrNull,
+  formatClosesAt,
+  formatTimestamp,
+  hasClosed,
+} from "@/lib/assignmentDeadline";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
 import {
   countGradingStatuses,
   describeToGradeDetail,
@@ -14,6 +20,7 @@ import {
   type GradingCounts,
   type GradingStatus,
 } from "@/lib/gradingStatus";
+import ExceptionForm from "./ExceptionForm";
 import GradeForm from "./GradeForm";
 import GradeHistory from "./GradeHistory";
 import MissingTag from "./MissingTag";
@@ -24,6 +31,7 @@ import type {
   Grade,
   MissingStudent,
   RosterStudent,
+  SubmissionExceptionSummary,
   SubmittedStudent,
 } from "../Types";
 
@@ -42,6 +50,11 @@ type Props = {
   onGraded: (studentId: string, grade: Grade) => void;
   /** Receives the missing-work grade the server saved for a student without a submission. */
   onMissingGraded: (studentId: string, grade: Grade) => void;
+  /** Receives a student's stored exception after a grant or replace, or null after a remove. */
+  onExceptionChanged: (
+    studentId: string,
+    exception: SubmissionExceptionSummary | null
+  ) => void;
   /** A student whose card is highlighted, scrolled into view and focused once the list loads. */
   focusStudentId?: string | null;
 };
@@ -204,6 +217,7 @@ export default function ProfessorSubmissions({
   canGradeSubmissions,
   onGraded,
   onMissingGraded,
+  onExceptionChanged,
   focusStudentId = null,
 }: Props) {
   const [alreadyGradedIds, setAlreadyGradedIds] = useState<ReadonlySet<string>>(
@@ -409,6 +423,25 @@ export default function ProfessorSubmissions({
     onMissingGraded(studentId, grade);
   }
 
+  /** Passes a student's changed exception up and announces the change. */
+  function handleExceptionChanged(
+    studentId: string,
+    exception: SubmissionExceptionSummary | null,
+    replaced: boolean
+  ) {
+    const changed = students.find((student) => student.studentId === studentId);
+    const name = changed ? displayName(changed) : "this student";
+
+    setAnnouncement(
+      !exception
+        ? `Exception removed for ${name}.`
+        : replaced
+          ? `Exception updated for ${name}.`
+          : `Exception granted for ${name}.`
+    );
+    onExceptionChanged(studentId, exception);
+  }
+
   return (
     <section
       ref={sectionRef}
@@ -485,6 +518,7 @@ export default function ProfessorSubmissions({
                       setEditing(student.studentId, open)
                     }
                     onSaved={handleMissingSaved}
+                    onExceptionChanged={handleExceptionChanged}
                   />
                 ) : (
                   <SubmissionCard
@@ -501,6 +535,7 @@ export default function ProfessorSubmissions({
                       setEditing(student.studentId, open)
                     }
                     onSaved={handleSaved}
+                    onExceptionChanged={handleExceptionChanged}
                   />
                 )
               )}
@@ -511,6 +546,12 @@ export default function ProfessorSubmissions({
     </section>
   );
 }
+
+type ExceptionChangeHandler = (
+  studentId: string,
+  exception: SubmissionExceptionSummary | null,
+  replaced: boolean
+) => void;
 
 type SubmissionCardProps = {
   classId: string;
@@ -528,6 +569,7 @@ type SubmissionCardProps = {
   highlighted: boolean;
   onEditingChange: (open: boolean) => void;
   onSaved: (studentId: string, grade: Grade, alreadyGraded: boolean) => void;
+  onExceptionChanged: ExceptionChangeHandler;
 };
 
 /** Shows one student's submission, its grade and the form to grade or edit it. */
@@ -542,6 +584,7 @@ function SubmissionCard({
   highlighted,
   onEditingChange,
   onSaved,
+  onExceptionChanged,
 }: SubmissionCardProps) {
   const graded = student.grade !== null && !!student.gradedAt;
 
@@ -710,6 +753,13 @@ function SubmissionCard({
           />
         </div>
       )}
+
+      <ExceptionDetails
+        classId={classId}
+        assignmentId={assignment.id}
+        student={student}
+        onChanged={onExceptionChanged}
+      />
     </article>
   );
 }
@@ -728,6 +778,7 @@ type MissingWorkCardProps = {
   highlighted: boolean;
   onEditingChange: (open: boolean) => void;
   onSaved: (studentId: string, grade: Grade, alreadyGraded: boolean) => void;
+  onExceptionChanged: ExceptionChangeHandler;
 };
 
 /**
@@ -745,6 +796,7 @@ function MissingWorkCard({
   highlighted,
   onEditingChange,
   onSaved,
+  onExceptionChanged,
 }: MissingWorkCardProps) {
   const missingGrade = student.missingGrade;
 
@@ -845,6 +897,148 @@ function MissingWorkCard({
           />
         </div>
       )}
+
+      <ExceptionDetails
+        classId={classId}
+        assignmentId={assignment.id}
+        student={student}
+        onChanged={onExceptionChanged}
+      />
     </article>
+  );
+}
+
+/** Formats a YYYY-MM-DD date as the instant it closes, like "Dec 2, 11:59 PM MT". */
+function formatDateCutoff(date: string) {
+  const closesAt = closesAtOrNull(date);
+
+  return closesAt ? formatClosesAt(closesAt) : date;
+}
+
+/**
+ * Shows a student's submission exception, if they have one, with the
+ * controls to grant, edit or remove it.
+ */
+function ExceptionDetails({
+  classId,
+  assignmentId,
+  student,
+  onChanged,
+}: {
+  classId: string;
+  assignmentId: string;
+  student: RosterStudent;
+  onChanged: ExceptionChangeHandler;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [error, setError] = useState("");
+  const exception = student.exception;
+
+  async function handleRemove() {
+    setError("");
+
+    const user = getFirebaseAuth().currentUser;
+
+    if (!user) {
+      setError("Please sign in again.");
+      return;
+    }
+
+    setRemoving(true);
+
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(
+        `/api/classes/${classId}/assignments/${assignmentId}/exceptions/${student.studentId}`,
+        { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Already removed elsewhere, which leaves the same result
+      if (!response.ok && response.status !== 404) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to remove the exception.");
+      }
+
+      onChanged(student.studentId, null, false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setRemoving(false);
+    }
+  }
+
+  return (
+    <div className="mt-4 border-t border-gray-200 pt-4 dark:border-zinc-700">
+      {exception && (
+        <div className="mb-3">
+          <p className="flex flex-wrap items-center gap-2 text-sm text-gray-500 dark:text-zinc-400">
+            <span>Exception</span>
+
+            {hasClosed(exception.closesAt) && (
+              <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-300">
+                Ended
+              </span>
+            )}
+          </p>
+
+          <p className="text-sm text-gray-900 dark:text-white">
+            {`Due ${formatDateCutoff(exception.dueDate)}`}
+            {exception.lateUntil &&
+              ` · Late until ${formatDateCutoff(exception.lateUntil)}`}
+          </p>
+
+          <p className="text-sm text-gray-900 dark:text-white">
+            {exception.allowResubmit
+              ? "Resubmission allowed"
+              : "Resubmission not allowed"}
+          </p>
+
+          {exception.reason && (
+            <p className="mt-1 whitespace-pre-line text-sm text-gray-700 dark:text-zinc-300">
+              {exception.reason}
+            </p>
+          )}
+        </div>
+      )}
+
+      {editing ? (
+        <ExceptionForm
+          classId={classId}
+          assignmentId={assignmentId}
+          studentId={student.studentId}
+          editing={exception}
+          onSaved={(studentId, saved, replaced) => {
+            setEditing(false);
+            onChanged(studentId, saved, replaced);
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            disabled={removing}
+            className={secondaryButtonClass}
+          >
+            {exception ? "Edit exception" : "Grant exception"}
+          </button>
+
+          {exception && (
+            <button
+              type="button"
+              onClick={handleRemove}
+              disabled={removing}
+              className={secondaryButtonClass}
+            >
+              {removing ? "Removing..." : "Remove exception"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+    </div>
   );
 }

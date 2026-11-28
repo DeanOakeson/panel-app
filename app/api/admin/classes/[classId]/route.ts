@@ -248,16 +248,23 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
 
     // Wipe the class document, every student enrollment, and the
     // subcollections that hang off the class (assignments, submissions,
-    // materials) so nothing is left pointing at a deleted class.
+    // submission exceptions, materials) so nothing is left pointing at a
+    // deleted class.
     const enrollmentRefs = await findEnrollmentRefs(classId);
     const docsToDelete: DocumentReference[] = [classRef, ...enrollmentRefs];
 
     const assignments = await classRef.collection("assignments").get();
     for (const assignment of assignments.docs) {
       docsToDelete.push(assignment.ref);
-      const submissions = await assignment.ref.collection("submissions").get();
+      const [submissions, exceptions] = await Promise.all([
+        assignment.ref.collection("submissions").get(),
+        assignment.ref.collection("exceptions").get(),
+      ]);
       for (const submission of submissions.docs) {
         docsToDelete.push(submission.ref);
+      }
+      for (const exception of exceptions.docs) {
+        docsToDelete.push(exception.ref);
       }
     }
 

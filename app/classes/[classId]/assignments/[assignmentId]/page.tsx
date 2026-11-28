@@ -1,12 +1,13 @@
 
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import {
+  closesAtOrNull,
   formatClosesAt,
   hasClosed,
   whenPassed,
@@ -18,6 +19,7 @@ import {
   isMissingWorkGrade,
   summarizeMissingGrade,
 } from "@/lib/gradingStatus";
+import { checkSubmission } from "@/lib/submissionException";
 
 import AssignmentInfo from "../../../../components/assignments/AssignmentInfo";
 import StudentSubmission from "../../../../components/assignments/StudentSubmission";
@@ -28,8 +30,10 @@ import type {
   Assignment,
   Grade,
   MissingGradeSummary,
+  OwnSubmissionException,
   RosterStudent,
   Submission,
+  SubmissionExceptionSummary,
 } from "../../../../components/Types";
 
 export default function AssignmentDetailPage() {
@@ -49,6 +53,9 @@ export default function AssignmentDetailPage() {
   const [missingGrade, setMissingGrade] = useState<MissingGradeSummary | null>(
     null,
   );
+  const [exception, setException] = useState<OwnSubmissionException | null>(
+    null,
+  );
   const [students, setStudents] = useState<RosterStudent[]>([]);
   const [isProfessor, setIsProfessor] = useState(false);
   const [viewsRoster, setViewsRoster] = useState(false);
@@ -63,6 +70,8 @@ export default function AssignmentDetailPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [submissionsClosed, setSubmissionsClosed] = useState(false);
+  // When the student's submission rules were last checked
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
 
   const loadSubmission = useCallback(
     async (user: User) => {
@@ -95,6 +104,7 @@ export default function AssignmentDetailPage() {
           setSubmission(null);
           setSubmissions([]);
           setMissingGrade(null);
+          setException(null);
         } else {
           setIsProfessor(false);
           setViewsRoster(false);
@@ -108,8 +118,11 @@ export default function AssignmentDetailPage() {
           setSubmissions(history.slice(0, 3));
           setSubmission(data.submission ?? history[0] ?? null);
           setMissingGrade(data.missingGrade ?? null);
+          setException(data.exception ?? null);
           setStudents([]);
         }
+
+        setCheckedAt(Date.now());
       } catch (err) {
         setSubmissionError(
           err instanceof Error ? err.message : "Failed to load submissions.",
@@ -208,6 +221,20 @@ export default function AssignmentDetailPage() {
     );
   }
 
+  // Updates only the student whose exception changed, in place.
+  function handleExceptionChanged(
+    studentId: string,
+    changed: SubmissionExceptionSummary | null,
+  ) {
+    setStudents((current) =>
+      current.map((student) =>
+        student.studentId === studentId
+          ? { ...student, exception: changed }
+          : student,
+      ),
+    );
+  }
+
   // Updates only the student whose missing work was graded, in place.
   function handleMissingGraded(studentId: string, grade: Grade) {
     announceGradeSaved(classId);
@@ -277,8 +304,36 @@ export default function AssignmentDetailPage() {
       return;
     }
 
-    return whenPassed(closesAt, () => setSubmissionsClosed(true));
+    return whenPassed(closesAt, () => {
+      setSubmissionsClosed(true);
+      setCheckedAt(Date.now());
+    });
   }, [closesAt]);
+
+  const exceptionClosesAt = exception?.closesAt;
+
+  useEffect(() => {
+    if (!exceptionClosesAt) {
+      return;
+    }
+
+    return whenPassed(exceptionClosesAt, () => setCheckedAt(Date.now()));
+  }, [exceptionClosesAt]);
+
+  const studentCheck =
+    assignment && checkedAt !== null
+      ? checkSubmission(
+          {
+            isLocked: assignment.isLocked === true,
+            closesAt: assignment.closesAt ?? null,
+          },
+          exception,
+          !!submission,
+          checkedAt,
+        )
+      : null;
+  const openedByException =
+    studentCheck?.allowed === true && studentCheck.byException;
 
   return (
     <div className="mx-auto w-full max-w-3xl">
@@ -321,6 +376,7 @@ export default function AssignmentDetailPage() {
               canGradeSubmissions={isProfessor}
               onGraded={handleGraded}
               onMissingGraded={handleMissingGraded}
+              onExceptionChanged={handleExceptionChanged}
               focusStudentId={focusStudentId}
             />
           ) : (
@@ -334,7 +390,17 @@ export default function AssignmentDetailPage() {
                 error={submissionError}
               />
 
-              {assignment.isLocked ? (
+              {openedByException && exception ? (
+                <SubmissionUploadForm
+                  submission={!!submission}
+                  selectedFile={selectedFile}
+                  submitting={submitting}
+                  message={submitMessage}
+                  notice={describeExtension(exception)}
+                  onFileChange={setSelectedFile}
+                  onSubmit={handleSubmit}
+                />
+              ) : assignment.isLocked ? (
                 <SubmissionUploadForm
                   submission={!!submission}
                   selectedFile={selectedFile}
@@ -346,13 +412,13 @@ export default function AssignmentDetailPage() {
                   onSubmit={handleSubmit}
                 />
               ) : submissionsClosed && closesAt ? (
-                <p className="mt-6 rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-600 dark:border-zinc-800 dark:bg-gray-900 dark:text-zinc-300">
+                <ClosedNotice message={submitMessage}>
                   Submissions closed {formatClosesAt(closesAt)}
-                </p>
+                </ClosedNotice>
               ) : submissionsClosed ? (
-                <p className="mt-6 rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-600 dark:border-zinc-800 dark:bg-gray-900 dark:text-zinc-300">
+                <ClosedNotice message={submitMessage}>
                   Submissions are closed.
-                </p>
+                </ClosedNotice>
               ) : (
                 <SubmissionUploadForm
                   submission={!!submission}
@@ -367,6 +433,48 @@ export default function AssignmentDetailPage() {
           )}
         </>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Returns the line telling a student about their extension: their own due
+ * date, and how long late submissions are accepted when they have a late window.
+ */
+function describeExtension(exception: OwnSubmissionException): string {
+  const dueAt = closesAtOrNull(exception.dueDate);
+  const lateUntilAt = exception.lateUntil
+    ? closesAtOrNull(exception.lateUntil)
+    : null;
+  const parts = ["You have an extension."];
+
+  if (dueAt) {
+    parts.push(`Your due date is ${formatClosesAt(dueAt)}.`);
+  }
+
+  if (lateUntilAt) {
+    parts.push(`Late submissions are accepted until ${formatClosesAt(lateUntilAt)}.`);
+  }
+
+  return parts.join(" ");
+}
+
+/**
+ * Shows that submissions are closed, with the result of the student's last
+ * submission beneath it when there is one.
+ */
+function ClosedNotice({
+  message,
+  children,
+}: {
+  message: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="mt-6 rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-600 dark:border-zinc-800 dark:bg-gray-900 dark:text-zinc-300">
+      <p>{children}</p>
+
+      {message && <p className="mt-3">{message}</p>}
     </div>
   );
 }
