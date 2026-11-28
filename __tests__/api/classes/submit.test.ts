@@ -236,6 +236,7 @@ describe("POST /api/classes/[classId]/assignments/[assignmentId]/submit", () => 
           status: "submitted",
         },
       ],
+      attemptCount: 1,
     });
   });
 

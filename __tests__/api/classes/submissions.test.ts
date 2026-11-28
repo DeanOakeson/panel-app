@@ -688,6 +688,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
         submissions: [],
         missingGrade: null,
         exception: null,
+        attemptCount: 0,
       });
     });
 
@@ -705,6 +706,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
         submissions: [submissionResponse(uid)],
         missingGrade: null,
         exception: null,
+        attemptCount: 1,
       });
     });
 
@@ -765,6 +767,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           updatedAt: null,
         },
         exception: null,
+        attemptCount: 0,
       });
     });
 
@@ -802,6 +805,7 @@ describe("GET /api/classes/[classId]/assignments/[assignmentId]/submit", () => {
           updatedAt: null,
         },
         exception: null,
+        attemptCount: 1,
       });
     });
 

@@ -5,6 +5,7 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { getEffectiveClosesAt } from "@/lib/assignmentDeadline";
 import { loadEnrolledStudentIds } from "@/lib/classRoster";
+import { countAttempts, resubmissionBlockedReason } from "@/lib/resubmission";
 import {
   getGradingStatus,
   gradingStatusRank,
@@ -94,6 +95,18 @@ function checkSubmissionRules(
   }
 
   return { byException: check.byException };
+}
+
+/**
+ * Returns whether the student's exception lets them resubmit whatever the
+ * class's resubmission setting says: it let this submission in and allows
+ * resubmitting.
+ */
+function exceptionAllowsResubmit(
+  byException: boolean,
+  exception: DocumentData | undefined,
+): boolean {
+  return byException && exception?.allowResubmit === true;
 }
 
 /**
@@ -382,11 +395,26 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       );
     }
 
-    checkSubmissionRules(
+    const { byException: admittedByException } = checkSubmissionRules(
       assignmentDoc.data() ?? {},
       exceptionDoc.data(),
       submissionDoc.exists,
     );
+
+    // PANEL-113: refuse a resubmission the professor has turned off or that
+    // is past the attempt limit, before taking the upload. An exception that
+    // allows resubmitting lets its student past these, since exceptions only
+    // widen access.
+    const blockedReason = exceptionAllowsResubmit(
+      admittedByException,
+      exceptionDoc.data(),
+    )
+      ? null
+      : resubmissionBlockedReason(assignmentDoc.data(), submissionDoc.data());
+
+    if (blockedReason) {
+      return NextResponse.json({ error: blockedReason }, { status: 403 });
+    }
 
     const formData = await request.formData();
     const file = formData.get("file");
@@ -476,6 +504,18 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         submissionDoc.exists,
       );
 
+      const existing = submissionDoc.data();
+
+      // Recheck here too, so two uploads at once can't both get past the limit
+      // and a professor turning resubmission off applies straight away.
+      const blocked = exceptionAllowsResubmit(byException, currentException)
+        ? null
+        : resubmissionBlockedReason(currentAssignment, existing);
+
+      if (blocked) {
+        throw new SubmissionRuleError(blocked, 403);
+      }
+
       const submittedAt = new Date().toISOString();
 
       const newSubmission = {
@@ -493,8 +533,6 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
           byException,
         ),
       };
-
-      const existing = submissionDoc.data();
 
       const history = Array.isArray(existing?.submissionHistory)
         ? existing.submissionHistory.filter(
@@ -537,6 +575,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         {
           ...newSubmission,
           submissionHistory: history,
+          // Every submission counts, even after older files are rotated out.
+          attemptCount: countAttempts(existing) + 1,
         },
         { merge: true },
       );
@@ -895,6 +935,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         submissions: [],
         missingGrade,
         exception,
+        attemptCount: 0,
       });
     }
 
@@ -945,6 +986,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       submissions,
       missingGrade,
       exception,
+      attemptCount: countAttempts(submission),
     });
   } catch (error) {
     console.error("Get assignment submission failed:", error);

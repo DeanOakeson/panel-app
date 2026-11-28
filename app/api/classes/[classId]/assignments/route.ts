@@ -3,6 +3,7 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { getEffectiveClosesAt } from "@/lib/assignmentDeadline";
 import { loadEnrolledStudentIds, loadGradingCounts } from "@/lib/classRoster";
 import { isMissingWorkGrade } from "@/lib/gradingStatus";
+import { parseResubmissionSettings } from "@/lib/resubmission";
 
 type RouteContext = { params: Promise<{ classId: string }> };
 
@@ -153,6 +154,13 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       );
     }
 
+    // PANEL-113: resubmission is allowed with no limit unless the form says otherwise.
+    const resubmission = parseResubmissionSettings(body);
+
+    if (!resubmission.ok) {
+      return NextResponse.json({ error: resubmission.error }, { status: 400 });
+    }
+
     const assignmentRef = getAdminDb()
       .collection("classes")
       .doc(classId)
@@ -166,6 +174,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       dueDate: dueDate || null,
       lateUntil: lateUntil || null,
       isLocked,
+      allowResubmission: resubmission.settings.allowResubmission ?? true,
+      maxAttempts: resubmission.settings.maxAttempts ?? null,
       createdBy: auth.uid,
       createdAt: new Date().toISOString(),
     };
